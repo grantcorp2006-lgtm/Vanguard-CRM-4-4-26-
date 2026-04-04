@@ -4139,6 +4139,12 @@ function updateActiveMenuItem(hash) {
             }
         }
     }
+
+    // Show Archived Leads nav item only when on leads or archived-leads
+    const archivedNavItem = document.getElementById('archived-leads-nav-item');
+    if (archivedNavItem) {
+        archivedNavItem.style.display = (normalizedHash === '#leads' || normalizedHash === '#archived-leads') ? '' : 'none';
+    }
 }
 
 // Modal Functions
@@ -4462,6 +4468,10 @@ function loadContent(section) {
             // Don't clear content, instead rebuild the dashboard structure
             loadFullDashboard();
             break;
+        case '#archived-leads':
+            dashboardContent.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading Archived Leads...</div>';
+            loadArchivedLeadsView();
+            break;
         case '#leads':
             console.log('🔥 DEBUG: About to call loadLeadsView()');
             dashboardContent.innerHTML = '<div>Loading leads from server...</div>'; // Show loading state
@@ -4474,6 +4484,12 @@ function loadContent(section) {
                         console.error('🔥 ERROR: loadLeadsView() did not add any content!');
                     }
                 }, 100);
+                // Apply initial My Leads filter if active
+                setTimeout(() => {
+                    if (window.myLeadsOnlyActive && typeof window.toggleMyLeadsFilter === 'function') {
+                        window.toggleMyLeadsFilter(true);
+                    }
+                }, 400);
             }).catch(error => {
                 console.error('🔥 ERROR: loadLeadsView() failed:', error);
             });
@@ -4714,6 +4730,66 @@ function loadContent(section) {
             // Default to dashboard
             loadDashboardView();
             break;
+    }
+}
+
+// Archived Leads Full-Page View
+function loadArchivedLeadsView() {
+    const dashboardContent = document.querySelector('.dashboard-content');
+    if (!dashboardContent) return;
+
+    dashboardContent.innerHTML = `
+        <div class="archived-view">
+            <header class="content-header" style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;gap:12px;">
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <a href="#leads" style="color:#6b7280;text-decoration:none;font-size:14px;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+                        <i class="fas fa-arrow-left"></i> Active Leads
+                    </a>
+                    <h1 style="margin:0;font-size:24px;font-weight:700;color:#111827;">Archived Leads</h1>
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <button onclick="exportArchivedLeads()" style="background:#10b981;color:white;border:none;padding:9px 16px;border-radius:6px;cursor:pointer;font-weight:500;font-size:14px;">
+                        <i class="fas fa-download"></i> Export Month
+                    </button>
+                    <button onclick="exportAllArchivedLeads()" style="background:#6366f1;color:white;border:none;padding:9px 16px;border-radius:6px;cursor:pointer;font-weight:500;font-size:14px;">
+                        <i class="fas fa-download"></i> Export All
+                    </button>
+                </div>
+            </header>
+
+            <div id="monthlyArchiveTabs" style="display:flex;gap:2px;margin:16px 24px 0;border-bottom:2px solid #e5e7eb;overflow-x:auto;white-space:nowrap;padding-bottom:2px;">
+                <!-- Monthly tabs populated by loadArchivedLeads() -->
+            </div>
+
+            <div class="table-container" style="margin:0 24px 24px;overflow-x:auto;">
+                <table class="data-table" id="archivedLeadsTable" style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr>
+                            <th style="width:40px;padding:12px;text-align:center;">
+                                <input type="checkbox" id="selectAllArchived" onclick="toggleAllArchived(this)">
+                            </th>
+                            <th style="width:28px;padding:4px;text-align:center;"></th>
+                            <th style="padding:12px;text-align:left;">Name</th>
+                            <th style="padding:12px;text-align:left;">Contact</th>
+                            <th style="padding:12px;text-align:left;">Product</th>
+                            <th style="padding:12px;text-align:left;">Premium</th>
+                            <th style="padding:12px;text-align:left;">Renewal</th>
+                            <th style="padding:12px;text-align:left;">Talk Time</th>
+                            <th style="padding:12px;text-align:left;">Agent</th>
+                            <th style="padding:12px;text-align:left;">Archived Date</th>
+                            <th style="padding:12px;text-align:center;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="archivedLeadsTableBody">
+                        <tr><td colspan="11" style="text-align:center;padding:2rem;color:#6b7280;">⏳ Loading archived leads...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    if (typeof loadArchivedLeads === 'function') {
+        loadArchivedLeads();
     }
 }
 
@@ -8083,16 +8159,6 @@ async function loadLeadsView() {
         <div class="leads-view">
             <header class="content-header">
                 <h1>Lead Management</h1>
-
-                <!-- Lead Management Tabs -->
-                <div class="lead-tabs" style="display: flex; gap: 0; margin: 20px 0 10px 0; border-bottom: 2px solid #e5e7eb;">
-                    <button class="lead-tab active" onclick="switchLeadTab('active')" style="padding: 12px 24px; background: #3b82f6; color: white; border: none; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; transition: all 0.2s;">
-                        <i class="fas fa-users"></i> Active Leads
-                    </button>
-                    <button class="lead-tab" onclick="switchLeadTab('archived')" style="padding: 12px 24px; background: #f3f4f6; color: #6b7280; border: none; border-radius: 6px 6px 0 0; cursor: pointer; font-weight: 600; margin-left: 2px; transition: all 0.2s;">
-                        <i class="fas fa-archive"></i> Archived Leads
-                    </button>
-                </div>
 
                 <div class="header-actions">
                     <button class="btn-primary" onclick="syncVicidialLeads()" style="background: #10b981; border-color: #10b981;">
@@ -14150,6 +14216,10 @@ function acctTab(tab) {
     document.querySelectorAll('.acct-tab').forEach(b => {
         b.classList.toggle('active', b.getAttribute('onclick') === `acctTab('${tab}')`);
     });
+    // Render chart if transactions tab is in chart view mode
+    if (tab === 'transactions' && (_acct._txViewMode === 'chart')) {
+        setTimeout(() => { if (typeof acctRedrawChart === 'function') acctRedrawChart(); }, 50);
+    }
 }
 
 function _acctTabContent(tab, isAdmin) {
@@ -14358,16 +14428,26 @@ function _acctPLHTML() {
 // ── TRANSACTIONS TAB ─────────────────────────────────────────
 function _acctTransactionsHTML(isAdmin) {
     const txs = _acct.transactions || [];
-    const sorted = [...txs].sort((a,b) => new Date(b.date) - new Date(a.date));
+    const MONTH_LABELS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
     const categories = [...new Set(txs.map(t => t.category).filter(Boolean))].sort();
     const catFilter = _acct._txCatFilter || '';
     const typeFilter = _acct._txTypeFilter || '';
     const monthFilter = _acct._txMonthFilter || 0;
     const searchFilter = (_acct._txSearch || '').toLowerCase();
-    const MONTH_LABELS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const sortMode = _acct._txSort || 'date';
+    const viewMode = _acct._txViewMode || 'list';
+    const chartType = _acct._chartType || 'donut';
 
-    let filtered = sorted;
+    if (!_acct._chartHiddenCats) _acct._chartHiddenCats = new Set();
+
+    // Sort base list
+    let base = [...txs];
+    if (sortMode === 'amount_desc') base.sort((a,b) => Math.abs(b.amount) - Math.abs(a.amount));
+    else if (sortMode === 'amount_asc') base.sort((a,b) => Math.abs(a.amount) - Math.abs(b.amount));
+    else base.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+    let filtered = base;
     if (monthFilter) filtered = filtered.filter(t => t.date && parseInt(t.date.substring(5,7)) === monthFilter);
     if (catFilter) filtered = filtered.filter(t => t.category === catFilter);
     if (typeFilter === 'income') filtered = filtered.filter(t => t.amount > 0);
@@ -14384,18 +14464,48 @@ function _acctTransactionsHTML(isAdmin) {
         catTotals[c] = (catTotals[c] || 0) + Math.abs(t.amount);
     });
     const catSorted = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
-    const CHART_COLORS = ['#3b82f6','#f59e0b','#10b981','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#6366f1','#14b8a6','#a855f7','#84cc16'];
+    const CHART_COLORS = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#3b82f6','#f59e0b','#10b981','#ef4444','#8b5cf6'];
     const totalExpense = Math.abs(totalOut) || 1;
-    // Monthly data for line/area/combo
     const _mIn = new Array(12).fill(0), _mOut = new Array(12).fill(0);
     filtered.forEach(t => {
         if (!t.date) return;
         const mi = parseInt(t.date.substring(5,7)) - 1;
         if (mi >= 0 && mi < 12) { if (t.amount > 0) _mIn[mi] += t.amount; else _mOut[mi] += Math.abs(t.amount); }
     });
-    if (!_acct._chartHiddenCats) _acct._chartHiddenCats = new Set();
-    if (!_acct._chartType) _acct._chartType = 'donut';
     _acct._chartData = { catSorted, CHART_COLORS, totalExpense, monthlyIn: _mIn, monthlyOut: _mOut };
+
+    // Month pill label
+    const currentYear = new Date().getFullYear();
+    const monthPill = monthFilter ? `<span class="acct-month-pill"><i class="fas fa-calendar-alt"></i> ${MONTH_LABELS[monthFilter]} ${currentYear}${typeFilter ? ' · ' + typeFilter : ''} <button onclick="_acct._txMonthFilter=null;_acct._txTypeFilter='';acctTab('transactions')" title="Clear month filter">×</button></span>` : '';
+
+    // Chart type buttons
+    const chartTypes = [
+        {id:'bar', icon:'fa-grip-horizontal', label:'Bar'},
+        {id:'donut', icon:'fa-chart-pie', label:'Pie'},
+        {id:'line', icon:'fa-chart-line', label:'Line'},
+        {id:'combo', icon:'fa-chart-bar', label:'Column+Line'},
+        {id:'area', icon:'fa-water', label:'Area'}
+    ];
+    const chartTypeBtns = chartTypes.map(ct =>
+        `<button class="acct-chart-type-btn acct-ctype-btn ${chartType===ct.id?'active':''}" data-t="${ct.id}" onclick="_acct._chartType='${ct.id}';_acct._chartHiddenCats=new Set();acctTab('transactions')"><i class="fas ${ct.icon}"></i> ${ct.label}</button>`
+    ).join('');
+
+    const chartSection = viewMode === 'chart' ? `
+  <div class="acct-chart-type-bar">${chartTypeBtns}</div>
+  <div class="acct-chart-wrap${chartType==='donut'?' acct-chart-wrap-pie':''}">
+    <div id="acct-chart-inner" style="display:flex;gap:16px;align-items:flex-start;flex:1;min-width:0;"></div>
+  </div>` : '';
+
+    const tableSection = viewMode === 'list' ? (filtered.length ? `<table class="acct-table">
+    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th>${isAdmin?'<th></th>':''}</tr></thead>
+    <tbody>${filtered.map(t=>`<tr>
+      <td style="white-space:nowrap">${t.date ? t.date.substring(0,10) : ''}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.description||''}">${t.description||''}</td>
+      <td><span class="acct-cat-badge">${t.category||'OTHER'}</span></td>
+      <td style="text-align:right;font-weight:600;color:${t.amount>=0?'#16a34a':'#ef4444'}">${fmtDollar(t.amount)}</td>
+      ${isAdmin?`<td><button class="acct-del-btn" onclick="acctDeleteTransaction('${t.id}')"><i class="fas fa-trash"></i></button></td>`:''}
+    </tr>`).join('')}</tbody>
+  </table>` : `<div class="acct-empty"><i class="fas fa-receipt"></i><p>${txs.length ? 'No matches for filters' : 'No transactions yet — upload a CSV bank statement'}</p></div>`) : '';
 
     return `
 <div class="acct-card">
@@ -14404,27 +14514,12 @@ function _acctTransactionsHTML(isAdmin) {
     <div style="display:flex;gap:8px;align-items:center;">
       <span style="color:#16a34a;font-weight:600;font-size:.9rem;">In: ${fmtDollar(totalIn)}</span>
       <span style="color:#ef4444;font-weight:600;font-size:.9rem;">Out: ${fmtDollar(totalOut)}</span>
-      <button class="btn-secondary btn-sm" id="acct-chart-toggle-btn" onclick="(function(btn){var p=document.getElementById('acct-cat-chart');if(p){var show=p.style.display==='none'||p.style.display==='';p.style.display=show?'block':'none';btn.style.background=show?'#3b82f6':'';btn.style.color=show?'white':'';if(show)acctRedrawChart();}})(this)" title="Toggle Spending Chart"><i class="fas fa-chart-pie"></i> Chart</button>
       ${isAdmin ? `<button class="btn-primary btn-sm" onclick="acctAddTransaction()"><i class="fas fa-plus"></i> Add</button>` : ''}
     </div>
-  </div>
-  <div id="acct-cat-chart" style="display:none;background:#f9fafb;border-radius:10px;padding:14px 16px;margin-bottom:14px;border:1px solid #e5e7eb;">
-    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
-      <button class="acct-ctype-btn" data-t="donut" onclick="acctSetChartType('donut')" style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-pie"></i> Pie</button>
-      <button class="acct-ctype-btn" data-t="bar"   onclick="acctSetChartType('bar')"   style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-bar"></i> Bar</button>
-      <button class="acct-ctype-btn" data-t="line"  onclick="acctSetChartType('line')"  style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-line"></i> Line</button>
-      <button class="acct-ctype-btn" data-t="combo" onclick="acctSetChartType('combo')" style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-bar"></i> Combo</button>
-      <button class="acct-ctype-btn" data-t="area"  onclick="acctSetChartType('area')"  style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-wave-square"></i> Area</button>
-    </div>
-    <div id="acct-chart-inner" style="display:flex;gap:16px;align-items:flex-start;"></div>
   </div>
 
   <div class="acct-filters">
     <input class="acct-search" type="text" placeholder="Search transactions…" value="${_acct._txSearch||''}" oninput="_acct._txSearch=this.value;acctTab('transactions')">
-    <select onchange="_acct._txMonthFilter=+this.value;acctTab('transactions')">
-      <option value="0">All Months</option>
-      ${MONTH_LABELS.slice(1).map((lbl,i)=>`<option value="${i+1}" ${monthFilter===i+1?'selected':''}>${lbl}</option>`).join('')}
-    </select>
     <select onchange="_acct._txCatFilter=this.value;acctTab('transactions')">
       <option value="">All Categories</option>
       ${categories.map(c=>`<option value="${c}" ${c===catFilter?'selected':''}>${c}</option>`).join('')}
@@ -14434,18 +14529,19 @@ function _acctTransactionsHTML(isAdmin) {
       <option value="income" ${typeFilter==='income'?'selected':''}>Income</option>
       <option value="expense" ${typeFilter==='expense'?'selected':''}>Expense</option>
     </select>
+    <select onchange="_acct._txSort=this.value;acctTab('transactions')">
+      <option value="date" ${sortMode==='date'?'selected':''}>Date (newest)</option>
+      <option value="amount_desc" ${sortMode==='amount_desc'?'selected':''}>Amount (high → low)</option>
+      <option value="amount_asc" ${sortMode==='amount_asc'?'selected':''}>Amount (low → high)</option>
+    </select>
+    ${monthPill}
+    <button class="acct-chart-toggle ${viewMode==='chart'?'active':''}" onclick="_acct._txViewMode=_acct._txViewMode==='chart'?'list':'chart';acctTab('transactions')">
+      <i class="fas fa-${viewMode==='chart'?'list':'chart-bar'}"></i> View ${viewMode==='chart'?'List':'Chart'}
+    </button>
   </div>
 
-  ${filtered.length ? `<table class="acct-table">
-    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th>${isAdmin?'<th></th>':''}</tr></thead>
-    <tbody>${filtered.map(t=>`<tr>
-      <td style="white-space:nowrap">${t.date ? t.date.substring(0,10) : ''}</td>
-      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.description||''}">${t.description||''}</td>
-      <td><span class="acct-cat-badge">${t.category||'OTHER'}</span></td>
-      <td style="text-align:right;font-weight:600;color:${t.amount>=0?'#16a34a':'#ef4444'}">${fmtDollar(t.amount)}</td>
-      ${isAdmin?`<td><button class="acct-del-btn" onclick="acctDeleteTransaction('${t.id}')"><i class="fas fa-trash"></i></button></td>`:''}
-    </tr>`).join('')}</tbody>
-  </table>` : `<div class="acct-empty"><i class="fas fa-receipt"></i><p>${txs.length ? 'No matches for filters' : 'No transactions yet — upload a CSV bank statement'}</p></div>`}
+  ${chartSection}
+  ${tableSection}
 </div>`;
 }
 
@@ -15246,9 +15342,19 @@ function _acctInjectStyles() {
 
 .acct-cat-badge { background:#eff6ff; color:#1d4ed8; padding:2px 7px; border-radius:10px; font-size:.73rem; font-weight:500; white-space:nowrap; }
 
-.acct-filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.acct-filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
 .acct-search { border:1px solid #d1d5db; border-radius:6px; padding:5px 10px; font-size:.85rem; min-width:180px; }
 .acct-filters select { border:1px solid #d1d5db; border-radius:6px; padding:5px 10px; font-size:.85rem; background:#fff; }
+.acct-chart-toggle { background:#f3f4f6; color:#6b7280; border:1px solid #d1d5db; border-radius:6px; padding:5px 12px; font-size:.85rem; cursor:pointer; font-weight:500; transition:.2s; }
+.acct-chart-toggle:hover { background:#e5e7eb; }
+.acct-chart-toggle.active { background:#3b82f6; color:white; border-color:#3b82f6; }
+.acct-month-pill { display:inline-flex; align-items:center; gap:5px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:20px; padding:4px 10px; font-size:.82rem; font-weight:500; white-space:nowrap; }
+.acct-month-pill button { background:none; border:none; color:#1d4ed8; cursor:pointer; font-size:.9rem; padding:0 2px; line-height:1; }
+.acct-chart-type-bar { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:12px; }
+.acct-chart-type-btn { padding:5px 12px; border:none; border-radius:6px; cursor:pointer; font-size:.82rem; font-weight:500; background:#e5e7eb; color:#374151; transition:.15s; }
+.acct-chart-type-btn:hover, .acct-chart-type-btn.active { background:#3b82f6; color:white; }
+.acct-chart-wrap { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:14px; margin-bottom:14px; overflow-x:auto; }
+.acct-chart-wrap-pie { display:flex; gap:16px; align-items:flex-start; }
 
 .acct-empty { text-align:center; padding:40px 20px; color:#9ca3af; }
 .acct-empty i { font-size:2rem; margin-bottom:12px; display:block; }
@@ -15501,6 +15607,14 @@ function loadReportsView() {
                     </div>
                     <h3>Carrier Performance</h3>
                     <p>Quote-to-bind ratios by carrier</p>
+                </div>
+
+                <div class="report-card" onclick="runReport('lead-list')">
+                    <div class="report-icon">
+                        <i class="fas fa-list-alt"></i>
+                    </div>
+                    <h3>Lead List</h3>
+                    <p>Full lead roster with status, assignment, and pipeline stage</p>
                 </div>
             </div>
 
@@ -20480,6 +20594,9 @@ function runReport(type) {
             showNotification('Generating ViciDial Performance report...', 'info');
             generateViciDialPerformanceReport();
             break;
+        case 'lead-list':
+            generateLeadListReport();
+            break;
         default:
             showNotification(`Generating ${type} report...`, 'info');
             setTimeout(() => {
@@ -20934,6 +21051,614 @@ function vdViewAgentProfile(agentId) {
     document.body.appendChild(overlay);
 }
 window.vdViewAgentProfile = vdViewAgentProfile;
+
+// ── Lead List Report ──────────────────────────────────────────────────────────
+const _LLR_AGENTS = {'1001':'Grant Corp','1002':'Hunter Brooks','1003':'Carson Sweitzer'};
+const _LLR_STATE_NAMES = {'OH':'Ohio','TX':'Texas','IN':'Indiana','IL':'Illinois','PA':'Pennsylvania','GA':'Georgia','FL':'Florida','NJ':'New Jersey','CO':'Colorado','SC':'South Carolina'};
+function _llrAgentName(uid) { return _LLR_AGENTS[String(uid)] || `Agent ${uid}`; }
+function _llrExtractState(name) { const m = String(name).match(/\b(OH|TX|IN|IL|PA|GA|FL|NJ|CO|SC)\b/i); return m ? m[1].toUpperCase() : null; }
+function _llrStateName(abbr) { return _LLR_STATE_NAMES[abbr] || abbr || 'Unknown'; }
+function _llrParseNum(s) { return parseInt((String(s)||'').replace(/[^\d]/g,''),10)||0; }
+function _llrPct(n, total) { return total > 0 ? (n/total*100).toFixed(1)+'%' : '0.0%'; }
+function _llrPctCell(n, total, tdStyle) {
+    const pct = _llrPct(n, total);
+    return `<td style="${tdStyle}color:#64748b;">${pct} <span style="font-size:11px;font-weight:400;opacity:.65">(${n})</span></td>`;
+}
+
+function _llrBuildHTML(d, startDate, endDate) {
+    const { text, agentDisp, listDisp, agentSummary, listCounts, mainSummary, callStatusRows } = d;
+    window._llrData = { startDate, endDate, agentDisp, listDisp, agentSummary, listCounts, mainSummary, callStatusRows, text };
+
+    const ms = mainSummary || {};
+    const th  = 'padding:9px 14px;text-align:center;color:#64748b;font-weight:600;font-size:11px;white-space:nowrap;background:#f8fafc;border-bottom:1px solid #e2e8f0;text-transform:uppercase;letter-spacing:.4px;';
+    const thL = 'padding:9px 14px;text-align:left;color:#64748b;font-weight:600;font-size:11px;background:#f8fafc;border-bottom:1px solid #e2e8f0;text-transform:uppercase;letter-spacing:.4px;';
+    const td  = 'padding:9px 12px;text-align:center;font-size:13px;border-bottom:1px solid #f1f5f9;';
+    const tdL = 'padding:9px 12px;text-align:left;font-size:13px;border-bottom:1px solid #f1f5f9;font-weight:600;color:#1e3a5f;';
+    const trAlt = 'background:#f8fafc;';
+
+    // ── Campaign Totals KPIs (border-top style) ──
+    const kpiDefs = [
+        {label:'Total Calls',    value:ms.totalCalls||0,                          icon:'fa-phone-alt',   color:'#0284c7'},
+        {label:'Human Answers',  value:ms.humanAnswers||0,                        icon:'fa-user-check',  color:'#059669'},
+        {label:'Drops',          value:`${ms.drops||0} (${ms.dropPct||'0%'})`,   icon:'fa-phone-slash', color:'#dc2626'},
+        {label:'No Answer',      value:ms.noAnswer||0,                            icon:'fa-phone-volume',color:'#d97706'},
+        {label:'Avg Call Length',value:ms.avgCallLen||'0:00',                     icon:'fa-clock',       color:'#7c3aed'},
+    ];
+    const kpiHTML = kpiDefs.map(k=>`
+        <div style="flex:1;min-width:160px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;border-top:3px solid ${k.color};">
+            <div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px;">
+                <i class="fas ${k.icon}" style="color:${k.color};"></i>${k.label}
+            </div>
+            <div style="font-size:22px;font-weight:700;color:#1e3a5f;margin-top:8px;">${k.value}</div>
+        </div>`).join('');
+
+    // ── Call Status Breakdown ──
+    const CSS_BG = {DNC:'#fef2f2',DROP:'#fff7ed',SALE:'#f0fdf4'};
+    const CSS_FG = {DNC:'#dc2626',DROP:'#ea580c',SALE:'#16a34a'};
+    const cssRows = callStatusRows || [];
+    const cssHTML = cssRows.length
+        ? cssRows.map((r,i)=>{
+            const s=r.status||''; const bg=CSS_BG[s]||(i%2===1?'#f8fafc':''); const fg=CSS_FG[s]||'#374151';
+            return `<tr style="${bg?`background:${bg};`:''}border-bottom:1px solid #f1f5f9;">
+                <td style="padding:9px 12px;text-align:left;font-size:13px;font-family:monospace;font-weight:700;color:${fg};">${s}</td>
+                <td style="padding:9px 12px;text-align:left;font-size:13px;color:#374151;">${r.description||''}</td>
+                <td style="padding:9px 12px;text-align:center;font-size:13px;font-weight:700;color:${fg};">${r.calls||0}</td>
+                <td style="padding:9px 12px;text-align:center;font-size:13px;color:#64748b;">${r.callTime||'-'}</td>
+                <td style="padding:9px 12px;text-align:center;font-size:13px;color:#64748b;">${r.agentTime||'-'}</td>
+                <td style="padding:9px 12px;text-align:center;font-size:13px;color:#64748b;">${r.callsHr||'-'}</td>
+            </tr>`;
+          }).join('')
+        : `<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">No call status data</td></tr>`;
+
+    // ── Agent Stats ──
+    const as = agentSummary || {};
+    const agentRows = Object.entries(agentDisp||{}).map(([uid,disp])=>{
+        const sum = as[uid] || {};
+        return { uid, name:_llrAgentName(uid), calls:sum.calls||0, time:sum.time||'', avg:sum.avg||'', disp };
+    });
+    // Disposition cell: each with border-left; zero values grayed out
+    const dispCell = (val, color, blColor) => {
+        const v = val || 0;
+        const c = v === 0 ? '#cbd5e1' : color;
+        const fw = v === 0 ? '400' : '600';
+        return `<td style="${td}border-left:1px solid ${blColor||'#f1f5f9'};font-weight:${fw};color:${c};">${v}</td>`;
+    };
+    const agentHTML = agentRows.length
+        ? agentRows.map((a,i)=>`
+            <tr style="${i%2===1?trAlt:''}border-bottom:1px solid #e2e8f0;">
+                <td style="${tdL}color:#1e3a5f;">${a.name} <span style="font-size:11px;color:#94a3b8;">(${a.uid})</span></td>
+                <td style="${td}font-weight:600;color:#1e40af;">${a.calls||'—'}</td>
+                <td style="${td}">${a.time||'—'}</td>
+                <td style="${td}">${a.avg||'—'}</td>
+                ${dispCell(a.disp.A,'#64748b')}
+                ${dispCell(a.disp.SALE,'#059669')}
+                ${dispCell(a.disp.NI,'#6366f1')}
+                ${dispCell(a.disp.NP,'#f59e0b')}
+                ${dispCell(a.disp.DROP,'#ef4444')}
+                ${dispCell(a.disp.DNC,'#dc2626')}
+                <td style="${td}"><button onclick="vdViewCsAgentProfile('${a.uid}')" title="Agent profile" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:#0284c7;font-size:12px;transition:.2s;"><i class="fas fa-eye"></i></button></td>
+            </tr>`).join('')
+        : `<tr><td colspan="11" style="text-align:center;padding:20px;color:#94a3b8;">No agent data</td></tr>`;
+
+    // TOTAL row — uses mainSummary for calls/time/avg; disposition cells blank
+    const blankDisp = `<td style="${td}border-left:1px solid #f1f5f9;"></td>`.repeat(6);
+    const agTotHTML = agentRows.length ? `
+        <tr style="background:#e0f2fe;font-weight:700;border-top:2px solid #0284c7;">
+            <td style="${tdL}color:#015b91;">TOTAL</td>
+            <td style="${td}font-weight:700;color:#1e40af;">${ms.totalCalls||'—'}</td>
+            <td style="${td}">${ms.totalTime||'—'}</td>
+            <td style="${td}">${ms.avgCallLen||'—'}</td>
+            ${blankDisp}<td style="${td}"></td>
+        </tr>` : '';
+
+    // AVERAGE row: avg of per-agent calls/dispositions
+    const na = agentRows.length || 1;
+    const agSum = agentRows.reduce((s,r)=>({
+        calls:s.calls+r.calls, A:s.A+(r.disp.A||0), SALE:s.SALE+(r.disp.SALE||0),
+        NI:s.NI+(r.disp.NI||0), NP:s.NP+(r.disp.NP||0), DROP:s.DROP+(r.disp.DROP||0), DNC:s.DNC+(r.disp.DNC||0)
+    }), {calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0});
+    const avgDispCell = (sum, color) => {
+        const v = (sum/na).toFixed(1);
+        const c = parseFloat(v)===0 ? '#cbd5e1' : color;
+        return `<td style="${td}border-left:1px solid #fef08a;font-weight:600;color:${c};">${v}</td>`;
+    };
+    const agAvgHTML = agentRows.length ? `
+        <tr style="background:#fef9c3;font-style:italic;border-top:1px solid #fde68a;">
+            <td style="${tdL}color:#92400e;font-weight:600;">AVERAGE</td>
+            <td style="${td}font-weight:600;color:#92400e;">${(agSum.calls/na).toFixed(1)}</td>
+            <td style="${td}">—</td><td style="${td}">—</td>
+            ${avgDispCell(agSum.A,'#64748b')}
+            ${avgDispCell(agSum.SALE,'#059669')}
+            ${avgDispCell(agSum.NI,'#6366f1')}
+            ${avgDispCell(agSum.NP,'#f59e0b')}
+            ${avgDispCell(agSum.DROP,'#ef4444')}
+            ${avgDispCell(agSum.DNC,'#dc2626')}
+            <td style="${td}"></td>
+        </tr>` : '';
+
+    // ── List Stats ──
+    const lc = listCounts || {};
+    const ld = listDisp || {};
+    const listSelect = document.getElementById('llr-lists');
+    const getListName = lid => {
+        const opt = listSelect ? Array.from(listSelect.options).find(o=>o.value===String(lid)) : null;
+        return opt ? opt.text : (lc[lid]?lc[lid].name:`List ${lid}`);
+    };
+    // Build rows from all lists in listCounts (not just tracked dispositions)
+    const allListIds = Object.keys(lc).filter(lid => (lc[lid].calls||0) > 0);
+    const listRows = allListIds.map(lid => {
+        const calls = lc[lid].calls || 0;
+        const disp = ld[lid] || {A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0};
+        return { lid, listName:getListName(lid), calls, disp };
+    }).sort((a,b) => parseInt(a.lid)-parseInt(b.lid));
+
+    const listRowsHTML = listRows.length
+        ? listRows.map((r,i)=>`<tr style="${i%2===1?trAlt:''}border-bottom:1px solid #f1f5f9;">
+                <td style="${tdL}">${r.listName}</td>
+                <td style="${td}font-weight:700;color:#1e40af;">${r.calls}</td>
+                ${_llrPctCell(r.disp.A||0,r.calls,td)}
+                ${_llrPctCell(r.disp.SALE||0,r.calls,td+'color:#16a34a;font-weight:700;')}
+                ${_llrPctCell(r.disp.NI||0,r.calls,td)}
+                ${_llrPctCell(r.disp.NP||0,r.calls,td)}
+                ${_llrPctCell(r.disp.DROP||0,r.calls,td+'color:#ea580c;')}
+                ${_llrPctCell(r.disp.DNC||0,r.calls,td+'color:#dc2626;')}
+                <td style="${td}"><button onclick="vdViewCsListProfile('${r.lid}')" title="List profile" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:#0284c7;font-size:12px;"><i class="fas fa-eye"></i></button></td>
+            </tr>`).join('')
+        : `<tr><td colspan="9" style="text-align:center;padding:20px;color:#94a3b8;">No list data</td></tr>`;
+
+    // List TOTAL / AVERAGE rows
+    const ltSum = listRows.reduce((s,r)=>({
+        calls:s.calls+r.calls, A:s.A+(r.disp.A||0), SALE:s.SALE+(r.disp.SALE||0),
+        NI:s.NI+(r.disp.NI||0), NP:s.NP+(r.disp.NP||0), DROP:s.DROP+(r.disp.DROP||0), DNC:s.DNC+(r.disp.DNC||0)
+    }), {calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0});
+    const nl = listRows.length || 1;
+    const listTotHTML = listRows.length ? `
+        <tr style="background:#e0f2fe;font-weight:700;border-top:2px solid #0284c7;">
+            <td style="${tdL}color:#0369a1;">TOTAL</td>
+            <td style="${td}font-weight:700;color:#1e40af;">${ltSum.calls}</td>
+            ${_llrPctCell(ltSum.A,ltSum.calls,td)}<td style="${td}color:#16a34a;font-weight:700;">${_llrPct(ltSum.SALE,ltSum.calls)} <span style="font-size:11px;font-weight:400;opacity:.65">(${ltSum.SALE})</span></td>
+            ${_llrPctCell(ltSum.NI,ltSum.calls,td)}${_llrPctCell(ltSum.NP,ltSum.calls,td)}${_llrPctCell(ltSum.DROP,ltSum.calls,td+'color:#ea580c;')}${_llrPctCell(ltSum.DNC,ltSum.calls,td+'color:#dc2626;')}
+            <td style="${td}"></td>
+        </tr>` : '';
+    const listAvgHTML = listRows.length ? `
+        <tr style="background:#fef9c3;font-style:italic;border-top:1px solid #fde68a;">
+            <td style="${tdL}color:#92400e;">AVERAGE</td>
+            <td style="${td}color:#1e40af;">${(ltSum.calls/nl).toFixed(1)}</td>
+            <td style="${td}color:#64748b;">${(ltSum.A/nl).toFixed(1)}</td>
+            <td style="${td}color:#16a34a;">${(ltSum.SALE/nl).toFixed(1)}</td>
+            <td style="${td}">${(ltSum.NI/nl).toFixed(1)}</td>
+            <td style="${td}">${(ltSum.NP/nl).toFixed(1)}</td>
+            <td style="${td}color:#ea580c;">${(ltSum.DROP/nl).toFixed(1)}</td>
+            <td style="${td}color:#dc2626;">${(ltSum.DNC/nl).toFixed(1)}</td>
+            <td style="${td}"></td>
+        </tr>` : '';
+
+    return `
+        <p style="font-size:12px;color:#94a3b8;margin:0 0 20px;">
+            Report period: <strong>${startDate} 00:00:00</strong> to <strong>${endDate} 23:59:59</strong>
+        </p>
+
+        <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:0 0 12px;text-transform:uppercase;letter-spacing:.6px;"><i class="fas fa-chart-bar" style="margin-right:7px;color:#0284c7;"></i>Campaign Totals</h3>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;">${kpiHTML}</div>
+
+        <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:0 0 10px;text-transform:uppercase;letter-spacing:.6px;"><i class="fas fa-list" style="margin-right:7px;color:#0284c7;"></i>Call Status Breakdown</h3>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:28px;overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead><tr>
+                    <th style="${thL}">Status</th><th style="${thL}">Description</th>
+                    <th style="${th}">Calls</th><th style="${th}">Total Time</th><th style="${th}">Avg Time</th><th style="${th}">Calls/Hr</th>
+                </tr></thead>
+                <tbody>${cssHTML}</tbody>
+            </table>
+        </div>
+
+        <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:0 0 10px;text-transform:uppercase;letter-spacing:.6px;"><i class="fas fa-users" style="margin-right:7px;color:#0284c7;"></i>Agent Stats</h3>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:28px;overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:800px;">
+                <thead><tr style="background:#f1f5f9;border-bottom:2px solid #e2e8f0;">
+                    <th style="${thL}">AGENT</th><th style="${th}">CALLS</th><th style="${th}">TIME (H:M:S)</th><th style="${th}">AVG</th>
+                    <th style="${th}border-left:1px solid #e2e8f0;color:#64748b;">Ans. Machine</th>
+                    <th style="${th}border-left:1px solid #e2e8f0;color:#059669;">Sale</th>
+                    <th style="${th}border-left:1px solid #e2e8f0;color:#6366f1;">Not Int.</th>
+                    <th style="${th}border-left:1px solid #e2e8f0;color:#f59e0b;">No Pitch</th>
+                    <th style="${th}border-left:1px solid #e2e8f0;color:#ef4444;">DROP</th>
+                    <th style="${th}border-left:1px solid #e2e8f0;color:#dc2626;">DNC</th>
+                    <th style="${th}"></th>
+                </tr></thead>
+                <tbody>${agentHTML}${agTotHTML}${agAvgHTML}</tbody>
+            </table>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:0;text-transform:uppercase;letter-spacing:.6px;"><i class="fas fa-list-alt" style="margin-right:7px;color:#0284c7;"></i>List Stats</h3>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:12px;font-weight:600;color:#64748b;">Group by State</span>
+                <span onclick="vdToggleListGroupStats(this)" data-on="false"
+                      style="display:inline-block;width:40px;height:22px;background:#cbd5e1;border-radius:10px;cursor:pointer;position:relative;transition:background .2s;vertical-align:middle;">
+                    <span style="position:absolute;left:2px;top:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></span>
+                </span>
+            </div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:28px;overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px;">
+                <thead><tr>
+                    <th id="vd-list-col-header" style="${thL}">List</th><th style="${th}">Calls</th>
+                    <th style="${th}">Ans.Machine</th><th style="${th}">Sale</th><th style="${th}">Not Int.</th>
+                    <th style="${th}">No Pitch</th><th style="${th}">DROP</th><th style="${th}">DNC</th><th style="${th}"></th>
+                </tr></thead>
+                <tbody id="vd-list-stats-tbody">${listRowsHTML}${listTotHTML}${listAvgHTML}</tbody>
+            </table>
+        </div>`;
+}
+
+function generateLeadListReport() {
+    document.querySelectorAll('.lead-list-report-overlay').forEach(e => e.remove());
+    const today = new Date().toISOString().slice(0,10);
+    const overlay = document.createElement('div');
+    overlay.className = 'lead-list-report-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:99999;padding:12px;box-sizing:border-box;';
+    overlay.innerHTML = `
+        <div style="background:#f8fafc;border-radius:18px;width:100%;max-width:1400px;height:94vh;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,0.4);display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+            <div style="background:linear-gradient(135deg,#1e3a5f 0%,#0284c7 100%);padding:18px 28px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                <div style="display:flex;align-items:center;gap:14px;">
+                    <div style="background:rgba(255,255,255,0.18);border-radius:12px;padding:10px 12px;">
+                        <i class="fas fa-list-alt" style="color:#fff;font-size:22px;"></i>
+                    </div>
+                    <div>
+                        <h2 style="margin:0;color:#fff;font-size:20px;font-weight:700;">Lead List Report</h2>
+                        <p style="margin:3px 0 0;color:#bae6fd;font-size:12px;">ViciDial campaign statistics by list, agent, and disposition</p>
+                    </div>
+                </div>
+                <button onclick="this.closest('.lead-list-report-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:36px;height:36px;border-radius:50%;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">&times;</button>
+            </div>
+            <div style="background:#f1f5f9;border-bottom:2px solid #e2e8f0;padding:14px 28px;flex-shrink:0;">
+                <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;">
+                    <div>
+                        <label style="display:block;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Start Date</label>
+                        <input type="date" id="llr-start" value="${today}" style="padding:7px 10px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;">
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">End Date</label>
+                        <input type="date" id="llr-end" value="${today}" style="padding:7px 10px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;">
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Campaigns <span style="font-weight:400;font-size:9px;text-transform:none;">(Ctrl+click)</span></label>
+                        <select id="llr-campaigns" multiple size="4" style="padding:4px 8px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;min-width:185px;">
+                            <option value="--ALL--">-- ALL CAMPAIGNS --</option>
+                            <option value="AgentsCM" selected>AgentsCM</option>
+                            <option value="ILun" selected>ILun &#x2013; Grant Corp</option>
+                            <option value="INun" selected>INun &#x2013; Hunter Brooks</option>
+                            <option value="PAun" selected>PAun &#x2013; PA Unassigned</option>
+                            <option value="Sweitzer" selected>Sweitzer &#x2013; Carson Sweitzer</option>
+                            <option value="TXun" selected>TXun &#x2013; TX Unassigned</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Lists <span style="font-weight:400;font-size:9px;text-transform:none;">(Ctrl+click)</span></label>
+                        <select id="llr-lists" multiple size="4" style="padding:4px 8px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;min-width:220px;">
+                            <option value="--ALL--" selected>-- All Lists --</option>
+                            <option value="998">998 &#x2013; OH Hunter</option>
+                            <option value="999">999 &#x2013; TX Hunter</option>
+                            <option value="1000">1000 &#x2013; IN Hunter</option>
+                            <option value="1001">1001 &#x2013; OH Grant</option>
+                            <option value="1002">1002 &#x2013; TEST</option>
+                            <option value="1005">1005 &#x2013; TX Grant</option>
+                            <option value="1006">1006 &#x2013; IN Grant</option>
+                            <option value="1007">1007 &#x2013; OH Carson</option>
+                            <option value="1008">1008 &#x2013; TX Carson</option>
+                            <option value="1009">1009 &#x2013; IN Carson</option>
+                            <option value="1010">1010 &#x2013; SC Carson</option>
+                            <option value="1011">1011 &#x2013; PA Hunter</option>
+                            <option value="1012">1012 &#x2013; IL Hunter</option>
+                            <option value="1013">1013 &#x2013; GA Grant</option>
+                            <option value="1014">1014 &#x2013; IL Grant</option>
+                            <option value="1015">1015 &#x2013; IL Carson</option>
+                            <option value="1016">1016 &#x2013; FL Carson</option>
+                            <option value="1017">1017 &#x2013; FL Grant</option>
+                            <option value="1018">1018 &#x2013; FL Hunter</option>
+                            <option value="1019">1019 &#x2013; PA Grant</option>
+                            <option value="1020">1020 &#x2013; PA Carson</option>
+                            <option value="1021">1021 &#x2013; GA Carson</option>
+                            <option value="1022">1022 &#x2013; GA Hunter</option>
+                            <option value="1023">1023 &#x2013; NJ Hunter</option>
+                            <option value="1024">1024 &#x2013; NJ Grant</option>
+                            <option value="1025">1025 &#x2013; NJ Carson</option>
+                            <option value="1026">1026 &#x2013; CO Hunter</option>
+                            <option value="1027">1027 &#x2013; CO Carson</option>
+                            <option value="1028">1028 &#x2013; CO Grant</option>
+                            <option value="1029">1029 &#x2013; OH MANUFACTURING</option>
+                            <option value="1030">1030 &#x2013; OH CONTRACTORS</option>
+                            <option value="1031">1031 &#x2013; OH CONSTRUCTION</option>
+                            <option value="1032">1032 &#x2013; OH LOGISTICS/WAREHOUSING</option>
+                            <option value="1033">1033 &#x2013; OH HOSPITALITY</option>
+                            <option value="1034">1034 &#x2013; OH REAL ESTATE</option>
+                            <option value="1035">1035 &#x2013; OH ENERGY</option>
+                            <option value="1036">1036 &#x2013; OH AUTO DEALERS</option>
+                            <option value="1037">1037 &#x2013; OH RESTAURANTS</option>
+                            <option value="1038">1038 &#x2013; OH RETAIL</option>
+                            <option value="1039">1039 &#x2013; OH FINANCIAL INSTITUTIONS</option>
+                            <option value="1040">1040 &#x2013; OH HEALTHCARE</option>
+                            <option value="1041">1041 &#x2013; OH TECHNOLOGY/SAAS</option>
+                            <option value="1042">1042 &#x2013; OH PROFESSIONAL SERVICES</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Shift</label>
+                        <select id="llr-shift" style="padding:7px 10px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;">
+                            <option value="ALL">All Day</option>
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Rollover</label>
+                        <select id="llr-rollover" style="padding:7px 10px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;color:#1e293b;background:#fff;">
+                            <option value="NO">No</option>
+                            <option value="YES">Yes</option>
+                        </select>
+                    </div>
+                    <button onclick="_llrRun()" style="background:#015b91;color:#fff;border:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;height:36px;display:flex;align-items:center;gap:7px;white-space:nowrap;">
+                        <i class="fas fa-play" style="font-size:11px;"></i>Run Report
+                    </button>
+                </div>
+            </div>
+            <div id="llr-results" style="flex:1;overflow-y:auto;padding:28px;">
+                <div style="text-align:center;padding:50px;color:#94a3b8;">
+                    <i class="fas fa-list-alt" style="font-size:40px;margin-bottom:14px;display:block;opacity:.4;"></i>
+                    <div style="font-size:14px;font-weight:600;">Select filters and click <strong>Run Report</strong></div>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+function _llrRun() {
+    const startDate = document.getElementById('llr-start')?.value;
+    const endDate   = document.getElementById('llr-end')?.value;
+    const campaignSel = document.getElementById('llr-campaigns');
+    const listSel   = document.getElementById('llr-lists');
+    const shift     = document.getElementById('llr-shift')?.value || 'ALL';
+    const rollover  = document.getElementById('llr-rollover')?.value || 'NO';
+    const results   = document.getElementById('llr-results');
+    if (!results || !startDate || !endDate) return;
+
+    let campaigns = campaignSel ? Array.from(campaignSel.selectedOptions).map(o=>o.value) : ['AgentsCM','ILun','INun','PAun','Sweitzer','TXun'];
+    // If --ALL-- selected, send all individual campaigns
+    if (campaigns.includes('--ALL--')) campaigns = ['AgentsCM','ILun','INun','PAun','Sweitzer','TXun'];
+    const lists = listSel ? Array.from(listSel.selectedOptions).map(o=>o.value) : ['--ALL--'];
+
+    results.innerHTML = '<div style="text-align:center;padding:50px;color:#64748b;"><i class="fas fa-spinner fa-spin" style="font-size:32px;margin-bottom:14px;display:block;color:#0284c7;"></i><div style="font-size:14px;font-weight:600;">Fetching ViciDial data...</div><div style="font-size:12px;color:#94a3b8;margin-top:6px;">This may take 15–30 seconds</div></div>';
+
+    const params = new URLSearchParams({ query_date: startDate, end_date: endDate, shift, include_rollover: rollover });
+    campaigns.forEach(c => params.append('group[]', c));
+    lists.forEach(l => params.append('list_ids[]', l));
+
+    fetch(`/api/vicidial/campaign-stats?${params}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) { results.innerHTML = `<div style="color:#ef4444;padding:20px;font-size:14px;"><i class="fas fa-exclamation-circle" style="margin-right:8px;"></i>Error: ${d.error}</div>`; return; }
+            results.innerHTML = _llrBuildHTML(d, startDate, endDate);
+        })
+        .catch(err => { results.innerHTML = `<div style="color:#ef4444;padding:20px;font-size:14px;"><i class="fas fa-exclamation-circle" style="margin-right:8px;"></i>Network error: ${err.message}</div>`; });
+}
+
+function vdToggleListGroupStats(toggleEl) {
+    const isOn = toggleEl.dataset.on === 'true';
+    const newOn = !isOn;
+    toggleEl.dataset.on = String(newOn);
+    const knob = toggleEl.firstElementChild;
+    if (newOn) { toggleEl.style.background='#3b82f6'; if(knob)knob.style.left='20px'; }
+    else        { toggleEl.style.background='#cbd5e1'; if(knob)knob.style.left='2px';  }
+
+    const tbody = document.getElementById('vd-list-stats-tbody');
+    const colHeader = document.getElementById('vd-list-col-header');
+    if (!tbody || !window._llrData) return;
+
+    const { listDisp, listCounts } = window._llrData;
+    const lc = listCounts || {};
+    const ld = listDisp || {};
+    const td  = 'padding:9px 12px;text-align:center;font-size:13px;border-bottom:1px solid #f1f5f9;';
+    const tdL = 'padding:9px 12px;text-align:left;font-size:13px;border-bottom:1px solid #f1f5f9;font-weight:600;color:#1e3a5f;';
+    const trAlt = 'background:#f8fafc;';
+    const listSelect = document.getElementById('llr-lists');
+    const getListName = lid => {
+        const opt = listSelect ? Array.from(listSelect.options).find(o=>o.value===String(lid)) : null;
+        return opt ? opt.text : (lc[lid]?lc[lid].name:`List ${lid}`);
+    };
+
+    if (!newOn) {
+        if (colHeader) colHeader.textContent = 'List';
+        const allListIds = Object.keys(lc).filter(lid => (lc[lid].calls||0) > 0);
+        const rows = allListIds.map(lid => {
+            const calls = lc[lid].calls || 0;
+            const disp = ld[lid] || {A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0};
+            return { lid, listName:getListName(lid), calls, disp };
+        }).sort((a,b) => parseInt(a.lid)-parseInt(b.lid));
+        const ltSum = rows.reduce((s,r)=>({calls:s.calls+r.calls,A:s.A+(r.disp.A||0),SALE:s.SALE+(r.disp.SALE||0),NI:s.NI+(r.disp.NI||0),NP:s.NP+(r.disp.NP||0),DROP:s.DROP+(r.disp.DROP||0),DNC:s.DNC+(r.disp.DNC||0)}),{calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0});
+        const nl = rows.length || 1;
+        tbody.innerHTML = rows.length
+            ? rows.map((r,i)=>`<tr style="${i%2===1?trAlt:''}border-bottom:1px solid #f1f5f9;">
+                <td style="${tdL}">${r.listName}</td>
+                <td style="${td}font-weight:700;color:#1e40af;">${r.calls}</td>
+                ${_llrPctCell(r.disp.A||0,r.calls,td)}
+                ${_llrPctCell(r.disp.SALE||0,r.calls,td+'color:#16a34a;font-weight:700;')}
+                ${_llrPctCell(r.disp.NI||0,r.calls,td)}${_llrPctCell(r.disp.NP||0,r.calls,td)}
+                ${_llrPctCell(r.disp.DROP||0,r.calls,td+'color:#ea580c;')}${_llrPctCell(r.disp.DNC||0,r.calls,td+'color:#dc2626;')}
+                <td style="${td}"><button onclick="vdViewCsListProfile('${r.lid}')" title="List profile" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:#0284c7;font-size:12px;"><i class="fas fa-eye"></i></button></td>
+              </tr>`).join('')
+            + (rows.length ? `<tr style="background:#e0f2fe;font-weight:700;border-top:2px solid #0284c7;"><td style="${tdL}color:#0369a1;">TOTAL</td><td style="${td}font-weight:700;color:#1e40af;">${ltSum.calls}</td>${_llrPctCell(ltSum.A,ltSum.calls,td)}${_llrPctCell(ltSum.SALE,ltSum.calls,td+'color:#16a34a;font-weight:700;')}${_llrPctCell(ltSum.NI,ltSum.calls,td)}${_llrPctCell(ltSum.NP,ltSum.calls,td)}${_llrPctCell(ltSum.DROP,ltSum.calls,td+'color:#ea580c;')}${_llrPctCell(ltSum.DNC,ltSum.calls,td+'color:#dc2626;')}<td style="${td}"></td></tr>` : '')
+            + (rows.length ? `<tr style="background:#fef9c3;font-style:italic;border-top:1px solid #fde68a;"><td style="${tdL}color:#92400e;">AVERAGE</td><td style="${td}color:#1e40af;">${(ltSum.calls/nl).toFixed(1)}</td><td style="${td}color:#64748b;">${(ltSum.A/nl).toFixed(1)}</td><td style="${td}color:#16a34a;">${(ltSum.SALE/nl).toFixed(1)}</td><td style="${td}">${(ltSum.NI/nl).toFixed(1)}</td><td style="${td}">${(ltSum.NP/nl).toFixed(1)}</td><td style="${td}color:#ea580c;">${(ltSum.DROP/nl).toFixed(1)}</td><td style="${td}color:#dc2626;">${(ltSum.DNC/nl).toFixed(1)}</td><td style="${td}"></td></tr>` : '')
+            : `<tr><td colspan="9" style="text-align:center;padding:20px;color:#94a3b8;">No list data</td></tr>`;
+    } else {
+        if (colHeader) colHeader.textContent = 'State';
+        // Aggregate by state using listCounts for total calls
+        const stateMap = {};
+        Object.keys(lc).forEach(lid => {
+            const calls = lc[lid].calls || 0;
+            if (!calls) return;
+            const listName = getListName(lid);
+            const abbr = _llrExtractState(listName) || 'Other';
+            const sn = _llrStateName(abbr);
+            if (!stateMap[sn]) stateMap[sn] = { sn, calls:0, A:0, SALE:0, NI:0, NP:0, DROP:0, DNC:0 };
+            const s = stateMap[sn];
+            s.calls += calls;
+            const disp = ld[lid] || {};
+            ['A','SALE','NI','NP','DROP','DNC'].forEach(k => s[k] += disp[k]||0);
+        });
+        const stateRows = Object.values(stateMap).filter(s=>s.calls>0).sort((a,b)=>b.calls-a.calls);
+        const stSum = stateRows.reduce((s,r)=>({calls:s.calls+r.calls,A:s.A+r.A,SALE:s.SALE+r.SALE,NI:s.NI+r.NI,NP:s.NP+r.NP,DROP:s.DROP+r.DROP,DNC:s.DNC+r.DNC}),{calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0});
+        const ns = stateRows.length || 1;
+        tbody.innerHTML = stateRows.length
+            ? stateRows.map((s,i)=>`<tr style="${i%2===1?trAlt:''}border-bottom:1px solid #f1f5f9;">
+                <td style="${tdL}">${s.sn}</td>
+                <td style="${td}font-weight:700;color:#1e40af;">${s.calls}</td>
+                ${_llrPctCell(s.A,s.calls,td)}${_llrPctCell(s.SALE,s.calls,td+'color:#16a34a;font-weight:700;')}
+                ${_llrPctCell(s.NI,s.calls,td)}${_llrPctCell(s.NP,s.calls,td)}
+                ${_llrPctCell(s.DROP,s.calls,td+'color:#ea580c;')}${_llrPctCell(s.DNC,s.calls,td+'color:#dc2626;')}
+                <td style="${td}"><button onclick="vdViewCsStateProfile('${s.sn}')" title="State profile" style="background:#e0f2fe;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:#0284c7;font-size:12px;"><i class="fas fa-eye"></i></button></td>
+              </tr>`).join('')
+            + (stateRows.length ? `<tr style="background:#e0f2fe;font-weight:700;border-top:2px solid #0284c7;"><td style="${tdL}color:#0369a1;">TOTAL</td><td style="${td}font-weight:700;color:#1e40af;">${stSum.calls}</td>${_llrPctCell(stSum.A,stSum.calls,td)}${_llrPctCell(stSum.SALE,stSum.calls,td+'color:#16a34a;font-weight:700;')}${_llrPctCell(stSum.NI,stSum.calls,td)}${_llrPctCell(stSum.NP,stSum.calls,td)}${_llrPctCell(stSum.DROP,stSum.calls,td+'color:#ea580c;')}${_llrPctCell(stSum.DNC,stSum.calls,td+'color:#dc2626;')}<td style="${td}"></td></tr>` : '')
+            : `<tr><td colspan="9" style="text-align:center;padding:20px;color:#94a3b8;">No state data</td></tr>`;
+    }
+}
+
+function vdViewCsAgentProfile(userId) {
+    if (!window._llrData) return;
+    const { agentDisp, agentSummary } = window._llrData;
+    const myDisp = agentDisp[String(userId)] || {};
+    const mySummary = (agentSummary||{})[String(userId)] || {};
+    const agentName = _llrAgentName(userId);
+    // Use agentSummary.calls for real total calls; fall back to sum of tracked dispositions
+    const myCalls = mySummary.calls || ((myDisp.A||0)+(myDisp.SALE||0)+(myDisp.NI||0)+(myDisp.NP||0)+(myDisp.DROP||0)+(myDisp.DNC||0));
+    const allAgentIds = Object.keys(agentDisp||{});
+    const na = allAgentIds.length || 1;
+    const avgCalls = allAgentIds.reduce((s,uid) => {
+        const sum = (agentSummary||{})[uid] || {};
+        const d = agentDisp[uid] || {};
+        return s + (sum.calls || (d.A||0)+(d.SALE||0)+(d.NI||0)+(d.NP||0)+(d.DROP||0)+(d.DNC||0));
+    }, 0) / na;
+    const avg = k => allAgentIds.reduce((s,uid)=>s+((agentDisp[uid]||{})[k]||0),0)/na;
+    const avgs = {A:avg('A'),SALE:avg('SALE'),NI:avg('NI'),NP:avg('NP'),DROP:avg('DROP'),DNC:avg('DNC')};
+    const metrics=[
+        {label:'Calls',       my:myCalls,        avg:avgCalls},
+        {label:'Ans. Machine',my:myDisp.A||0,    avg:avgs.A},
+        {label:'Sale',        my:myDisp.SALE||0, avg:avgs.SALE},
+        {label:'Not Int.',    my:myDisp.NI||0,   avg:avgs.NI},
+        {label:'No Pitch',    my:myDisp.NP||0,   avg:avgs.NP},
+        {label:'DROP',        my:myDisp.DROP||0, avg:avgs.DROP},
+        {label:'DNC',         my:myDisp.DNC||0,  avg:avgs.DNC},
+    ];
+    document.querySelectorAll('#vd-cs-agent-profile-overlay').forEach(e=>e.remove());
+    const overlay=document.createElement('div');
+    overlay.id='vd-cs-agent-profile-overlay';
+    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
+    const cardsHTML=metrics.map(m=>{
+        let color='#6b7280',bg='#f9fafb',badge='';
+        if(m.my>m.avg){color='#16a34a';bg='#f0fdf4';badge='<span style="font-size:10px;color:#16a34a;display:block;margin-top:3px;">&#x25b2; above avg</span>';}
+        else if(m.my<m.avg){color='#dc2626';bg='#fef2f2';badge='<span style="font-size:10px;color:#dc2626;display:block;margin-top:3px;">&#x25bc; below avg</span>';}
+        else{badge='<span style="font-size:10px;color:#6b7280;display:block;margin-top:3px;">= avg</span>';}
+        return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;min-width:120px;"><div style="font-size:22px;font-weight:700;color:${color};">${Math.round(m.my)}</div><div style="font-size:11px;color:#6b7280;margin:4px 0 2px;">${m.label}</div><div style="font-size:10px;color:#9ca3af;">avg: ${m.avg.toFixed(1)}</div>${badge}</div>`;
+    }).join('');
+    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;width:90vw;max-width:900px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()"><div style="background:linear-gradient(135deg,#1e3a5f,#0284c7);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;"><div><h2 style="margin:0;color:#fff;font-size:18px;"><i class="fas fa-user" style="margin-right:10px;"></i>${agentName} <span style="font-size:13px;opacity:.7;">(${userId})</span></h2><p style="margin:4px 0 0;color:#bae6fd;font-size:12px;">Agent vs. Average Performance</p></div><button onclick="document.getElementById('vd-cs-agent-profile-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;">&times;</button></div><div style="padding:24px;"><div style="display:flex;gap:12px;flex-wrap:wrap;">${cardsHTML}</div></div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+}
+
+function vdViewCsStateProfile(stateName) {
+    if (!window._llrData) return;
+    const { listDisp, listCounts } = window._llrData;
+    const lc = listCounts || {};
+    const ld = listDisp || {};
+    const listSelect = document.getElementById('llr-lists');
+    const getListName = lid => {
+        const opt = listSelect ? Array.from(listSelect.options).find(o=>o.value===String(lid)) : null;
+        return opt ? opt.text : (lc[lid]?lc[lid].name:`List ${lid}`);
+    };
+    // Build state map using listCounts for real call totals
+    const stateMap = {};
+    Object.keys(lc).forEach(lid => {
+        const calls = lc[lid].calls || 0;
+        if (!calls) return;
+        const abbr = _llrExtractState(getListName(lid)) || 'Other';
+        const sn = _llrStateName(abbr);
+        if (!stateMap[sn]) stateMap[sn] = {calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0};
+        stateMap[sn].calls += calls;
+        const disp = ld[lid] || {};
+        ['A','SALE','NI','NP','DROP','DNC'].forEach(k=>stateMap[sn][k]+=(disp[k]||0));
+    });
+    const myD = stateMap[stateName] || {calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0};
+    const stateList = Object.values(stateMap);
+    const ns = stateList.length || 1;
+    const avgCalls = stateList.reduce((s,d)=>s+(d.calls||0),0)/ns;
+    const avg = k => stateList.reduce((s,d)=>s+(d[k]||0),0)/ns;
+    const avgs = {A:avg('A'),SALE:avg('SALE'),NI:avg('NI'),NP:avg('NP'),DROP:avg('DROP'),DNC:avg('DNC')};
+    const metrics=[
+        {label:'Calls',       my:myD.calls, avg:avgCalls},
+        {label:'Ans. Machine',my:myD.A,     avg:avgs.A},
+        {label:'Sale',        my:myD.SALE,  avg:avgs.SALE},
+        {label:'Not Int.',    my:myD.NI,    avg:avgs.NI},
+        {label:'No Pitch',    my:myD.NP,    avg:avgs.NP},
+        {label:'DROP',        my:myD.DROP,  avg:avgs.DROP},
+        {label:'DNC',         my:myD.DNC,   avg:avgs.DNC},
+    ];
+    document.querySelectorAll('#vd-cs-state-profile-overlay').forEach(e=>e.remove());
+    const overlay=document.createElement('div');
+    overlay.id='vd-cs-state-profile-overlay';
+    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
+    const cardsHTML=metrics.map(m=>{
+        let color='#6b7280',bg='#f9fafb',badge='';
+        if(m.my>m.avg){color='#16a34a';bg='#f0fdf4';badge='<span style="font-size:10px;color:#16a34a;display:block;margin-top:3px;">&#x25b2; above avg</span>';}
+        else if(m.my<m.avg){color='#dc2626';bg='#fef2f2';badge='<span style="font-size:10px;color:#dc2626;display:block;margin-top:3px;">&#x25bc; below avg</span>';}
+        else{badge='<span style="font-size:10px;color:#6b7280;display:block;margin-top:3px;">= avg</span>';}
+        return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;min-width:120px;"><div style="font-size:22px;font-weight:700;color:${color};">${Math.round(m.my)}</div><div style="font-size:11px;color:#6b7280;margin:4px 0 2px;">${m.label}</div><div style="font-size:10px;color:#9ca3af;">avg: ${m.avg.toFixed(1)}</div>${badge}</div>`;
+    }).join('');
+    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;width:90vw;max-width:800px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()"><div style="background:linear-gradient(135deg,#134e4a,#0f766e);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;"><div><h2 style="margin:0;color:#fff;font-size:18px;"><i class="fas fa-map-marker-alt" style="margin-right:10px;"></i>${stateName}</h2><p style="margin:4px 0 0;color:#99f6e4;font-size:12px;">State vs. Average Performance</p></div><button onclick="document.getElementById('vd-cs-state-profile-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;">&times;</button></div><div style="padding:24px;"><div style="display:flex;gap:12px;flex-wrap:wrap;">${cardsHTML}</div></div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+}
+
+function vdViewCsListProfile(listId) {
+    if (!window._llrData) return;
+    const { listDisp, listCounts } = window._llrData;
+    const lc = listCounts || {};
+    const lid = String(listId);
+    const myDisp = (listDisp||{})[lid] || {};
+    const myCalls = (lc[lid]||{}).calls || ((myDisp.A||0)+(myDisp.SALE||0)+(myDisp.NI||0)+(myDisp.NP||0)+(myDisp.DROP||0)+(myDisp.DNC||0));
+    const listSelect = document.getElementById('llr-lists');
+    const opt = listSelect ? Array.from(listSelect.options).find(o=>o.value===lid) : null;
+    const listName = opt ? opt.text : ((lc[lid]||{}).name || `List ${listId}`);
+    // Use listCounts for avg calls across all lists
+    const allListIds = Object.keys(lc).filter(l=>(lc[l].calls||0)>0);
+    const nl = allListIds.length || 1;
+    const avgCalls = allListIds.reduce((s,l)=>s+(lc[l].calls||0),0)/nl;
+    const avg = k => allListIds.reduce((s,l)=>s+((listDisp||{})[l]?((listDisp||{})[l][k]||0):0),0)/nl;
+    const avgs = {A:avg('A'),SALE:avg('SALE'),NI:avg('NI'),NP:avg('NP'),DROP:avg('DROP'),DNC:avg('DNC')};
+    const metrics=[
+        {label:'Calls',       my:myCalls,        avg:avgCalls},
+        {label:'Ans. Machine',my:myDisp.A||0,    avg:avgs.A},
+        {label:'Sale',        my:myDisp.SALE||0, avg:avgs.SALE},
+        {label:'Not Int.',    my:myDisp.NI||0,   avg:avgs.NI},
+        {label:'No Pitch',    my:myDisp.NP||0,   avg:avgs.NP},
+        {label:'DROP',        my:myDisp.DROP||0, avg:avgs.DROP},
+        {label:'DNC',         my:myDisp.DNC||0,  avg:avgs.DNC},
+    ];
+    document.querySelectorAll('#vd-cs-list-profile-overlay').forEach(e=>e.remove());
+    const overlay=document.createElement('div');
+    overlay.id='vd-cs-list-profile-overlay';
+    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
+    const cardsHTML=metrics.map(m=>{
+        let color='#6b7280',bg='#f9fafb',badge='';
+        if(m.my>m.avg){color='#16a34a';bg='#f0fdf4';badge='<span style="font-size:10px;color:#16a34a;display:block;margin-top:3px;">&#x25b2; above avg</span>';}
+        else if(m.my<m.avg){color='#dc2626';bg='#fef2f2';badge='<span style="font-size:10px;color:#dc2626;display:block;margin-top:3px;">&#x25bc; below avg</span>';}
+        else{badge='<span style="font-size:10px;color:#6b7280;display:block;margin-top:3px;">= avg</span>';}
+        return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;min-width:120px;"><div style="font-size:22px;font-weight:700;color:${color};">${Math.round(m.my)}</div><div style="font-size:11px;color:#6b7280;margin:4px 0 2px;">${m.label}</div><div style="font-size:10px;color:#9ca3af;">avg: ${m.avg.toFixed(1)}</div>${badge}</div>`;
+    }).join('');
+    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;width:90vw;max-width:800px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()"><div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;"><div><h2 style="margin:0;color:#fff;font-size:18px;"><i class="fas fa-list" style="margin-right:10px;"></i>${listName}</h2><p style="margin:4px 0 0;color:#bae6fd;font-size:12px;">List vs. Average Performance</p></div><button onclick="document.getElementById('vd-cs-list-profile-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;">&times;</button></div><div style="padding:24px;"><div style="display:flex;gap:12px;flex-wrap:wrap;">${cardsHTML}</div></div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+}
+// ── End Lead List Report ───────────────────────────────────────────────────────
 
 function generateAgentPerformanceReport() {
     document.querySelectorAll('.agent-perf-report-overlay').forEach(e => e.remove());

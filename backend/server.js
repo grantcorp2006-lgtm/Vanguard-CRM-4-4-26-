@@ -647,6 +647,23 @@ app.post('/api/clients', (req, res) => {
     );
 });
 
+// Get single client by ID
+app.get('/api/clients/:id', (req, res) => {
+    const id = req.params.id;
+    const idDot = id.includes('.') ? id : id + '.0';
+    const idRaw = id.replace(/\.0$/, '');
+    db.get(
+        `SELECT data FROM clients WHERE id=? OR id=? OR id=? OR json_extract(data,'$.id')=? OR json_extract(data,'$.id')=?`,
+        [id, idDot, idRaw, id, idRaw],
+        (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!row) return res.status(404).json({ error: 'Client not found' });
+            try { res.json(JSON.parse(row.data)); }
+            catch { res.status(500).json({ error: 'Failed to parse client data' }); }
+        }
+    );
+});
+
 // Delete client
 app.delete('/api/clients/:id', (req, res) => {
     const id = req.params.id;
@@ -1650,7 +1667,13 @@ app.post('/api/leads', (req, res) => {
         if (delRow) {
             return res.json({ id: id, success: true, skipped: 'permanently deleted' });
         }
-        insertOrUpdateLead(id, lead, res);
+        // Reject if this lead has been archived — ViciDial sync must not re-insert archived leads
+        db.get('SELECT id FROM archived_leads WHERE original_lead_id = ?', [id], (archErr, archRow) => {
+            if (archRow) {
+                return res.json({ id: id, success: true, skipped: 'archived' });
+            }
+            insertOrUpdateLead(id, lead, res);
+        });
     });
 });
 
@@ -2453,7 +2476,7 @@ app.get('/api/vicidial/lists', async (req, res) => {
         const VICI_HOST = '204.13.233.29';
         const VICI_USER = '6666';
         const VICI_PASS = 'corp06';
-        const KNOWN_LISTS = ['998', '999', '1000', '1001', '1002', '1005', '1006', '1007', '1008', '1009', '1010', '1011', '1012', '1013', '1014', '1015', '1016', '1017', '1018', '1019', '1020', '1021', '1022', '1023', '1024', '1025', '1026', '1027', '1028', '1029'];
+        const KNOWN_LISTS = ['998', '999', '1000', '1001', '1002', '1005', '1006', '1007', '1008', '1009', '1010', '1011', '1012', '1013', '1014', '1015', '1016', '1017', '1018', '1019', '1020', '1021', '1022', '1023', '1024', '1025', '1026', '1027', '1028', '1029', '1030', '1031', '1032', '1033', '1034', '1035', '1036', '1037', '1038', '1039', '1040', '1041', '1042'];
 
         // Fetch a single list's info via Node.js HTTPS (no Python subprocess needed)
         function fetchListInfo(listId) {
@@ -2565,6 +2588,222 @@ app.get('/api/vicidial/performance-report', async (req, res) => {
         res.json({ success: true, html: response.data });
     } catch (error) {
         console.error('❌ ViciDial performance report error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Helper: extract disposition counts from a ViciDial TEXT report
+// Helper: parse CALL STATUS STATS pipe table; returns { rows, totalRow }
+function parseCSSTable(text) {
+    const lines = text.split('\n');
+    const start = lines.findIndex(l => l.includes('CALL STATUS STATS'));
+    const rows = [], totals = {};
+    if (start < 0) return { rows, totals };
+    for (let i = start + 1; i < Math.min(start + 150, lines.length); i++) {
+        const l = lines[i];
+        const t = l.trim();
+        if (t.startsWith('----------')) break;
+        if (!t.startsWith('|') || t.startsWith('+-')) continue;
+        if (l.includes('STATUS') && l.includes('STATUS_NAME')) continue;
+        const cols = l.split('|').map(s => s.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+        if (cols.length < 3 || !cols[0]) continue;
+        const count = parseInt((cols[3]||cols[2]||'').replace(/[^\d]/g,''),10)||0;
+        if (cols[0] === 'TOTAL' || cols[0] === 'TOTALS') {
+            totals.calls     = count;
+            totals.callTime  = cols[4] || cols[3] || '';
+            totals.agentTime = cols[5] || cols[4] || '';
+        } else {
+            rows.push({ status: cols[0], description: cols[1]||'', calls: count,
+                callTime: cols[4]||cols[3]||'', agentTime: cols[5]||cols[4]||'', callsHr: cols[6]||cols[5]||'' });
+        }
+    }
+    return { rows, totals };
+}
+
+// Helper: format seconds as H:MM:SS
+function fmtSec(sec) {
+    const s = Math.round(sec), h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = s%60;
+    return `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+}
+
+// Helper: convert H:MM:SS or H:MM string to total seconds
+function toSec(t) {
+    if (!t) return 0;
+    const p = String(t).split(':').map(Number);
+    return (p[0]||0)*3600 + (p[1]||0)*60 + (p[2]||0);
+}
+
+// Parse main campaign summary — derived from CALL STATUS STATS pipe table
+function parseViciMainSummary(text) {
+    const { rows, totals } = parseCSSTable(text);
+    const totalCalls = totals.calls || rows.reduce((s,r)=>s+r.calls,0);
+    const totalTime  = totals.callTime || '';
+    const naRow      = rows.find(r => r.status==='NA' || r.status==='NOANSWER');
+    const aRow       = rows.find(r => r.status==='A');
+    const noAnswer   = naRow ? naRow.calls : 0;
+    const machineAns = aRow  ? aRow.calls  : 0;
+    const drops      = rows.filter(r=>r.status==='DROP'||r.status==='PDROP').reduce((s,r)=>s+r.calls,0);
+    const humanAnswers = totalCalls - noAnswer - machineAns;
+    const dropPct    = totalCalls > 0 ? ((drops/totalCalls)*100).toFixed(1)+'%' : '0%';
+    // Compute avgCallLen from totalTime / totalCalls
+    let avgCallLen = totals.agentTime && /\d+:\d+/.test(totals.agentTime) ? totals.agentTime : '';
+    if (!avgCallLen && totalTime && totalCalls > 0) {
+        avgCallLen = fmtSec(toSec(totalTime) / totalCalls);
+    }
+    if (!avgCallLen || avgCallLen === '0:00:00') {
+        // Last resort: text regex for AVERAGE TALK SECONDS
+        const m = text.match(/AVERAGE\s+TALK\s+SECONDS[:\s]+([\d.]+)/i);
+        if (m) avgCallLen = fmtSec(parseFloat(m[1]));
+    }
+    return { totalCalls, humanAnswers, drops, dropPct, noAnswer, avgCallLen, totalTime };
+}
+
+// Parse per-agent summary — derived from their individual campaign CALL STATUS STATS TOTAL row
+function parseViciAgentSummary(text) {
+    const { rows, totals } = parseCSSTable(text);
+    const calls = totals.calls || rows.reduce((s,r)=>s+r.calls,0);
+    const time  = totals.callTime || '';
+    let avg = totals.agentTime && /\d+:\d+/.test(totals.agentTime) ? totals.agentTime : '';
+    if (!avg && time && calls > 0) avg = fmtSec(toSec(time) / calls);
+    if (!avg) {
+        const m = text.match(/AVERAGE\s+TALK\s+SECONDS[:\s]+([\d.]+)/i);
+        if (m) avg = fmtSec(parseFloat(m[1]));
+    }
+    return { calls, time, avg };
+}
+
+// Parse per-list call counts from LIST ID STATS section
+function parseViciListCounts(text) {
+    const counts = {};
+    const lines = text.split('\n');
+    const start = lines.findIndex(l => l.includes('---------- LIST ID STATS'));
+    if (start < 0) return counts;
+    const end = lines.findIndex((l, i) => i > start && l.startsWith('----------'));
+    lines.slice(start, end >= 0 ? end : start + 300).forEach(l => {
+        const t = l.trim();
+        if (!t.startsWith('|') || t.startsWith('+-') || t.includes('LIST') || t.includes('TOTAL')) return;
+        const cols = l.split('|').map(s => s.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+        if (cols.length < 2) return;
+        const id = cols[0].split(' ')[0].trim();
+        if (id && /^\d+$/.test(id)) {
+            const calls = parseInt((cols[1]||'').replace(/[^\d]/g,''),10)||0;
+            counts[id] = { name: cols[0], calls };
+        }
+    });
+    return counts;
+}
+
+// Parse CALL STATUS STATS rows from text (reuses parseCSSTable)
+function parseViciCallStatus(text) {
+    return parseCSSTable(text).rows;
+}
+
+function parseViciDispositions(text) {
+    const TRACKED = ['A','SALE','NI','NP','DROP','DNC'];
+    const counts = Object.fromEntries(TRACKED.map(k => [k, 0]));
+    const lines = text.split('\n');
+    const start = lines.findIndex(l => l.includes('CALL STATUS STATS'));
+    if (start < 0) return counts;
+    for (let i = start + 1; i < Math.min(start + 60, lines.length); i++) {
+        const l = lines[i];
+        if (l.trim().startsWith('----------')) break;
+        if (!l.trim().startsWith('|') || l.trim().startsWith('+-') || l.includes('STATUS') || l.includes('TOTAL')) continue;
+        const cols = l.split('|').map(s => s.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+        if (cols.length < 4) continue;
+        const code = cols[0];
+        const n = parseInt((cols[3] || '').replace(/[^\d]/g, ''), 10) || 0;
+        if (code in counts) counts[code] = n;
+    }
+    return counts;
+}
+
+app.get('/api/vicidial/campaign-stats', async (req, res) => {
+    const axios = require('axios');
+    const VICI_URL = 'http://204.13.233.29/vicidial/AST_VDADstats.php';
+    const AUTH = { username: '6666', password: 'corp06' };
+    const AX_CFG = { auth: AUTH, timeout: 25000, responseType: 'text', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
+
+    const today = new Date().toISOString().slice(0, 10);
+    const queryDate = req.query.query_date || today;
+    const endDate   = req.query.end_date   || today;
+    const shift     = req.query.shift      || 'ALL';
+    const rollover  = req.query.include_rollover || 'NO';
+
+    const rawGroups = req.query['group[]'];
+    const rawLists  = req.query['list_ids[]'];
+    const groups  = rawGroups ? (Array.isArray(rawGroups) ? rawGroups : [rawGroups]) : ['AgentsCM','ILun','INun','PAun','Sweitzer','TXun'];
+    const listIds = rawLists  ? (Array.isArray(rawLists)  ? rawLists  : [rawLists])  : ['998','1001','1007'];
+
+    const BASE = { agent_hours:'', DB:'0', outbound_rate:'', costformat:'', print_calls:'',
+                   query_date: queryDate, end_date: endDate, include_rollover: rollover,
+                   bottom_graph:'NO', carrier_stats:'NO', report_display_type:'TEXT', shift, SUBMIT:'SUBMIT' };
+
+    // Build URLSearchParams and POST to ViciDial, return clean text
+    const fetchVici = async (grps, lists) => {
+        const p = new URLSearchParams(BASE);
+        grps.forEach(g => p.append('group[]', g));
+        if (!lists.includes('--ALL--')) lists.forEach(l => p.append('list_ids[]', l));
+        const r = await axios.post(VICI_URL, p.toString(), AX_CFG);
+        const m = r.data.match(/<PRE[^>]*>([\s\S]*?)<\/PRE>/i);
+        return (m ? m[1] : r.data).replace(/<[^>]+>/g, '');
+    };
+
+    // Agent → primary campaign mapping (campaigns are named per-agent)
+    const AGENT_CAMPAIGNS = { '1001': ['ILun'], '1002': ['INun'], '1003': ['Sweitzer'] };
+
+    // Helper: extract list IDs that appear in the LIST ID STATS section of a TEXT report
+    const extractListIds = (text) => {
+        const lines = text.split('\n');
+        const start = lines.findIndex(l => l.includes('---------- LIST ID STATS'));
+        if (start < 0) return [];
+        const end = lines.findIndex((l, i) => i > start && l.startsWith('----------'));
+        const ids = [];
+        lines.slice(start, end >= 0 ? end : start + 60).forEach(l => {
+            if (!l.trim().startsWith('|') || l.trim().startsWith('+-') || l.includes('LIST') || l.includes('TOTAL')) return;
+            const cols = l.split('|').map(s => s.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+            if (cols.length >= 2) {
+                const id = cols[0].split(' ')[0];
+                if (id && /^\d+$/.test(id)) ids.push(id);
+            }
+        });
+        return ids;
+    };
+
+    console.log('📊 Fetching ViciDial campaign stats + agent/list detail');
+
+    try {
+        // First get main text so we know which lists actually have data
+        const mainText = await fetchVici(groups, listIds);
+
+        // Determine lists to fetch detail for:
+        // if specific lists were selected use those (cap 10), otherwise extract from results (cap 10)
+        const detailLists = listIds.includes('--ALL--')
+            ? extractListIds(mainText).slice(0, 20)
+            : listIds.slice(0, 20);
+
+        // Agent + list detail calls in parallel
+        const detailTexts = await Promise.all([
+            ...Object.values(AGENT_CAMPAIGNS).map(camps => fetchVici(camps, ['--ALL--'])),
+            ...detailLists.map(lid => fetchVici(groups, [lid]))
+        ]);
+
+        const agentEntries = Object.keys(AGENT_CAMPAIGNS);
+        const agentDisp = {};
+        agentEntries.forEach((uid, i) => { agentDisp[uid] = parseViciDispositions(detailTexts[i]); });
+
+        const agentSummary = {};
+        agentEntries.forEach((uid, i) => { agentSummary[uid] = parseViciAgentSummary(detailTexts[i]); });
+
+        const listDisp = {};
+        detailLists.forEach((lid, i) => { listDisp[lid] = parseViciDispositions(detailTexts[agentEntries.length + i]); });
+
+        const listCounts = parseViciListCounts(mainText);
+        const mainSummary = parseViciMainSummary(mainText);
+        const callStatusRows = parseViciCallStatus(mainText);
+
+        res.json({ success: true, text: mainText, agentDisp, listDisp, agentSummary, listCounts, mainSummary, callStatusRows });
+    } catch (error) {
+        console.error('❌ ViciDial campaign stats error:', error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -8450,6 +8689,104 @@ app.delete('/api/documents/:docId', (req, res) => {
     });
 });
 
+// Agency Files (Settings Upload) endpoints
+const agencyUploadDir = '/var/www/vanguard/uploads/agency/';
+if (!fs.existsSync(agencyUploadDir)) {
+    fs.mkdirSync(agencyUploadDir, { recursive: true });
+}
+
+const agencyFileStorage = multer.diskStorage({
+    destination: (req, file, cb) => { cb(null, agencyUploadDir); },
+    filename: (req, file, cb) => {
+        const ts = Date.now();
+        const rand = Math.random().toString(36).substr(2, 8);
+        const ext = path.extname(file.originalname);
+        cb(null, `agency_${ts}_${rand}${ext}`);
+    }
+});
+
+const uploadAgencyFile = multer({
+    storage: agencyFileStorage,
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = [
+            'application/pdf','application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'image/jpeg','image/png','image/gif','text/plain',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'text/csv','application/json','application/octet-stream',
+            'text/xml','application/xml',
+            'application/zip','application/x-zip-compressed','application/x-zip',
+            'multipart/x-zip'
+        ];
+        // Accept if in allowed list OR if it's a text-based file (al3, txt, csv, etc.)
+        if (allowed.includes(file.mimetype) || file.mimetype.startsWith('text/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('File type not allowed: ' + file.mimetype), false);
+        }
+    }
+});
+
+app.post('/api/agency-files', (req, res) => {
+    uploadAgencyFile.single('file')(req, res, (err) => {
+        if (err) return res.status(400).json({ success: false, error: err.message });
+        if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
+
+        const docId = 'agf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const { uploadedBy } = req.body;
+
+        db.run(
+            `INSERT INTO documents (id, client_id, policy_id, filename, original_name, file_path, file_size, file_type, uploaded_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [docId, 'AGENCY_GENERAL', null, req.file.filename, req.file.originalname,
+             req.file.path, req.file.size, req.file.mimetype, uploadedBy || 'Agency'],
+            function(dbErr) {
+                if (dbErr) {
+                    fs.unlink(req.file.path, () => {});
+                    return res.status(500).json({ success: false, error: dbErr.message });
+                }
+                res.json({
+                    success: true,
+                    file: {
+                        id: docId,
+                        name: req.file.originalname,
+                        type: req.file.mimetype,
+                        size: req.file.size,
+                        uploadDate: new Date().toISOString()
+                    }
+                });
+            }
+        );
+    });
+});
+
+app.get('/api/agency-files', (req, res) => {
+    db.all(
+        `SELECT id, original_name as name, file_type as type, file_size as size, upload_date as uploadDate, uploaded_by as uploadedBy
+         FROM documents WHERE client_id = 'AGENCY_GENERAL' ORDER BY upload_date DESC`,
+        [],
+        (err, rows) => {
+            if (err) return res.status(500).json({ success: false, error: err.message });
+            res.json({ success: true, files: rows || [] });
+        }
+    );
+});
+
+app.delete('/api/agency-files/:fileId', (req, res) => {
+    const fileId = req.params.fileId;
+    db.get('SELECT file_path FROM documents WHERE id = ? AND client_id = ?', [fileId, 'AGENCY_GENERAL'], (err, doc) => {
+        if (err) return res.status(500).json({ success: false, error: err.message });
+        if (!doc) return res.status(404).json({ success: false, error: 'File not found' });
+        db.run('DELETE FROM documents WHERE id = ?', [fileId], function(err) {
+            if (err) return res.status(500).json({ success: false, error: err.message });
+            fs.unlink(doc.file_path, () => {});
+            res.json({ success: true, message: 'File deleted' });
+        });
+    });
+});
+
 // Agent Dev Stats API endpoints
 // Save dev stats to server
 app.post('/api/agent-dev-stats', (req, res) => {
@@ -10541,14 +10878,12 @@ app.get('/api/finance/pl', async (req, res) => {
             db.all('SELECT * FROM contractor_payments WHERE payment_date>=? AND payment_date<=?', [startDate, endDate], (err,rows) => err ? reject(err) : resolve(rows||[]));
         });
 
-        // Build income items
+        // Build income items — bank transactions only
         const income = [];
-        // Commission income from paid commissions
-        const commIncome = paidComm.reduce((s,c) => s + (c.commission_amount||0), 0);
-        if (commIncome > 0) income.push({ category: 'Commission Income', amount: commIncome });
 
-        // Other income from positive transactions
-        const txnIncome = txns.filter(t => t.amount > 0);
+        // Income from positive bank transactions only — exclude equity/capital contributions
+        const EQUITY_CATEGORIES = new Set(['Capital Contribution', 'Owner Contribution', 'Equity Contribution', 'Owner Deposit']);
+        const txnIncome = txns.filter(t => t.amount > 0 && !EQUITY_CATEGORIES.has(t.category));
         const txnIncomeCats = {};
         for (const t of txnIncome) {
             const cat = t.category || 'Other Income';
@@ -10577,18 +10912,13 @@ app.get('/api/finance/pl', async (req, res) => {
         const totalExpenses = expenseItems.reduce((s,i) => s + i.amount, 0);
         const netIncome = grossProfit - totalExpenses;
 
-        // Monthly breakdown
+        // Monthly breakdown — exclude equity contributions from income
         const monthly = Array.from({length:12}, (_,i) => ({ month: i+1, label: new Date(year,i,1).toLocaleString('en-US',{month:'short'}), income:0, expenses:0, net:0 }));
         for (const t of txns) {
             const m = parseInt(t.date.split('-')[1]) - 1;
             if (m < 0 || m > 11) continue;
-            if (t.amount > 0) monthly[m].income += t.amount;
-            else monthly[m].expenses += Math.abs(t.amount);
-        }
-        for (const c of paidComm) {
-            const d = new Date(c.payment_date); if (isNaN(d)) continue;
-            const m = d.getMonth();
-            monthly[m].income += c.commission_amount || 0;
+            if (t.amount > 0 && !EQUITY_CATEGORIES.has(t.category)) monthly[m].income += t.amount;
+            else if (t.amount < 0) monthly[m].expenses += Math.abs(t.amount);
         }
         for (const m of monthly) m.net = m.income - m.expenses;
 
@@ -10746,12 +11076,12 @@ app.get('/api/finance/tax-summary', async (req, res) => {
         const start = `${year}-01-01`, end = `${year}-12-31`;
 
         // Net income
-        const txns = await new Promise((resolve,reject) => db.all('SELECT amount FROM financial_transactions WHERE date>=? AND date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
+        const txns = await new Promise((resolve,reject) => db.all('SELECT amount, category FROM financial_transactions WHERE date>=? AND date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
         const paidComm = await new Promise((resolve,reject) => db.all('SELECT commission_amount FROM commission_payments WHERE payment_date>=? AND payment_date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
         const contractors = await new Promise((resolve,reject) => db.all('SELECT amount FROM contractor_payments WHERE payment_date>=? AND payment_date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
 
-        const grossIncome = txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-                          + paidComm.reduce((s,c)=>s+(c.commission_amount||0),0);
+        const EQUITY_CATS = new Set(['Capital Contribution', 'Owner Contribution', 'Equity Contribution', 'Owner Deposit']);
+        const grossIncome = txns.filter(t=>t.amount>0 && !EQUITY_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
         const totalExpenses = txns.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0)
                             + contractors.reduce((s,c)=>s+c.amount,0);
         const netIncome = grossIncome - totalExpenses;
@@ -11007,6 +11337,27 @@ app.get('/api/chat/unread-count', (req, res) => {
             res.json({ count });
         }
     );
+});
+
+// POST /api/chat/typing  { sender, tab }
+const _chatTypingState = {}; // { tab: { username: timestamp } }
+app.post('/api/chat/typing', (req, res) => {
+    const { sender, tab } = req.body || {};
+    if (!sender || !tab) return res.status(400).json({ error: 'Missing fields' });
+    if (!_chatTypingState[tab]) _chatTypingState[tab] = {};
+    _chatTypingState[tab][sender.toLowerCase()] = Date.now();
+    res.json({ ok: true });
+});
+
+// GET /api/chat/typing?tab=group&me=hunter
+app.get('/api/chat/typing', (req, res) => {
+    const { tab, me } = req.query;
+    if (!tab) return res.status(400).json({ error: 'Missing tab' });
+    const now = Date.now();
+    const typing = Object.entries(_chatTypingState[tab] || {})
+        .filter(([user, ts]) => now - ts < 4000 && user !== (me || '').toLowerCase())
+        .map(([user]) => user);
+    res.json({ typing });
 });
 
 // ─── End Team Chat API ────────────────────────────────────────────────────────
