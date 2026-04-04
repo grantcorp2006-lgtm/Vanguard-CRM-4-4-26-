@@ -75,37 +75,39 @@ module.exports = function(app) {
 
         console.log(`Querying carriers: state=${state}, expiry=${expiry} days, skip=${skipDays} days, limit=${limit}`);
 
-        // Open database
-        const db = new sqlite3.Database(path.join(__dirname, '..', 'vanguard_system.db'));
+        // Open database - Use the new DB-V3 database with updated schema
+        const db = new sqlite3.Database('/var/www/vanguard/DB-V3.db');
 
-        // Query carriers from the state
+        // Query carriers from the new carriers table schema
         let query = `
             SELECT DISTINCT
-                dot_number as usdot_number,
-                mc_number,
-                legal_name,
-                dba_name,
-                street,
-                city,
-                state,
-                zip_code,
-                phone,
-                email_address as email,
-                power_units as fleet_size,
-                insurance_carrier,
-                contact_person as representative_name,
-                contact_title,
-                website,
-                cell_phone,
+                DOT_NUMBER as usdot_number,
+                MC_NUMBER as mc_number,
+                LEGAL_NAME as legal_name,
+                DBA_NAME as dba_name,
+                PHY_STREET as street,
+                PHY_CITY as city,
+                PHY_STATE as state,
+                PHY_ZIP_CODE as zip_code,
+                PHONE as phone,
+                COMPANY_EMAIL as email,
+                POWER_UNITS as fleet_size,
+                PRIMARY_INSURANCE_CARRIER as insurance_carrier,
+                COMPANY_OFFICER_1 as representative_name,
+                OFFICER_TITLE_1 as contact_title,
+                COMPANY_WEBSITE as website,
+                CELL_PHONE as cell_phone,
                 'Active' as operating_status,
-                'Satisfactory' as safety_rating,
-                '$750,000' as insurance_amount
-            FROM fmcsa_enhanced
-            WHERE state = ?
-            AND dot_number IS NOT NULL
-            AND insurance_carrier IS NOT NULL
-            AND power_units > 0
-            ORDER BY power_units DESC
+                SAFETY_RATING as safety_rating,
+                '$750,000' as insurance_amount,
+                DRIVERS as drivers,
+                TOTAL_DRIVERS as total_drivers
+            FROM carriers
+            WHERE PHY_STATE = ?
+            AND DOT_NUMBER IS NOT NULL
+            AND PRIMARY_INSURANCE_CARRIER IS NOT NULL
+            AND POWER_UNITS > 0
+            ORDER BY POWER_UNITS DESC
         `;
 
         const params = [state]; // Just state filter
@@ -172,15 +174,15 @@ module.exports = function(app) {
     app.get('/api/carriers/counts-by-state', (req, res) => {
         const { days = 30 } = req.query;
 
-        const db = new sqlite3.Database(path.join(__dirname, '..', 'vanguard_system.db'));
+        const db = new sqlite3.Database('/var/www/vanguard/DB-V3.db');
 
         const query = `
             SELECT
-                state,
+                PHY_STATE as state,
                 COUNT(*) as count
-            FROM fmcsa_enhanced
-            WHERE state IS NOT NULL
-            GROUP BY state
+            FROM carriers
+            WHERE PHY_STATE IS NOT NULL
+            GROUP BY PHY_STATE
             ORDER BY count DESC
         `;
 

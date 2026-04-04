@@ -124,7 +124,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     <h3><i class="fas fa-chart-line"></i> Lead Stage</h3>
                     <div>
                         <label style="font-weight: 600; font-size: 12px;">Current Stage:</label>
-                        <select id="lead-stage-${lead.id}" onchange="updateLeadStage('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                        <select id="lead-stage-${lead.id}" onchange="handleStageChange('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
                             <option value="new" ${lead.stage === 'new' ? 'selected' : ''}>New</option>
                             <option value="contact_attempted" ${lead.stage === 'contact_attempted' ? 'selected' : ''}>Contact Attempted</option>
                             <option value="info_requested" ${lead.stage === 'info_requested' ? 'selected' : ''}>Info Requested</option>
@@ -132,12 +132,30 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <option value="loss_runs_requested" ${lead.stage === 'loss_runs_requested' ? 'selected' : ''}>Loss Runs Requested</option>
                             <option value="loss_runs_received" ${lead.stage === 'loss_runs_received' ? 'selected' : ''}>Loss Runs Received</option>
                             <option value="app_prepared" ${lead.stage === 'app_prepared' ? 'selected' : ''}>App Prepared</option>
-                            <option value="app_sent" ${lead.stage === 'app_sent' ? 'selected' : ''}>App Sent</option>
+                            <option value="app_sent" ${lead.stage === 'app_sent' ? 'selected' : ''}>Waiting on Markets</option>
                             <option value="quote_sent" ${lead.stage === 'quote_sent' ? 'selected' : ''}>Quote Sent</option>
                             <option value="sale" ${lead.stage === 'sale' ? 'selected' : ''}>Sale</option>
-                            <option value="not-interested" ${lead.stage === 'not-interested' ? 'selected' : ''}>Not Interested</option>
                             <option value="closed" ${lead.stage === 'closed' ? 'selected' : ''}>Closed</option>
+                            ${(function() {
+                                // Check if current stage is a custom stage (not in predefined list)
+                                const predefinedStages = ['new', 'contact_attempted', 'info_requested', 'info_received', 'loss_runs_requested', 'loss_runs_received', 'app_prepared', 'app_sent', 'quote_sent', 'sale', 'closed'];
+                                const isCustomStage = lead.stage && !predefinedStages.includes(lead.stage);
+                                if (isCustomStage) {
+                                    return `<option value="${lead.stage}" selected>${lead.stage}</option>`;
+                                }
+                                return '';
+                            })()}
+                            <option value="custom">Custom</option>
                         </select>
+                        <input type="text" id="lead-stage-custom-${lead.id}" placeholder="Enter custom stage" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; display: none; margin-top: 5px;" onblur="saveCustomStage('${lead.id}', this.value)" onkeypress="if(event.key==='Enter') saveCustomStage('${lead.id}', this.value)">
+                        <button id="toggle-stage-${lead.id}" onclick="toggleStageInput('${lead.id}')" style="background: #6b7280; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; display: none; margin-top: 5px; font-size: 12px;" title="Switch back to dropdown">
+                            <i class="fas fa-chevron-down"></i> Dropdown
+                        </button>
+                        <div id="todo-field-${lead.id}" style="display: none; margin-top: 10px;">
+                            <label style="font-weight: 600; font-size: 12px; color: #374151;">TO DO (Optional):</label>
+                            <textarea id="todo-text-${lead.id}" placeholder="Enter optional to-do notes..." style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; margin-top: 5px; resize: vertical; min-height: 60px;" onblur="saveTodoText('${lead.id}', this.value)" onkeypress="if(event.key==='Enter' && event.shiftKey) saveTodoText('${lead.id}', this.value)"></textarea>
+                            <small style="color: #6b7280; font-size: 11px;">Press Shift+Enter to save, or click outside to save automatically</small>
+                        </div>
                     </div>
                     <!-- Stage Timestamp with Color Coding -->
                     <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 6px; text-align: center;">
@@ -255,7 +273,8 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     <!-- Completion Timestamp -->
                     <div id="reach-out-completion-${lead.id}" style="text-align: center; margin-bottom: 10px; display: none;">
                         <div style="background: #10b981; color: white; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block;">
-                            Completed: <span id="completion-timestamp-${lead.id}"></span>
+                            Completed: <span id="completion-timestamp-${lead.id}"></span><br>
+                            <span id="highlight-countdown-${lead.id}" style="font-size: 10px; opacity: 0.9;"></span>
                         </div>
                     </div>
 
@@ -265,7 +284,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         <!-- Called Section - Now at top -->
                         <div style="display: flex; align-items: center; justify-content: space-between;">
                             <div style="display: flex; align-items: center; gap: 10px;">
-                                <input type="checkbox" id="call-made-${lead.id}" onchange="console.log('🔍 CHECKBOX CLICKED: leadId=${lead.id}'); updateReachOut('${lead.id}', 'call', this.checked)" style="width: 20px; height: 20px; cursor: pointer;" data-debug-lead="${lead.id}">
+                                <input type="checkbox" id="call-made-${lead.id}" onchange="console.log('🔍 CHECKBOX CLICKED: leadId=${lead.id}'); console.log('🔍 CHECKBOX STATE: checked=' + this.checked); if(window.updateReachOut) { window.updateReachOut('${lead.id}', 'call', this.checked); } else { console.error('❌ window.updateReachOut not found!'); }" style="width: 20px; height: 20px; cursor: pointer;" data-debug-lead="${lead.id}">
                                 <label for="call-made-${lead.id}" style="font-weight: 600; cursor: pointer;">Called</label>
                             </div>
                             <div style="display: flex; align-items: center; gap: 20px;">
@@ -330,14 +349,13 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Premium:</label>
-                            <input type="text" id="lead-premium-${lead.id}" value="${lead.premium || ''}" placeholder="Enter premium amount" onchange="updateLeadField('${lead.id}', 'premium', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                            <input type="text" id="lead-premium-${lead.id}" value="${lead.premium || ''}" placeholder="Enter premium amount" onchange="updateLeadField('${lead.id}', 'premium', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white; ${(lead.confirmedPremium === 'yes') ? 'color: #16a34a; font-weight: 600;' : ''}">
                         </div>
                         <div>
-                            <label style="font-weight: 600; font-size: 12px;">Win/Loss:</label>
-                            <select id="lead-winloss-${lead.id}" onchange="updateWinLossStatus('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
-                                <option value="neutral" ${(lead.winLoss === 'neutral' || !lead.winLoss) ? 'selected' : ''}>Neutral</option>
-                                <option value="win" ${lead.winLoss === 'win' ? 'selected' : ''}>Win</option>
-                                <option value="loss" ${lead.winLoss === 'loss' ? 'selected' : ''}>Loss</option>
+                            <label style="font-weight: 600; font-size: 12px;">Confirmed Premium:</label>
+                            <select id="lead-confirmedpremium-${lead.id}" onchange="updateConfirmedPremiumStatus('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                                <option value="no" ${(lead.confirmedPremium === 'no' || !lead.confirmedPremium) ? 'selected' : ''}>No</option>
+                                <option value="yes" ${lead.confirmedPremium === 'yes' ? 'selected' : ''}>Yes</option>
                             </select>
                         </div>
                         <div>
@@ -352,33 +370,6 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     </div>
                 </div>
 
-                <!-- Owner Details -->
-                <div class="profile-section" style="background: #e7f3ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3><i class="fas fa-user-circle"></i> Owner Details</h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                        <div>
-                            <label style="font-weight: 600; font-size: 12px;">Name:</label>
-                            <input type="text"
-                                value="${lead.ownerName || ''}"
-                                onchange="updateLeadField('${lead.id}', 'ownerName', this.value); updateNameFieldColor(this);"
-                                oninput="updateNameFieldColor(this);"
-                                placeholder="Enter owner name"
-                                style="width: 100%; padding: 8px; border: 1px solid ${(lead.ownerName && lead.ownerName.trim()) ? '#d1d5db' : '#ef4444'}; border-radius: 6px; background-color: ${(lead.ownerName && lead.ownerName.trim()) ? 'white' : '#fef2f2'};">
-                        </div>
-                        <div>
-                            <label style="font-weight: 600; font-size: 12px;">Interest:</label>
-                            <input type="text" value="${lead.ownerInterest || ''}" onchange="updateLeadField('${lead.id}', 'ownerInterest', this.value)" placeholder="Enter interests" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
-                        </div>
-                        <div>
-                            <label style="font-weight: 600; font-size: 12px;">Dislikes:</label>
-                            <input type="text" value="${lead.ownerDislikes || ''}" onchange="updateLeadField('${lead.id}', 'ownerDislikes', this.value)" placeholder="Enter dislikes" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
-                        </div>
-                        <div>
-                            <label style="font-weight: 600; font-size: 12px;">Personality:</label>
-                            <input type="text" value="${lead.ownerPersonality || ''}" onchange="updateLeadField('${lead.id}', 'ownerPersonality', this.value)" placeholder="Enter personality traits" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
-                        </div>
-                    </div>
-                </div>
 
                 <!-- Notes -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -388,7 +379,17 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
                 <!-- Company Information -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3>Company Information</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">Company Information</h3>
+                        <div style="display:flex;gap:8px;">
+                            <button id="dot-lookup-btn-${lead.id}" onclick="triggerManualDOTLookup('${lead.id}', document.getElementById('dot-input-${lead.id}')?.value || '${lead.dotNumber || ''}')" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;" title="Rescan DOT data from FMCSA">
+                                <i class="fas fa-sync-alt"></i> Rescan DOT
+                            </button>
+                            <button onclick="acctGoToDOTLookup('${lead.id}')" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;" title="Open DOT in lead generation search">
+                                <i class="fas fa-search"></i> DOT Lookup
+                            </button>
+                        </div>
+                    </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Company Name:</label>
@@ -398,17 +399,27 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <label style="font-weight: 600; font-size: 12px;">Contact:</label>
                             <input type="text" value="${lead.contact || ''}" onchange="updateLeadField('${lead.id}', 'contact', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
                         </div>
-                        <div>
+                        <div style="position: relative;">
                             <label style="font-weight: 600; font-size: 12px;">Phone:</label>
-                            <input type="text" value="${lead.phone || ''}" onchange="updateLeadField('${lead.id}', 'phone', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" value="${lead.phone || ''}" onchange="updateLeadField('${lead.id}', 'phone', this.value)" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <button onclick="window.open('tel:${lead.phone || ''}')" title="Call ${lead.phone || ''}" style="background: #10b981; color: white; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; font-size: 14px; transition: background 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+                                    <i class="fas fa-phone" style="margin: 0;"></i>
+                                </button>
+                            </div>
                         </div>
-                        <div>
+                        <div style="position: relative;">
                             <label style="font-weight: 600; font-size: 12px;">Email:</label>
-                            <input type="text" value="${lead.email || ''}" onchange="updateLeadField('${lead.id}', 'email', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" value="${lead.email || ''}" onchange="updateLeadField('${lead.id}', 'email', this.value)" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <button onclick="window.open('mailto:${lead.email || ''}')" title="Compose email to ${lead.email || ''}" style="background: #3b82f6; color: white; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; font-size: 14px; transition: background 0.2s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+                                    <i class="fas fa-envelope" style="margin: 0;"></i>
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">DOT Number:</label>
-                            <input type="text" value="${lead.dotNumber || ''}" onchange="updateLeadField('${lead.id}', 'dotNumber', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <input type="text" value="${lead.dotNumber || ''}" onchange="updateLeadField('${lead.id}', 'dotNumber', this.value); toggleDOTButton('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" id="dot-input-${lead.id}">
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">MC Number:</label>
@@ -416,7 +427,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Years in Business:</label>
-                            <input type="text" value="${lead.yearsInBusiness || ''}" onchange="updateLeadField('${lead.id}', 'yearsInBusiness', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <input type="text" value="${lead.yearsInBusiness || ''}" onchange="updateLeadField('${lead.id}', 'yearsInBusiness', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background-color: ${lead.yearsInBusiness ? '#e8f5e8' : '#fff'};" placeholder="Auto-populated from DOT lookup">
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Renewal Date:</label>
@@ -428,7 +439,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">State:</label>
-                            <input type="text" value="${lead.state || ''}" placeholder="State" onchange="updateLeadField('${lead.id}', 'state', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <input type="text" value="${lead.state || ''}" placeholder="Auto-populated from DOT lookup" onchange="updateLeadField('${lead.id}', 'state', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background-color: ${lead.state ? '#e8f5e8' : '#fff'};">
                         </div>
                     </div>
                 </div>
@@ -436,18 +447,14 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 <!-- Operation Details -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h3>Operation Details</h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Radius of Operation:</label>
                             <input type="text" value="${lead.radiusOfOperation || ''}" placeholder="e.g., 500 miles" onchange="updateLeadField('${lead.id}', 'radiusOfOperation', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Commodity Hauled:</label>
-                            <input type="text" value="${lead.commodityHauled || ''}" placeholder="e.g., General Freight" onchange="updateLeadField('${lead.id}', 'commodityHauled', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
-                        </div>
-                        <div>
-                            <label style="font-weight: 600; font-size: 12px;">Operating States:</label>
-                            <input type="text" value="${lead.operatingStates || ''}" placeholder="e.g., TX, LA, OK" onchange="updateLeadField('${lead.id}', 'operatingStates', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <input type="text" value="${lead.commodityHauled || ''}" placeholder="Auto-populated from DOT lookup" onchange="updateLeadField('${lead.id}', 'commodityHauled', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background-color: ${lead.commodityHauled ? '#e8f5e8' : '#fff'};">
                         </div>
                     </div>
                 </div>
@@ -616,14 +623,21 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 <div class="profile-section" style="background: #fff; border: 2px solid ${lead.recordingPath && lead.hasRecording ? '#10b981' : '#f3f4f6'}; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3><i class="fas fa-${lead.recordingPath && lead.hasRecording ? 'play-circle' : 'microphone-alt'}"></i> Call Recording</h3>
-                        ${!(lead.recordingPath && lead.hasRecording) ? `
-                            <button onclick="openCallRecordingUpload('${lead.id}')" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                                <i class="fas fa-upload"></i> Upload Recording
-                            </button>
-                        ` : ''}
+                        <div style="display: flex; gap: 8px;">
+                            ${lead.recordingPath && lead.hasRecording ? `
+                                <button onclick="transcribeRecording('${lead.id}', '${lead.recordingPath}')" id="transcribe-btn-${lead.id}" style="background: #7c3aed; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                    <i class="fas fa-file-alt"></i> Transcribe Recording
+                                </button>
+                            ` : ''}
+                            ${!(lead.recordingPath && lead.hasRecording) ? `
+                                <button onclick="openCallRecordingUpload('${lead.id}')" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                    <i class="fas fa-upload"></i> Upload Recording
+                                </button>
+                            ` : ''}
+                        </div>
                     </div>
                     ${lead.recordingPath && lead.hasRecording ? `
-                        <audio controls style="width: 100%; height: 40px;" preload="none">
+                        <audio id="recording-audio-${lead.id}" controls style="width: 100%; height: 40px;" preload="none">
                             <source src="${lead.recordingPath}" type="audio/mpeg">
                             <source src="${lead.recordingPath}" type="audio/wav">
                             Your browser does not support the audio element.
@@ -636,7 +650,12 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 <!-- Call Transcript -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h3><i class="fas fa-microphone"></i> Call Transcript</h3>
-                    <textarea onchange="updateLeadField('${lead.id}', 'transcriptText', this.value)" style="width: 100%; min-height: 150px; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; font-family: monospace;">${lead.transcriptText || ''}</textarea>
+                    <div id="transcript-display-${lead.id}" style="width: 100%; min-height: 150px; max-height: 350px; overflow-y: auto; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; font-family: monospace; font-size: 13px; line-height: 1.9; background: white;">
+                        ${(lead.transcriptWords && lead.transcriptWords.length)
+                            ? buildTranscriptSpans(lead.transcriptWords)
+                            : `<span style="color:#9ca3af;">${lead.transcriptText ? lead.transcriptText.replace(/\n/g, '<br>') : 'No transcript yet. Click Transcribe Recording above.'}</span>`
+                        }
+                    </div>
                 </div>
 
                 <!-- Quote Submissions -->
@@ -644,17 +663,17 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3><i class="fas fa-file-contract"></i> Quote Submissions</h3>
                         <div style="display: flex; gap: 10px;">
-                            <button onclick="createQuoteApplication('${lead.id}')" style="background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
-                                <i class="fas fa-file-alt"></i> Quote Application
-                            </button>
                             <button onclick="addQuoteSubmission('${lead.id}')" style="background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
                                 <i class="fas fa-plus"></i> Add Quote
+                            </button>
+                            <button class="auto-import-market-btn" onclick="autoImportToMarket('${lead.id}', '${(lead.name || 'Lead').replace(/'/g, "\\'")}')" style="background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                                <i class="fas fa-arrow-right"></i> Auto-Import to Market
                             </button>
                         </div>
                     </div>
                     <div id="quote-submissions-container">
                         <div id="quotes-container-${lead.id}" style="padding: 20px; text-align: center;">
-                            <p style="color: #9ca3af; text-align: center; padding: 20px;">No quotes submitted yet</p>
+                            <p style="color: #9ca3af; text-align: center; padding: 20px;">Loading quotes...</p>
                         </div>
                     </div>
                 </div>
@@ -737,6 +756,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 <div class="profile-section" style="background: #f0f9f0; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3><i class="fas fa-file-signature"></i> Application Submissions</h3>
+                        <button onclick="createQuoteApplication('${lead.id}')" style="background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                            <i class="fas fa-file-alt"></i> Quote Application
+                        </button>
                     </div>
                     <div id="application-submissions-container-${lead.id}">
                         <p style="color: #9ca3af; text-align: center; padding: 20px;">No applications submitted yet</p>
@@ -767,12 +789,120 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
     document.body.appendChild(modalContainer);
 
+    // Init transcript sync if words already stored
+    if (lead.transcriptWords && lead.transcriptWords.length) {
+        setTimeout(() => initTranscriptSync(lead.id), 100);
+    }
+
+    // Add custom stage functions
+    window.handleStageChange = function(leadId, value) {
+        if (value === 'custom') {
+            // Switch to text input
+            const select = document.getElementById('lead-stage-' + leadId);
+            const input = document.getElementById('lead-stage-custom-' + leadId);
+            const toggle = document.getElementById('toggle-stage-' + leadId);
+            const todoField = document.getElementById('todo-field-' + leadId);
+
+            select.style.display = 'none';
+            input.style.display = 'block';
+            toggle.style.display = 'block';
+            if (todoField) todoField.style.display = 'block';
+            input.focus();
+        } else {
+            // Regular stage update
+            updateLeadStage(leadId, value);
+        }
+    };
+
+    window.saveCustomStage = function(leadId, customValue) {
+        if (customValue.trim()) {
+            updateLeadStage(leadId, customValue.trim());
+
+            // Add the custom stage as a new option in the dropdown and select it
+            const select = document.getElementById('lead-stage-' + leadId);
+            const customOption = document.createElement('option');
+            customOption.value = customValue.trim();
+            customOption.textContent = customValue.trim();
+            customOption.selected = true;
+
+            // Insert before the "Custom" option
+            const customEntry = select.querySelector('option[value="custom"]');
+            select.insertBefore(customOption, customEntry);
+
+            // Switch back to dropdown and hide TO DO field
+            const input = document.getElementById('lead-stage-custom-' + leadId);
+            const toggle = document.getElementById('toggle-stage-' + leadId);
+            const todoField = document.getElementById('todo-field-' + leadId);
+
+            select.style.display = 'block';
+            input.style.display = 'none';
+            toggle.style.display = 'none';
+            if (todoField) todoField.style.display = 'none';
+            input.value = '';
+        }
+    };
+
+    window.toggleStageInput = function(leadId) {
+        const select = document.getElementById('lead-stage-' + leadId);
+        const input = document.getElementById('lead-stage-custom-' + leadId);
+        const toggle = document.getElementById('toggle-stage-' + leadId);
+        const todoField = document.getElementById('todo-field-' + leadId);
+        const todoText = document.getElementById('todo-text-' + leadId);
+
+        if (input.style.display === 'none' || !input.style.display) {
+            // Switch to text input
+            select.style.display = 'none';
+            input.style.display = 'block';
+            toggle.style.display = 'block';
+            if (todoField) todoField.style.display = 'block';
+            input.focus();
+        } else {
+            // Switch back to dropdown
+            select.style.display = 'block';
+            input.style.display = 'none';
+            toggle.style.display = 'none';
+            if (todoField) todoField.style.display = 'none';
+            input.value = ''; // Clear input
+            if (todoText) todoText.value = ''; // Clear to-do text
+        }
+    };
+
+    window.saveTodoText = function(leadId, todoValue) {
+        if (todoValue && todoValue.trim()) {
+            // Update the reach-out TO DO section with the custom text
+            const todoDiv = document.getElementById(`reach-out-todo-${leadId}`);
+            if (todoDiv) {
+                todoDiv.innerHTML = `<span style="color: #dc2626; font-weight: bold; font-size: 18px;">TO DO: ${todoValue.trim()}</span>`;
+                todoDiv.style.display = 'block';
+                console.log(`📝 Custom TO DO saved for lead ${leadId}: ${todoValue.trim()}`);
+            }
+        } else {
+            // Clear the TO DO section if no text provided
+            const todoDiv = document.getElementById(`reach-out-todo-${leadId}`);
+            if (todoDiv) {
+                todoDiv.innerHTML = '';
+                todoDiv.style.display = 'none';
+                console.log(`🗑️ Custom TO DO cleared for lead ${leadId}`);
+            }
+        }
+    };
+
+    // Load existing quotes for this lead
+    loadQuotesForLead(lead.id);
+
     // Activate DOM protection to prevent hardcoded ID overwrites
     protectedFunctions.protectModalIDs(lead.id, modalContainer);
 
     // Initialize callback display for this lead
-    setTimeout(() => {
-        displayScheduledCallbacks(lead.id);
+    setTimeout(async () => {
+        await displayScheduledCallbacks(lead.id);
+
+        // Also try to load from server in case it wasn't loaded yet
+        loadCallbacksFromServer().then(async () => {
+            setTimeout(async () => {
+                await displayScheduledCallbacks(lead.id);
+            }, 500);
+        });
     }, 100);
 
     // Force immediate ID fix in case any hardcoded elements are already present
@@ -836,58 +966,10 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
         // Load loss runs from server
         protectedFunctions.loadLossRuns(lead.id);
-
-        // AUTO-CHECK CALL CHECKBOX FOR OVERDUE CALLBACKS
-        setTimeout(() => {
-            console.log('🔍 CALLBACK AUTO-CHECK: Checking for overdue callbacks for lead', lead.id);
-
-            const callbacksKey = 'scheduled_callbacks';
-            const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
-            const now = new Date();
-
-            console.log('🔍 CALLBACK AUTO-CHECK: Current callbacks data:', callbacks);
-            console.log('🔍 CALLBACK AUTO-CHECK: Looking for leadId:', lead.id);
-
-            if (callbacks[lead.id]) {
-                console.log('📋 CALLBACK AUTO-CHECK: Found callbacks for lead:', callbacks[lead.id]);
-
-                // Check if any callback is overdue AND not completed
-                const overdueCallbacks = callbacks[lead.id].filter(callback => {
-                    const callbackTime = new Date(callback.dateTime);
-                    const isOverdue = callbackTime <= now;
-                    const isCompleted = callback.completed;
-                    console.log('🔍 CALLBACK AUTO-CHECK: Callback', callback.dateTime, 'isOverdue:', isOverdue, 'isCompleted:', isCompleted);
-                    return isOverdue && !isCompleted;
-                });
-
-                console.log('🔍 CALLBACK AUTO-CHECK: Filtered overdue callbacks:', overdueCallbacks);
-
-                if (overdueCallbacks.length > 0) {
-                    console.log('📞 CALLBACK AUTO-CHECK: Found', overdueCallbacks.length, 'overdue callbacks, auto-checking call-made checkbox');
-
-                    const callCheckbox = document.getElementById(`call-made-${lead.id}`);
-                    console.log('🔍 CALLBACK AUTO-CHECK: Found checkbox:', callCheckbox, 'currently checked:', callCheckbox?.checked);
-
-                    if (callCheckbox && !callCheckbox.checked) {
-                        callCheckbox.checked = true;
-                        console.log('✅ CALLBACK AUTO-CHECK: Auto-checked call-made checkbox for lead', lead.id);
-
-                        // Trigger the change event to update the reach out data
-                        const changeEvent = new Event('change', { bubbles: true });
-                        callCheckbox.dispatchEvent(changeEvent);
-                        console.log('🔍 CALLBACK AUTO-CHECK: Triggered change event');
-                    } else if (callCheckbox?.checked) {
-                        console.log('✅ CALLBACK AUTO-CHECK: Checkbox already checked for lead', lead.id);
-                    }
-                } else {
-                    console.log('⏳ CALLBACK AUTO-CHECK: No overdue callbacks for lead', lead.id);
-                }
-            } else {
-                console.log('📋 CALLBACK AUTO-CHECK: No callbacks found for lead', lead.id);
-            }
-        }, 200);
-
     }, 100);
+
+    // AUTO-CHECK REMOVED - Now only triggers from "Reach out: CALL" button click
+    console.log('📋 PROFILE OPENED: Auto-check disabled for normal profile open. Use "Reach out: CALL" button to trigger auto-check.');
 
     console.log('🔥 Enhanced Profile: Modal created successfully');
 };
@@ -1125,6 +1207,18 @@ protectedFunctions.openEmailDocumentation = async function(leadId) {
     protectedFunctions.createEmailComposer(lead, subject, allFiles);
 };
 
+// Agent email map
+const AGENT_EMAILS = {
+    'grant':   'Grant@vigagency.com',
+    'carson':  'Carson@vigagency.com',
+    'hunter':  'Hunter@vigagency.com',
+    'maureen': 'Maureen@vigagency.com'
+};
+function getAgentEmail(assignedTo) {
+    if (!assignedTo) return '';
+    return AGENT_EMAILS[assignedTo.toLowerCase()] || '';
+}
+
 // NEW: Create dedicated email composer modal
 protectedFunctions.createEmailComposer = function(lead, subject, attachments) {
     console.log('✉️ Creating email composer for:', lead.name);
@@ -1154,7 +1248,13 @@ protectedFunctions.createEmailComposer = function(lead, subject, attachments) {
     `;
 
     // Broker-focused email body template
-    const emailBody = `Hello,
+    const agentName = lead.assignedTo || 'NULL';
+    const agentEmail = getAgentEmail(lead.assignedTo);
+    const agentLine = `ASSIGNED AGENT: ${agentName}${agentEmail ? ' | ' + agentEmail : ''}`;
+
+    const emailBody = `${agentLine}
+
+Hello,
 
 We are looking to get a quote for the following commercial auto account:
 
@@ -1181,7 +1281,13 @@ Thank you,`;
                 <!-- To Field -->
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; color: #374151;">To:</label>
-                    <input type="email" id="email-to-field" value="Grant@vigagency.com" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                    <input type="email" id="email-to-field" value="amanda_miller@rpsins.com" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+
+                <!-- Agent CC Field -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; color: #374151;">Agent (CC):</label>
+                    <input type="email" id="email-agent-cc-field" value="${getAgentEmail(lead.assignedTo)}" placeholder="agent@vigagency.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                 </div>
 
                 <!-- Subject Field -->
@@ -1694,7 +1800,7 @@ protectedFunctions.updateReachOut = function(leadId, type, checked) {
                 });
 
                 // Mark as complete with green styling
-                markReachOutComplete(leadId, leads[leadIndex].reachOut.completedAt);
+                markReachOutComplete(leadId, leads[leadIndex].reachOut.completedAt, leads[leadIndex]);
 
                 showNotification('Text sent! Reach-out sequence completed.', 'success');
 
@@ -1724,8 +1830,14 @@ protectedFunctions.updateReachOut = function(leadId, type, checked) {
         }
     } else if (type === 'call') {
         if (checked) {
-            // Show popup when call checkbox is checked
-            showCallOutcomePopup(leadId);
+            // Show popup when call checkbox is checked manually (not auto-checked)
+            console.log(`🔥 MANUAL CALL CHECKBOX: About to show popup for lead ${leadId}`);
+            if (typeof showCallOutcomePopup === 'function') {
+                showCallOutcomePopup(leadId);
+                console.log(`✅ MANUAL CALL CHECKBOX: Popup function called successfully`);
+            } else {
+                console.error(`❌ MANUAL CALL CHECKBOX: showCallOutcomePopup function not found!`);
+            }
             return; // Exit early - let popup handle everything
         } else {
             leads[leadIndex].reachOut.callAttempts = Math.max(0, leads[leadIndex].reachOut.callAttempts - 1);
@@ -1791,6 +1903,21 @@ protectedFunctions.updateReachOut = function(leadId, type, checked) {
                 applyReachOutStyling(leadId, true);
             }
         }
+    }
+
+    // CRITICAL FIX: Refresh table after all reach-out updates (except text completion which has its own refresh)
+    if (type !== 'text' || !checked) {
+        console.log(`🔄 CHECKBOX FIX: Refreshing table after ${type} checkbox update (checked=${checked})`);
+        setTimeout(() => {
+            if (typeof refreshLeadsTable === 'function') {
+                refreshLeadsTable();
+            } else if (window.displayLeads) {
+                window.displayLeads();
+            } else if (window.loadLeadsView) {
+                window.loadLeadsView();
+            }
+            console.log('✅ CHECKBOX FIX: Table refresh completed');
+        }, 100);
     }
 };
 
@@ -2004,6 +2131,109 @@ window.handleVoicemailOutcome = function(leadId, leftVoicemail) {
     // Update the sequential to-do display - FORCE UPDATE since we know this is a reach-out stage
     applyReachOutStyling(leadId, true);
     console.log('🔄 Updated TO DO display after voicemail outcome');
+
+    // Show callback reschedule popup after a brief delay
+    setTimeout(() => {
+        showCallbackReschedulePopup(leadId);
+    }, 1000);
+};
+
+// Show callback reschedule popup after unsuccessful call
+function showCallbackReschedulePopup(leadId) {
+    console.log(`📅 Showing callback reschedule popup for lead ${leadId}`);
+
+    // Get lead data for display
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+
+    if (!lead) {
+        console.error('❌ Lead not found for callback reschedule popup');
+        return;
+    }
+
+    // Remove any existing popup
+    const existingPopup = document.getElementById('callback-reschedule-popup');
+    if (existingPopup) {
+        existingPopup.remove();
+    }
+
+    // Create backdrop
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+
+    // Create popup
+    const popup = document.createElement('div');
+    popup.id = 'callback-reschedule-popup';
+    popup.style.cssText = `
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: rgba(0, 0, 0, 0.5) 0px 20px 50px;
+        min-width: 400px;
+        max-width: 500px;
+    `;
+
+    popup.innerHTML = `
+        <div style="text-align: center;">
+            <div style="width: 60px; height: 60px; background: #dbeafe; border-radius: 50%; margin: 0 auto 15px; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-calendar-plus" style="font-size: 24px; color: #3b82f6;"></i>
+            </div>
+            <h3 style="margin: 0 0 10px 0; color: #1f2937;">Schedule Follow-up Call</h3>
+            <p style="margin: 0 0 15px 0; color: #6b7280; font-size: 14px;">
+                Please schedule a callback for <strong>${lead.name}</strong>
+            </p>
+
+            <div style="display: flex; justify-content: center; margin-top: 25px;">
+                <button onclick="handleCallbackRescheduleChoice('${leadId}', true)" style="
+                    background: #10b981;
+                    color: white;
+                    border: none;
+                    padding: 15px 30px;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    width: 200px;
+                ">
+                    <i class="fas fa-calendar-plus"></i> Schedule Callback
+                </button>
+            </div>
+        </div>
+    `;
+
+    // Add to page
+    backdrop.appendChild(popup);
+    document.body.appendChild(backdrop);
+
+    // Prevent closing on backdrop click since callback scheduling is required
+}
+
+// Handle callback reschedule choice
+window.handleCallbackRescheduleChoice = function(leadId, shouldSchedule) {
+    console.log(`📅 Callback scheduling required for lead ${leadId}`);
+
+    // Close popup
+    const popup = document.getElementById('callback-reschedule-popup');
+    if (popup) {
+        popup.parentElement.remove(); // Remove the backdrop which contains the popup
+    }
+
+    // Always show the callback scheduler since it's required
+    setTimeout(() => {
+        showCallbackScheduler(leadId);
+    }, 200);
 };
 
 // Helper function to save reach-out data to server
@@ -2034,72 +2264,563 @@ function saveReachOutToServer(leadId, reachOutData) {
 
 // Function to show call duration popup
 function showCallDurationPopup(leadId) {
-    console.log(`📞 Showing call duration popup for lead: ${leadId}`);
+    console.log(`📞 Starting call timer for lead: ${leadId}`);
 
-    // Remove existing popups
+    // Remove existing popups AND their backdrops
     const existingPopup = document.getElementById('call-outcome-popup');
     if (existingPopup) {
         existingPopup.remove();
     }
 
-    // Create new popup for duration
-    const popup = document.createElement('div');
-    popup.id = 'call-duration-popup';
-    popup.style.cssText = `
+    // Remove popup backdrop to allow page interaction
+    const existingBackdrop = document.getElementById('popup-backdrop');
+    if (existingBackdrop) {
+        existingBackdrop.remove();
+    }
+
+    // Remove any existing timer
+    const existingTimer = document.getElementById('call-timer-widget');
+    if (existingTimer) {
+        clearInterval(window.callTimerInterval);
+        existingTimer.remove();
+    }
+
+    // Create timer widget in top right corner (NO BACKDROP)
+    const timerWidget = document.createElement('div');
+    timerWidget.id = 'call-timer-widget';
+    timerWidget.style.cssText = `
         position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: white;
-        padding: 30px;
-        border-radius: 10px;
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-        z-index: 1000002;
-        min-width: 400px;
+        top: 20px;
+        right: 20px;
+        background: #1f2937;
+        color: white;
+        padding: 15px 20px;
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        z-index: 1000003;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        min-width: 180px;
+        text-align: center;
+        pointer-events: auto;
     `;
 
-    popup.innerHTML = `
-        <div style="text-align: center;">
-            <h3 style="margin-top: 0;">Call Duration</h3>
-            <p style="font-size: 16px; margin: 20px 0;">How long was the call?</p>
-            <div style="margin: 20px 0;">
-                <input type="number" id="duration-minutes" placeholder="0" min="0" max="999"
-                       style="width: 80px; padding: 10px; border: 2px solid #e5e7eb; border-radius: 5px; font-size: 16px; text-align: center;">
-                <span style="font-size: 16px; margin-left: 10px;">minutes</span>
+    timerWidget.innerHTML = `
+        <div style="margin-bottom: 10px;">
+            <div style="font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px;">Call in Progress</div>
+        </div>
+        <div style="font-size: 24px; font-weight: bold; margin: 8px 0; font-variant-numeric: tabular-nums;" id="timer-display">00:00</div>
+        <button onclick="showManualTimeLogPopup('${leadId}')" style="
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            margin-bottom: 8px;
+        " onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">Manual Log Time</button>
+        <button onclick="endCall('${leadId}')" style="
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        " onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">End Call</button>
+    `;
+
+    // Append directly to body (NO backdrop or modal container)
+    document.body.appendChild(timerWidget);
+
+    // Start the timer
+    const startTime = Date.now();
+    window.callTimerStartTime = startTime;
+    window.callTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        const display = document.getElementById('timer-display');
+        if (display) {
+            display.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }, 1000);
+
+    console.log(`🎯 Call timer started - page interaction enabled, timer in corner`);
+}
+
+// Function to show manual time logging popup
+window.showManualTimeLogPopup = function(leadId) {
+    console.log(`⏱️ Opening manual time log popup for lead: ${leadId}`);
+
+    // Permanently remove the call timer widget and clear the timer
+    const timerWidget = document.getElementById('call-timer-widget');
+    if (timerWidget) {
+        timerWidget.remove();
+    }
+
+    // Clear the timer interval
+    if (window.callTimerInterval) {
+        clearInterval(window.callTimerInterval);
+        window.callTimerInterval = null;
+    }
+
+    // Get lead data for display
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    const leadName = lead ? lead.name : `Lead ${leadId}`;
+
+    // Remove any existing popup
+    const existingPopup = document.getElementById('manual-time-log-popup');
+    if (existingPopup) {
+        existingPopup.remove();
+    }
+
+    // Create modal backdrop
+    const modal = document.createElement('div');
+    modal.id = 'manual-time-log-popup';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 10000001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    `;
+
+    modal.innerHTML = `
+        <div style="
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            min-width: 400px;
+            max-width: 500px;
+        ">
+            <h3 style="margin: 0 0 20px 0; color: #1f2937; font-size: 20px; font-weight: 600;">
+                Manual Time Log
+            </h3>
+            <p style="margin: 0 0 20px 0; color: #6b7280; font-size: 14px;">
+                Log call time for: <strong>${leadName}</strong>
+            </p>
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151; font-size: 14px;">
+                    Call Duration (minutes):
+                </label>
+                <input type="number" id="manual-time-input" min="1" max="999"
+                    style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 16px;"
+                    placeholder="Enter minutes" autofocus>
             </div>
-            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-                <button onclick="handleCallDuration('${leadId}', document.getElementById('duration-minutes').value)" style="
-                    background: #10b981;
-                    color: white;
-                    border: none;
-                    padding: 10px 30px;
-                    border-radius: 5px;
-                    font-size: 16px;
-                    cursor: pointer;
-                ">Save</button>
-                <button onclick="cancelCallDuration('${leadId}')" style="
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151; font-size: 14px;">
+                    Notes (optional):
+                </label>
+                <textarea id="manual-time-notes" rows="3"
+                    style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; resize: vertical;"
+                    placeholder="Add any notes about this call..."></textarea>
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeManualTimeLogPopup()" style="
                     background: #6b7280;
                     color: white;
                     border: none;
-                    padding: 10px 30px;
-                    border-radius: 5px;
-                    font-size: 16px;
+                    padding: 10px 20px;
+                    border-radius: 6px;
                     cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
                 ">Cancel</button>
+                <button onclick="saveManualTimeLog('${leadId}')" style="
+                    background: #3b82f6;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
+                ">Log Time</button>
             </div>
         </div>
     `;
 
-    document.body.appendChild(popup);
+    document.body.appendChild(modal);
 
-    // Focus on input field
+    // Focus on the input field
     setTimeout(() => {
-        const input = document.getElementById('duration-minutes');
-        if (input) {
-            input.focus();
-        }
+        const input = document.getElementById('manual-time-input');
+        if (input) input.focus();
     }, 100);
 }
+
+// Function to close manual time log popup
+window.closeManualTimeLogPopup = function() {
+    const popup = document.getElementById('manual-time-log-popup');
+    if (popup) {
+        popup.remove();
+    }
+    // Note: Timer widget is permanently removed when manual logging is chosen
+}
+
+// Function to save manual time log
+window.saveManualTimeLog = function(leadId) {
+    const timeInput = document.getElementById('manual-time-input');
+    const notesInput = document.getElementById('manual-time-notes');
+
+    if (!timeInput) {
+        console.error('❌ Time input field not found');
+        return;
+    }
+
+    const minutes = parseInt(timeInput.value);
+    const notes = notesInput ? notesInput.value.trim() : '';
+
+    if (!minutes || minutes < 1) {
+        alert('Please enter a valid number of minutes (minimum 1).');
+        timeInput.focus();
+        return;
+    }
+
+    console.log(`⏱️ Saving manual time log: ${minutes} minutes for lead ${leadId}`);
+
+    // Update lead data with manual time
+    let leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
+
+    if (leadIndex !== -1) {
+        // Format duration for display
+        const durationText = `${minutes} min${minutes !== 1 ? 's' : ''}`;
+
+        // Create call log entry
+        const callLogEntry = {
+            timestamp: new Date().toISOString(),
+            connected: true, // Manual logging assumes successful connection
+            duration: durationText,
+            notes: notes ? `Manual Entry: ${notes}` : 'Manual Entry - Connected call',
+            leftVoicemail: false,
+            source: 'manual'
+        };
+
+        if (!leads[leadIndex].reachOut) {
+            leads[leadIndex].reachOut = {
+                lastUpdate: new Date().toISOString(),
+                attempts: 1,
+                callAttempts: 1,
+                callsConnected: 1,
+                callMinutes: minutes,
+                voicemailCount: 0,
+                callLogs: [callLogEntry],
+                notes: notes || undefined
+            };
+        } else {
+            // Add to existing call minutes
+            const existingMinutes = leads[leadIndex].reachOut.callMinutes || 0;
+            leads[leadIndex].reachOut.callMinutes = existingMinutes + minutes;
+            leads[leadIndex].reachOut.lastUpdate = new Date().toISOString();
+            leads[leadIndex].reachOut.attempts = (leads[leadIndex].reachOut.attempts || 0) + 1;
+
+            // Update call stats
+            leads[leadIndex].reachOut.callAttempts = (leads[leadIndex].reachOut.callAttempts || 0) + 1;
+            leads[leadIndex].reachOut.callsConnected = (leads[leadIndex].reachOut.callsConnected || 0) + 1;
+
+            // Add to call logs array
+            if (!leads[leadIndex].reachOut.callLogs) {
+                leads[leadIndex].reachOut.callLogs = [];
+            }
+            leads[leadIndex].reachOut.callLogs.push(callLogEntry);
+
+            // Append notes if provided
+            if (notes) {
+                const existingNotes = leads[leadIndex].reachOut.notes || '';
+                leads[leadIndex].reachOut.notes = existingNotes ?
+                    `${existingNotes}\n${new Date().toLocaleString()}: ${notes}` :
+                    `${new Date().toLocaleString()}: ${notes}`;
+            }
+        }
+
+        // Save updated leads
+        localStorage.setItem('insurance_leads', JSON.stringify(leads));
+        console.log(`✅ Logged ${minutes} minutes for lead ${leadId}. Total call time: ${leads[leadIndex].reachOut.callMinutes} minutes`);
+
+        // Save to server
+        const updateData = {
+            reachOut: leads[leadIndex].reachOut
+        };
+
+        fetch(`/api/leads/${leadId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updateData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('✅ Manual time log saved to server successfully');
+                // Refresh data from server to ensure consistency
+                setTimeout(() => {
+                    if (typeof loadLeadsFromServerAndRefresh === 'function') {
+                        loadLeadsFromServerAndRefresh();
+                        console.log('🔄 Data refreshed after manual time log');
+                    }
+                }, 300);
+            } else {
+                console.error('❌ Failed to save manual time log to server:', data.error || 'Unknown error');
+            }
+        })
+        .catch(error => {
+            console.error('❌ Server save error for manual time log:', error.message);
+        });
+
+        // Close popup
+        closeManualTimeLogPopup();
+
+        // Show success message briefly
+        const successMsg = document.createElement('div');
+        successMsg.style.cssText = `
+            position: fixed;
+            top: 100px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            z-index: 10000002;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        `;
+        successMsg.textContent = `✅ Logged ${minutes} minutes successfully`;
+        document.body.appendChild(successMsg);
+
+        setTimeout(() => {
+            if (successMsg.parentNode) {
+                successMsg.remove();
+            }
+            // Show call completed popup after success message disappears
+            showCallCompletedPopup(leadId);
+        }, 3000);
+
+    } else {
+        console.error(`❌ Lead ${leadId} not found for manual time logging`);
+        alert('Error: Lead not found. Please try again.');
+        closeManualTimeLogPopup(); // Close popup
+    }
+}
+
+// Function to end call and show callback scheduling popup
+window.endCall = function(leadId) {
+    console.log(`📞 Ending call for lead: ${leadId}`);
+
+    // Calculate call duration
+    const duration = window.callTimerStartTime ? Math.floor((Date.now() - window.callTimerStartTime) / 1000 / 60) : 0;
+
+    // Clear timer
+    if (window.callTimerInterval) {
+        clearInterval(window.callTimerInterval);
+        window.callTimerInterval = null;
+    }
+
+    // Remove timer widget
+    const timerWidget = document.getElementById('call-timer-widget');
+    if (timerWidget) {
+        timerWidget.remove();
+    }
+
+    // Update lead data with call info (same as original handleCallDuration)
+    let leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
+
+    if (leadIndex !== -1) {
+        if (!leads[leadIndex].reachOut) {
+            leads[leadIndex].reachOut = {
+                emailCount: 0,
+                textCount: 0,
+                callAttempts: 0,
+                callsConnected: 0,
+                voicemailCount: 0,
+                callLogs: []
+            };
+        }
+
+        // Initialize callLogs array if it doesn't exist
+        if (!leads[leadIndex].reachOut.callLogs) {
+            leads[leadIndex].reachOut.callLogs = [];
+        }
+
+        // Increment connected counter
+        leads[leadIndex].reachOut.callsConnected = (leads[leadIndex].reachOut.callsConnected || 0) + 1;
+        leads[leadIndex].reachOut.callAttempts = (leads[leadIndex].reachOut.callAttempts || 0) + 1;
+
+        // Add call log entry
+        leads[leadIndex].reachOut.callLogs.push({
+            timestamp: new Date().toISOString(),
+            duration: duration,
+            type: 'call',
+            notes: `Call duration: ${duration} minutes`,
+            outcome: 'connected'
+        });
+
+        // Save to localStorage
+        localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Update display counters
+        const attemptsDisplay = document.getElementById(`call-attempts-${leadId}`);
+        if (attemptsDisplay) {
+            attemptsDisplay.textContent = leads[leadIndex].reachOut.callAttempts;
+        }
+
+        const connectedDisplay = document.getElementById(`calls-connected-${leadId}`);
+        if (connectedDisplay) {
+            connectedDisplay.textContent = leads[leadIndex].reachOut.callsConnected;
+        }
+
+        // Update checkbox to checked and set called property
+        const checkbox = document.getElementById(`call-made-${leadId}`);
+        if (checkbox) {
+            checkbox.checked = true;
+        }
+
+        // Set called property for reachout logic
+        leads[leadIndex].reachOut.called = true;
+
+        // Save again to ensure called property is saved
+        localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        console.log(`📞 Call completed for lead ${leadId} with duration: ${duration} minutes`);
+
+        // Show the callback scheduling popup
+        showCallCompletedPopup(leadId);
+    }
+};
+
+// Function to show call completed popup
+function showCallCompletedPopup(leadId) {
+    console.log(`✅ Showing call completed popup for lead: ${leadId}`);
+
+    // Remove any existing popups
+    const existingBackdrop = document.getElementById('popup-backdrop');
+    if (existingBackdrop) {
+        existingBackdrop.remove();
+    }
+
+    // Create modal backdrop
+    const modalBackdrop = document.createElement('div');
+    modalBackdrop.id = 'popup-backdrop';
+    modalBackdrop.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000001;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+
+    // Create modal content
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        padding: 30px;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        max-width: 400px;
+        margin: 0 20px;
+    `;
+
+    modalContent.innerHTML = `
+        <div style="margin-bottom: 20px;">
+            <div style="width: 60px; height: 60px; background: #dcfce7; border-radius: 50%; margin: 0 auto 15px; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-calendar-plus" style="font-size: 24px; color: #10b981;"></i>
+            </div>
+            <h3 style="margin: 0 0 10px 0; color: #1f2937; font-size: 20px; font-weight: 600;">Call Completed!</h3>
+            <p style="margin: 0; color: #6b7280; font-size: 16px; line-height: 1.5;">
+                Would you like to schedule the next callback for this lead?
+            </p>
+        </div>
+
+        <div style="display: flex; gap: 12px; justify-content: center;">
+            <button id="schedule-next-callback" onclick="scheduleCallbackFromPopup('${leadId}')" style="
+                background: #10b981;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+                font-size: 14px;
+                min-width: 120px;
+                transition: all 0.2s;
+            ">Schedule Next Call</button>
+            <button id="no-callback-needed" onclick="completeCallWithoutCallback('${leadId}')" style="
+                background: #f3f4f6;
+                color: #374151;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+                font-size: 14px;
+                min-width: 120px;
+                transition: all 0.2s;
+            ">Not Needed</button>
+        </div>
+    `;
+
+    modalBackdrop.appendChild(modalContent);
+    document.body.appendChild(modalBackdrop);
+}
+
+// Function to schedule callback from call completed popup
+window.scheduleCallbackFromPopup = function(leadId) {
+    // Close the call completed popup
+    const backdrop = document.getElementById('popup-backdrop');
+    if (backdrop) {
+        backdrop.remove();
+    }
+
+    // Show callback scheduler (if it exists)
+    if (typeof showCallbackScheduler === 'function') {
+        showCallbackScheduler(leadId);
+    } else {
+        console.error('❌ showCallbackScheduler function not found');
+        alert('Callback scheduling function not available');
+    }
+};
+
+// Function to complete call without callback
+window.completeCallWithoutCallback = function(leadId) {
+    console.log(`✅ Call completed without callback for lead: ${leadId}`);
+
+    // Close the popup
+    const backdrop = document.getElementById('popup-backdrop');
+    if (backdrop) {
+        backdrop.remove();
+    }
+
+    // Show notification
+    if (typeof showNotification === 'function') {
+        showNotification('Call completed successfully', 'success');
+    }
+};
 
 // Function to handle call duration submission
 window.handleCallDuration = function(leadId, duration) {
@@ -2286,6 +3007,16 @@ window.handleCallDuration = function(leadId, duration) {
             backdrop.remove();
         }
 
+        // CRITICAL FIX: Prevent duplicate popups from appearing after call duration save
+        // Remove any existing callback outcome popups that might be triggered
+        setTimeout(() => {
+            const existingCallbackPopup = document.getElementById('callback-outcome-popup');
+            if (existingCallbackPopup) {
+                console.log('🔧 CLEANUP: Removing existing callback outcome popup to prevent duplicates');
+                existingCallbackPopup.remove();
+            }
+        }, 100);
+
         // Update checkbox to checked and set called property
         const checkbox = document.getElementById(`call-made-${leadId}`);
         if (checkbox) {
@@ -2327,7 +3058,7 @@ window.handleCallDuration = function(leadId, duration) {
         });
 
         // Mark reach-out as COMPLETE with green styling
-        markReachOutComplete(leadId, leads[leadIndex].reachOut.completedAt);
+        markReachOutComplete(leadId, leads[leadIndex].reachOut.completedAt, leads[leadIndex]);
 
         // Show green highlight duration popup
         showGreenHighlightDurationPopup(leadId);
@@ -2431,6 +3162,7 @@ function applyReachOutStyling(leadId, hasReachOutTodo) {
                     isCompleted = false;
                 } else if ((lead.reachOut.completedAt || lead.reachOut.reachOutCompletedAt) && hasActuallyCompleted) {
                     const completedTime = lead.reachOut.completedAt || lead.reachOut.reachOutCompletedAt;
+                    console.log(`🟢 COMPLETION BADGE DEBUG: Lead ${leadId} - completedAt: ${lead.reachOut.completedAt}, reachOutCompletedAt: ${lead.reachOut.reachOutCompletedAt}, emailConfirmed: ${lead.reachOut.emailConfirmed}`);
 
                     // NEW: Check if reach-out has expired (older than 2 days) - SAME LOGIC AS getNextAction
                     if (lead.reachOut.reachOutCompletedAt) {
@@ -2460,18 +3192,21 @@ function applyReachOutStyling(leadId, hasReachOutTodo) {
                             isCompleted = false;
                         } else {
                             // COMPLETED REACH-OUT and NOT EXPIRED - Show green completion status
-                            markReachOutComplete(leadId, completedTime);
+                            // FIXED: Only display completion styling, don't trigger popup
+                            displayReachOutComplete(leadId, completedTime, lead);
                             isCompleted = true;
                         }
                     } else {
                         // COMPLETED REACH-OUT but no expiry timestamp to check - Show green completion status
-                        markReachOutComplete(leadId, completedTime);
+                        // FIXED: Only display completion styling, don't trigger popup
+                        displayReachOutComplete(leadId, completedTime, lead);
                         isCompleted = true;
                     }
                 }
 
                 // If not completed (either never completed or expired), show red incomplete styling
                 if (!isCompleted) {
+                    console.log(`🔴 COMPLETION BADGE DEBUG: Lead ${leadId} - NOT showing completion badge. completedAt: ${lead.reachOut.completedAt}, reachOutCompletedAt: ${lead.reachOut.reachOutCompletedAt}, emailConfirmed: ${lead.reachOut.emailConfirmed}, hasActuallyCompleted: ${hasActuallyCompleted}`);
                 // STAGE REQUIRES REACH-OUT AND NOT COMPLETED - Show red styling
                 todoDiv.style.display = 'block'; // Show TO DO text
 
@@ -2573,8 +3308,85 @@ function removeGreenHighlightFromTableRow(leadId) {
     }
 }
 
-// Function to mark reach-out as complete
-function markReachOutComplete(leadId, completedAt) {
+// Function to rescan all rows and remove green highlighting from leads with "Reach out: CALL" text
+function rescanGreenHighlightingAfterCallbacks() {
+    console.log('🔄 GREEN RESCAN: Starting comprehensive green highlight rescan after callback updates');
+
+    const tableBody = document.getElementById('leadsTableBody');
+    if (!tableBody) {
+        console.log('❌ GREEN RESCAN: leadsTableBody not found');
+        return;
+    }
+
+    const rows = tableBody.querySelectorAll('tr');
+    let rescannedCount = 0;
+    let removedCount = 0;
+
+    console.log(`🔄 GREEN RESCAN: Found ${rows.length} rows to scan`);
+
+    rows.forEach((row, index) => {
+        const checkbox = row.querySelector('.lead-checkbox');
+        if (!checkbox) {
+            return;
+        }
+
+        const leadId = checkbox.value;
+        const cells = row.querySelectorAll('td');
+
+        if (cells.length <= 6) {
+            return;
+        }
+
+        const todoCell = cells[7]; // TODO column
+        const todoText = todoCell.textContent || '';
+
+        rescannedCount++;
+
+        // Check if row has green highlighting
+        const hasGreenHighlight =
+            row.classList.contains('reach-out-complete') ||
+            row.classList.contains('force-green-highlight') ||
+            (row.style.backgroundColor && (
+                row.style.backgroundColor.includes('16, 185, 129') ||
+                row.style.backgroundColor.includes('rgb(16, 185, 129)') ||
+                row.style.backgroundColor.includes('rgba(16, 185, 129')
+            ));
+
+        // If row has "Reach out: CALL" text AND green highlighting, remove the green highlight
+        if (todoText.includes('Reach out: CALL') && hasGreenHighlight) {
+            console.log(`🔴 GREEN RESCAN: Lead ${leadId} has "Reach out: CALL" but green highlight - REMOVING`);
+
+            // Remove green highlighting
+            row.classList.remove('reach-out-complete', 'force-green-highlight');
+
+            if (row.style.backgroundColor && (
+                row.style.backgroundColor.includes('16, 185, 129') ||
+                row.style.backgroundColor.includes('rgb(16, 185, 129)') ||
+                row.style.backgroundColor.includes('rgba(16, 185, 129'))) {
+
+                row.style.removeProperty('background-color');
+                row.style.removeProperty('background');
+                row.style.removeProperty('border-left');
+                row.style.removeProperty('border-right');
+
+                // Clear style attribute if it's now empty
+                const remainingStyle = row.getAttribute('style');
+                if (!remainingStyle || remainingStyle.trim() === '') {
+                    row.removeAttribute('style');
+                }
+            }
+
+            removedCount++;
+        }
+    });
+
+    console.log(`✅ GREEN RESCAN: Completed rescan - checked ${rescannedCount} rows, removed green from ${removedCount} leads`);
+}
+
+// Function to display reach-out completion styling (for profile loading - no popup)
+function displayReachOutComplete(leadId, completedAt, lead) {
+    console.log(`🎨 DISPLAY ONLY: Showing reach-out completion styling for lead ${leadId} (no popup)`);
+
     // Update the TO DO text to show COMPLETED
     const todoDiv = document.getElementById(`reach-out-todo-${leadId}`);
     if (todoDiv) {
@@ -2596,6 +3408,7 @@ function markReachOutComplete(leadId, completedAt) {
     // Show completion timestamp
     const completionDiv = document.getElementById(`reach-out-completion-${leadId}`);
     const timestampSpan = document.getElementById(`completion-timestamp-${leadId}`);
+    const countdownSpan = document.getElementById(`highlight-countdown-${leadId}`);
 
     if (completionDiv && timestampSpan) {
         const completedDate = new Date(completedAt);
@@ -2606,6 +3419,105 @@ function markReachOutComplete(leadId, completedAt) {
             minute: '2-digit',
             hour12: true
         });
+
+        // Add highlight duration countdown
+        if (countdownSpan && lead) {
+            const highlightUntil = lead.greenHighlightUntil || lead.reachOut?.greenHighlightUntil;
+            if (highlightUntil) {
+                const highlightExpiry = new Date(highlightUntil);
+                const now = new Date();
+                const timeLeft = highlightExpiry - now;
+
+                if (timeLeft > 0) {
+                    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+
+                    let countdownText = 'Highlight expires in: ';
+                    if (days > 0) {
+                        countdownText += `${days}d ${hours}h`;
+                    } else if (hours > 0) {
+                        countdownText += `${hours}h ${minutes}m`;
+                    } else {
+                        countdownText += `${minutes}m`;
+                    }
+                    countdownSpan.textContent = countdownText;
+                } else {
+                    countdownSpan.textContent = 'Highlight expired';
+                }
+            }
+        }
+
+        completionDiv.style.display = 'block';
+    }
+
+    console.log(`🎨 DISPLAY COMPLETE: Styled reach-out completion for lead ${leadId} at ${completedAt} (no popup triggered)`);
+}
+
+// Function to mark reach-out as complete
+function markReachOutComplete(leadId, completedAt, lead) {
+    // Update the TO DO text to show COMPLETED
+    const todoDiv = document.getElementById(`reach-out-todo-${leadId}`);
+    if (todoDiv) {
+        todoDiv.innerHTML = `<span style="color: #10b981; font-weight: bold; font-size: 18px;">COMPLETED</span>`;
+    }
+
+    // Change "Reach Out" title to green
+    const headerTitle = document.getElementById(`reach-out-header-title-${leadId}`);
+    if (headerTitle) {
+        headerTitle.innerHTML = '<i class="fas fa-tasks"></i> <span style="color: #10b981;">Reach Out</span>';
+    }
+
+    // Change separator line to green
+    const separator = document.getElementById(`reach-out-separator-${leadId}`);
+    if (separator) {
+        separator.style.borderBottom = '2px solid #10b981';
+    }
+
+    // Show completion timestamp
+    const completionDiv = document.getElementById(`reach-out-completion-${leadId}`);
+    const timestampSpan = document.getElementById(`completion-timestamp-${leadId}`);
+    const countdownSpan = document.getElementById(`highlight-countdown-${leadId}`);
+
+    if (completionDiv && timestampSpan) {
+        const completedDate = new Date(completedAt);
+        timestampSpan.textContent = completedDate.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        });
+
+        // Add highlight duration countdown
+        if (countdownSpan && lead) {
+            console.log(`🎯 COUNTDOWN DEBUG: Lead ${leadId} - greenHighlightUntil: ${lead.greenHighlightUntil}, greenHighlightDays: ${lead.greenHighlightDays}, reachOut.greenHighlightUntil: ${lead.reachOut?.greenHighlightUntil}`);
+            const highlightUntil = lead.greenHighlightUntil || lead.reachOut?.greenHighlightUntil;
+            if (highlightUntil) {
+                const highlightExpiry = new Date(highlightUntil);
+                const now = new Date();
+                const timeLeft = highlightExpiry - now;
+
+                if (timeLeft > 0) {
+                    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+
+                    let countdownText = 'Highlight expires in: ';
+                    if (days > 0) {
+                        countdownText += `${days}d ${hours}h`;
+                    } else if (hours > 0) {
+                        countdownText += `${hours}h ${minutes}m`;
+                    } else {
+                        countdownText += `${minutes}m`;
+                    }
+                    countdownSpan.textContent = countdownText;
+                } else {
+                    countdownSpan.textContent = 'Highlight expired';
+                }
+            }
+        }
+
         completionDiv.style.display = 'block';
     }
 
@@ -2613,10 +3525,10 @@ function markReachOutComplete(leadId, completedAt) {
 
     // Complete any existing callbacks for this lead since the call was successful
     console.log('✅ CALLBACK COMPLETION: Completing callbacks after successful reach-out for lead', leadId);
-    if (typeof window.completeCallback === 'function') {
-        window.completeCallback(leadId, true);
+    if (typeof completeAllCallbacksForLead === 'function') {
+        completeAllCallbacksForLead(leadId);
     } else {
-        console.log('⚠️  CALLBACK COMPLETION: completeCallback function not available');
+        console.log('⚠️  CALLBACK COMPLETION: completeAllCallbacksForLead function not available');
     }
 
     // Show next callback scheduling popup
@@ -2674,29 +3586,32 @@ protectedFunctions.showCallLogs = function(leadId) {
     let lead = allLeads.find(l => normalizeId(l.id) === targetId);
     console.log(`🔍 LOOKUP RESULT: Looking for "${targetId}", found:`, lead ? `${lead.name} (${lead.id})` : 'NOT FOUND');
 
-    // If not found in localStorage, try to fetch from server
-    if (!lead) {
-        console.log(`🌐 Lead not found in localStorage, attempting server fetch for ${leadId}...`);
+    // ALWAYS fetch fresh data from server first to ensure we have the latest call logs
+    console.log(`🌐 Fetching fresh call log data from server for ${leadId}...`);
 
-        // Try to fetch from the API
-        fetch(`/api/leads/${leadId}`)
-            .then(response => {
-                if (response.ok) {
-                    return response.json();
-                }
-                throw new Error(`HTTP ${response.status}`);
-            })
-            .then(data => {
-                console.log(`✅ Server fetch successful for lead ${leadId}:`, data.name);
-                // Recreate the modal with server data
-                protectedFunctions.showCallLogsWithData(data);
-            })
-            .catch(error => {
-                console.log(`❌ Server fetch failed for lead ${leadId}:`, error.message);
+    fetch(`/api/leads/${leadId}`)
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            }
+            throw new Error(`HTTP ${response.status}`);
+        })
+        .then(data => {
+            console.log(`✅ Server fetch successful for lead ${leadId}:`, data.name);
+            // Use fresh server data which includes saved manual call logs
+            protectedFunctions.showCallLogsWithData(data);
+        })
+        .catch(error => {
+            console.log(`❌ Server fetch failed for lead ${leadId}:`, error.message);
+            // Fall back to localStorage data if server fails
+            if (lead) {
+                console.log(`🔄 Using localStorage data as fallback for ${leadId}`);
+                protectedFunctions.showCallLogsWithData(lead);
+            } else {
                 alert(`Lead not found in local storage or server! ID: ${leadId}`);
-            });
-        return; // Exit early, server fetch will handle the modal
-    }
+            }
+        });
+    return; // Exit early, server fetch will handle the modal
 
     // Create modal for call logs
     const modal = document.createElement('div');
@@ -2847,7 +3762,7 @@ protectedFunctions.showCallLogsWithData = function(lead) {
         display: flex;
         justify-content: center;
         align-items: center;
-        z-index: 9999;
+        z-index: 10000003;
     `;
 
     const callLogs = lead.reachOut?.callLogs || [];
@@ -2856,27 +3771,51 @@ protectedFunctions.showCallLogsWithData = function(lead) {
         <div style="background: white; border-radius: 8px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);">
             <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2 style="margin: 0; color: #1f2937;"><i class="fas fa-phone-alt"></i> Call Logs - ${lead.name || 'Unknown'} (Server Data)</h2>
+                    <h2 style="margin: 0; color: #1f2937;"><i class="fas fa-phone-alt"></i> Call Logs - ${lead.name || 'Unknown'}</h2>
                     <button onclick="this.closest('.call-logs-modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">&times;</button>
                 </div>
             </div>
             <div style="padding: 20px;">
                 ${callLogs.length > 0 ? `
+                    <!-- Statistics Boxes -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <div style="text-align: center; background: #f3f4f6; padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 24px; font-weight: bold; color: #10b981;">${callLogs.filter(log => log.connected).length}</div>
+                            <div style="font-size: 14px; color: #6b7280;">Connected</div>
+                        </div>
+                        <div style="text-align: center; background: #f3f4f6; padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">${callLogs.filter(log => !log.connected).length}</div>
+                            <div style="font-size: 14px; color: #6b7280;">Attempted</div>
+                        </div>
+                        <div style="text-align: center; background: #f3f4f6; padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 24px; font-weight: bold; color: #8b5cf6;" id="avg-duration-display">0:00</div>
+                            <div style="font-size: 14px; color: #6b7280;">Avg Duration</div>
+                        </div>
+                    </div>
+
+                    <!-- Call Logs -->
                     <div style="space-y: 12px;">
-                        ${callLogs.map(log => `
+                        ${callLogs.map((log, index) => `
                             <div style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <span style="font-weight: 600; color: ${log.connected ? '#10b981' : '#f59e0b'};">
-                                        ${log.connected ? '✅ Connected' : '📞 Attempted'}
-                                    </span>
-                                    <span style="color: #6b7280; font-size: 14px;">
-                                        ${log.timestamp ? new Date(log.timestamp).toLocaleString() : 'No timestamp'}
-                                    </span>
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <span style="font-weight: 600; color: ${log.connected ? '#10b981' : '#f59e0b'};">
+                                            ${log.connected ? 'Connected' : 'Attempted'}
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <span style="color: #6b7280; font-size: 14px;">
+                                            ${log.timestamp ? new Date(log.timestamp).toLocaleString() : 'No timestamp'}
+                                        </span>
+                                        <button onclick="deleteIndividualCallLog('${lead.id}', ${index})" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px; border-radius: 4px;" title="Delete this call log">
+                                            <i class="fas fa-trash" style="font-size: 14px;"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div style="color: #374151; margin-bottom: 4px;">
                                     <strong>Duration:</strong> ${log.duration || 'Not recorded'}
                                 </div>
-                                ${log.leftVoicemail ? '<div style="color: #f59e0b; font-size: 14px;">📧 Left Voicemail</div>' : ''}
+                                ${log.leftVoicemail ? '<div style="color: #f59e0b; font-size: 14px;">Left Voicemail</div>' : ''}
                                 ${log.notes ? `<div style="color: #6b7280; font-size: 14px; font-style: italic;">${log.notes}</div>` : ''}
                             </div>
                         `).join('')}
@@ -2898,6 +3837,158 @@ protectedFunctions.showCallLogsWithData = function(lead) {
 
     modal.className = 'call-logs-modal';
     document.body.appendChild(modal);
+
+    // Calculate and display average duration
+    setTimeout(() => {
+        const avgDisplay = document.getElementById('avg-duration-display');
+        if (avgDisplay && callLogs.length > 0) {
+            let totalMinutes = 0;
+            let connectedCalls = 0;
+
+            callLogs.forEach(log => {
+                if (log.connected && log.duration) {
+                    const durationStr = log.duration;
+                    let minutes = 0;
+                    let seconds = 0;
+
+                    if (durationStr.includes('min')) {
+                        const minMatch = durationStr.match(/(\d+)\s*min/);
+                        const secMatch = durationStr.match(/(\d+)\s*sec/);
+                        if (minMatch) minutes = parseInt(minMatch[1]);
+                        if (secMatch) seconds = parseInt(secMatch[1]);
+                    } else if (durationStr.includes(':')) {
+                        const parts = durationStr.split(':');
+                        minutes = parseInt(parts[0]) || 0;
+                        seconds = parseInt(parts[1]) || 0;
+                    }
+
+                    if (minutes > 0 || seconds > 0) {
+                        totalMinutes += minutes + (seconds / 60);
+                        connectedCalls++;
+                    }
+                }
+            });
+
+            if (connectedCalls === 0) {
+                avgDisplay.textContent = '0:00';
+            } else {
+                const avgMinutes = totalMinutes / connectedCalls;
+                const minutes = Math.floor(avgMinutes);
+                const seconds = Math.round((avgMinutes - minutes) * 60);
+                avgDisplay.textContent = minutes + ':' + seconds.toString().padStart(2, '0');
+            }
+        }
+    }, 100);
+};
+
+// Function to delete an individual call log entry
+window.deleteIndividualCallLog = function(leadId, logIndex) {
+    if (!confirm('Are you sure you want to delete this call log entry? This action cannot be undone.')) {
+        return;
+    }
+
+    console.log(`🗑️ Deleting call log entry ${logIndex} for lead: ${leadId}`);
+
+    // Get leads from localStorage
+    let leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
+
+    if (leadIndex !== -1 && leads[leadIndex].reachOut && leads[leadIndex].reachOut.callLogs) {
+        const callLogs = leads[leadIndex].reachOut.callLogs;
+
+        if (logIndex >= 0 && logIndex < callLogs.length) {
+            const logToDelete = callLogs[logIndex];
+
+            // Remove the specific call log entry
+            callLogs.splice(logIndex, 1);
+
+            // Recalculate statistics based on remaining logs
+            const connectedCalls = callLogs.filter(log => log.connected).length;
+            const attemptedCalls = callLogs.filter(log => !log.connected).length;
+            const voicemailCalls = callLogs.filter(log => log.leftVoicemail).length;
+
+            // Calculate total minutes from remaining logs
+            let totalMinutes = 0;
+            callLogs.forEach(log => {
+                if (log.connected && log.duration) {
+                    const durationStr = log.duration;
+                    let minutes = 0;
+                    let seconds = 0;
+
+                    if (durationStr.includes('min')) {
+                        const minMatch = durationStr.match(/(\d+)\s*min/);
+                        const secMatch = durationStr.match(/(\d+)\s*sec/);
+                        if (minMatch) minutes = parseInt(minMatch[1]);
+                        if (secMatch) seconds = parseInt(secMatch[1]);
+                    } else if (durationStr.includes(':')) {
+                        const parts = durationStr.split(':');
+                        minutes = parseInt(parts[0]) || 0;
+                        seconds = parseInt(parts[1]) || 0;
+                    }
+
+                    totalMinutes += minutes + (seconds / 60);
+                }
+            });
+
+            // Update reachOut statistics
+            leads[leadIndex].reachOut.callLogs = callLogs;
+            leads[leadIndex].reachOut.callAttempts = connectedCalls + attemptedCalls;
+            leads[leadIndex].reachOut.callsConnected = connectedCalls;
+            leads[leadIndex].reachOut.callMinutes = Math.round(totalMinutes);
+            leads[leadIndex].reachOut.voicemailCount = voicemailCalls;
+            leads[leadIndex].reachOut.lastUpdate = new Date().toISOString();
+
+            // Save to localStorage
+            localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+            // Save to server
+            const updateData = {
+                reachOut: leads[leadIndex].reachOut
+            };
+
+            fetch(`/api/leads/${leadId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('✅ Call log entry deleted from server successfully');
+                    // Refresh the modal with updated data
+                    setTimeout(() => {
+                        if (typeof loadLeadsFromServerAndRefresh === 'function') {
+                            loadLeadsFromServerAndRefresh();
+                            console.log('🔄 Data refreshed after deleting call log entry');
+                        }
+                        // Refresh the call logs modal
+                        const modal = document.querySelector('.call-logs-modal');
+                        if (modal) {
+                            modal.remove();
+                            // Reopen the modal with fresh data
+                            setTimeout(() => protectedFunctions.showCallLogs(leadId), 100);
+                        }
+                    }, 300);
+                } else {
+                    console.error('❌ Failed to delete call log entry from server:', data.error || 'Unknown error');
+                    alert('Failed to delete call log entry from server. Please try again.');
+                }
+            })
+            .catch(error => {
+                console.error('❌ Server error while deleting call log entry:', error.message);
+                alert('Server error while deleting call log entry. Please try again.');
+            });
+
+        } else {
+            console.error(`❌ Invalid log index ${logIndex} for lead ${leadId}`);
+            alert('Invalid call log entry. Please refresh and try again.');
+        }
+    } else {
+        console.error(`❌ Lead ${leadId} not found or has no call logs`);
+        alert('Lead not found or has no call logs. Please refresh the page and try again.');
+    }
 };
 
 // Function to show call status modal
@@ -3679,28 +4770,14 @@ window.showCallScheduledPopup = function(leadId) {
 
     modalContent.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 15px;">
-            <h2 style="margin: 0; color: #1f2937;"><i class="fas fa-calendar-check" style="color: #3b82f6;"></i> Call Scheduled?</h2>
+            <h2 style="margin: 0; color: #1f2937;"><i class="fas fa-calendar-check" style="color: #3b82f6;"></i> Schedule Callback</h2>
             <button onclick="this.closest('.call-scheduled-modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">×</button>
         </div>
 
-        <div style="text-align: center; margin-bottom: 25px;">
-            <div style="font-size: 18px; font-weight: 600; color: #1f2937; margin-bottom: 15px;">Was a call scheduled with this lead?</div>
-        </div>
 
         <!-- Initial Response Options -->
-        <div id="initial-options" style="display: flex; gap: 15px; justify-content: center; margin-bottom: 20px;">
-            <button onclick="handleCallScheduled('${leadId}', true)" style="
-                background: #10b981;
-                color: white;
-                border: none;
-                padding: 15px 25px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-weight: 600;
-                font-size: 16px;
-                min-width: 120px;
-                transition: all 0.2s;
-            " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+        <div id="initial-options" style="display: none; gap: 15px; justify-content: center; margin-bottom: 20px;">
+            <button onclick="handleCallScheduled('${leadId}', true)" style="background: rgb(16, 185, 129); color: white; border: none; padding: 15px 25px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 16px; min-width: 120px; transition: 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
                 <i class="fas fa-check"></i> Yes
             </button>
             <button onclick="handleCallScheduled('${leadId}', false)" style="
@@ -3720,17 +4797,22 @@ window.showCallScheduledPopup = function(leadId) {
         </div>
 
         <!-- Date Selector (Initially Hidden) -->
-        <div id="date-selector" style="display: none; text-align: center; margin-top: 20px;">
+        <div id="date-selector" style="display: block; text-align: center; margin-top: 20px;">
             <div style="margin-bottom: 15px;">
                 <label style="font-weight: 600; font-size: 16px; display: block; margin-bottom: 10px;">Select Call Date & Time:</label>
                 <div style="display: flex; gap: 15px; justify-content: center; align-items: center;">
                     <div>
                         <label style="font-weight: 500; font-size: 14px; display: block; margin-bottom: 5px;">Date:</label>
-                        <input type="date" id="call-date-${leadId}" min="${new Date().toISOString().split('T')[0]}" style="padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        <input type="date" id="call-date-${leadId}" min="${new Date().toISOString().split('T')[0]}" value="${new Date().toISOString().split('T')[0]}" style="padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                     </div>
                     <div>
                         <label style="font-weight: 500; font-size: 14px; display: block; margin-bottom: 5px;">Time:</label>
-                        <input type="time" id="call-time-${leadId}" value="10:00" style="padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        <input type="time" id="call-time-${leadId}" value="${(() => {
+                            const now = new Date();
+                            const hours = now.getHours().toString().padStart(2, '0');
+                            const minutes = now.getMinutes().toString().padStart(2, '0');
+                            return hours + ':' + minutes;
+                        })()}" style="padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                     </div>
                 </div>
             </div>
@@ -3773,19 +4855,7 @@ window.handleCallScheduled = function(leadId, isScheduled) {
             initialOptions.style.display = 'none';
             dateSelector.style.display = 'block';
 
-            // Set default date to tomorrow
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const dateInput = document.getElementById(`call-date-${leadId}`);
-            if (dateInput) {
-                dateInput.value = tomorrow.toISOString().split('T')[0];
-            }
-
-            // Set default time to 10:00 AM
-            const timeInput = document.getElementById(`call-time-${leadId}`);
-            if (timeInput) {
-                timeInput.value = '10:00';
-            }
+            // Date and time are now set via HTML template to current date/time
         }
     } else {
         // No call scheduled - reset reach-out to uncompleted state and uncheck the call checkbox
@@ -3853,14 +4923,78 @@ window.confirmCallScheduled = function(leadId) {
         return;
     }
 
-    console.log(`📅 Call scheduled for ${selectedDate} at ${selectedTime} for lead ${leadId}`);
+    console.log(`📅 Scheduling callback for ${selectedDate} at ${selectedTime} for lead ${leadId}`);
 
-    // Calculate days until the scheduled date for green highlighting
-    const scheduledDate = new Date(selectedDate);
-    const today = new Date();
-    const daysDiff = Math.ceil((scheduledDate - today) / (1000 * 60 * 60 * 24));
+    // Create callback date with proper timezone
+    const callbackDateTime = new Date(`${selectedDate}T${selectedTime}:00`);
 
-    // Set green highlight until the scheduled date
+    // Save callback using the same system as normal callback scheduler
+    const callbacksKey = 'scheduled_callbacks';
+    const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+
+    if (!callbacks[leadId]) {
+        callbacks[leadId] = [];
+    }
+
+    // Remove any existing callbacks for this lead (replace with new one)
+    callbacks[leadId] = [];
+
+    // Create new callback
+    const newCallback = {
+        id: Date.now().toString(),
+        dateTime: callbackDateTime.toISOString(),
+        notes: `Scheduled call for ${selectedDate} at ${selectedTime}`,
+        completed: false,
+        createdAt: new Date().toISOString()
+    };
+
+    callbacks[leadId].push(newCallback);
+    localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
+    if (window.CallbackNotifications && window.CallbackNotifications.refresh) window.CallbackNotifications.refresh();
+
+    console.log(`📅 Callback scheduled and saved to localStorage:`, newCallback);
+
+    // Save callback to server using proper API
+    // Use same API as working callback scheduler
+    const callbackUrl = '/api/callbacks';
+
+    const saveCallbackToServer = async () => {
+        try {
+            const response = await fetch(callbackUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    callback_id: newCallback.id.toString(),
+                    lead_id: leadId,
+                    date_time: newCallback.dateTime,
+                    notes: newCallback.notes
+                })
+            });
+
+            if (response.ok) {
+                console.log('✅ Callback saved to server');
+                return true;
+            } else {
+                console.log(`❌ Server callback save failed: ${response.status}`);
+                return false;
+            }
+        } catch (error) {
+            console.log('❌ Error saving callback to server:', error.message);
+            return false;
+        }
+    };
+
+    saveCallbackToServer();
+
+    // Refresh callback display in any open profile
+    setTimeout(() => {
+        if (typeof displayScheduledCallbacks === 'function') {
+            displayScheduledCallbacks(leadId);
+            console.log('🔄 CALLBACK DISPLAY: Refreshed after scheduling callback');
+        }
+    }, 100);
+
+    // Update leads data for reach-out tracking
     const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
     const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
 
@@ -3869,53 +5003,39 @@ window.confirmCallScheduled = function(leadId) {
             leads[leadIndex].reachOut = {};
         }
 
-        // Initialize reachOut with proper structure (matching email confirmation)
-        if (!leads[leadIndex].reachOut.emailCount) leads[leadIndex].reachOut.emailCount = 0;
-        if (!leads[leadIndex].reachOut.textCount) leads[leadIndex].reachOut.textCount = 0;
-        if (!leads[leadIndex].reachOut.callAttempts) leads[leadIndex].reachOut.callAttempts = 0;
-        if (!leads[leadIndex].reachOut.callsConnected) leads[leadIndex].reachOut.callsConnected = 0;
-        if (!leads[leadIndex].reachOut.voicemailCount) leads[leadIndex].reachOut.voicemailCount = 0;
+        // Initialize reachOut with proper structure
+        if (typeof leads[leadIndex].reachOut.emailCount !== 'number') leads[leadIndex].reachOut.emailCount = 0;
+        if (typeof leads[leadIndex].reachOut.textCount !== 'number') leads[leadIndex].reachOut.textCount = 0;
+        if (typeof leads[leadIndex].reachOut.callAttempts !== 'number') leads[leadIndex].reachOut.callAttempts = 0;
+        if (typeof leads[leadIndex].reachOut.callsConnected !== 'number') leads[leadIndex].reachOut.callsConnected = 0;
+        if (typeof leads[leadIndex].reachOut.voicemailCount !== 'number') leads[leadIndex].reachOut.voicemailCount = 0;
         if (!leads[leadIndex].reachOut.callLogs) leads[leadIndex].reachOut.callLogs = [];
 
         // Add 1 connected call (since call was scheduled)
         leads[leadIndex].reachOut.callsConnected = leads[leadIndex].reachOut.callsConnected + 1;
         leads[leadIndex].reachOut.callAttempts = leads[leadIndex].reachOut.callAttempts + 1;
 
-        // Add call log entry with time
+        // Add call log entry
         const callLog = {
             timestamp: new Date().toISOString(),
             connected: true,
             duration: '5 min',
             leftVoicemail: false,
-            notes: `Call scheduled for ${selectedDate} at ${selectedTime} - Lead agreed to scheduled call`
+            notes: `Call scheduled for ${selectedDate} at ${selectedTime}`
         };
         leads[leadIndex].reachOut.callLogs.push(callLog);
 
-        // Mark reach-out as COMPLETE (matching email confirmation)
+        // Mark reach-out as COMPLETE
         leads[leadIndex].reachOut.completedAt = new Date().toISOString();
-        leads[leadIndex].reachOut.called = true;
-
-        // Set green highlight until scheduled call time (Eastern Time)
-        // Simple approach: treat the input as if it's in the user's current timezone
-        // Since you're in Eastern Time, this should work correctly
-        const [hours, minutes] = selectedTime.split(':');
-        const highlightUntil = new Date(selectedDate + 'T' + selectedTime + ':00');
-
-        console.log(`🕐 TIMEZONE DEBUG: Selected time: ${selectedDate} ${selectedTime}`);
-        console.log(`🕐 TIMEZONE DEBUG: Parsed highlightUntil: ${highlightUntil.toISOString()}`);
-        console.log(`🕐 TIMEZONE DEBUG: Local time string: ${highlightUntil.toString()}`);
-
-        leads[leadIndex].reachOut.greenHighlightUntil = highlightUntil.toISOString();
-        leads[leadIndex].reachOut.greenHighlightDays = daysDiff;
+        leads[leadIndex].reachOut.reachOutCompletedAt = new Date().toISOString();
         leads[leadIndex].reachOut.callScheduled = true;
         leads[leadIndex].reachOut.scheduledCallDate = selectedDate;
         leads[leadIndex].reachOut.scheduledCallTime = selectedTime;
         leads[leadIndex].reachOut.scheduledCallDateTime = `${selectedDate} ${selectedTime}`;
-        leads[leadIndex].reachOut.reachOutCompletedAt = new Date().toISOString();
 
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
 
-        // CRITICAL: Save to server for persistence (matching email confirmation approach)
+        // Save reach-out data to server
         const updateData = {
             reachOut: leads[leadIndex].reachOut
         };
@@ -3927,18 +5047,7 @@ window.confirmCallScheduled = function(leadId) {
         }).then(response => response.json())
         .then(data => {
             if (data.success) {
-                console.log('✅ Call scheduled reach-out data saved to server successfully');
-
-                // Force immediate profile refresh after server save
-                setTimeout(() => {
-                    console.log('🔄 FORCE REFRESH after server save...');
-                    const finalLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-                    const finalLead = finalLeads.find(l => String(l.id) === String(leadId));
-                    if (finalLead && window.createEnhancedProfile) {
-                        console.log('📊 Final lead reach-out data:', finalLead.reachOut);
-                        window.createEnhancedProfile(finalLead);
-                    }
-                }, 200);
+                console.log('✅ Reach-out completion saved to server');
             } else {
                 console.error('❌ Server reach-out update failed:', data.error);
             }
@@ -3948,20 +5057,17 @@ window.confirmCallScheduled = function(leadId) {
         });
 
         console.log(`✅ Call scheduled: connected=${leads[leadIndex].reachOut.callsConnected}`);
-        console.log(`✅ Call scheduled for ${selectedDate} at ${selectedTime}`);
-        console.log(`✅ Green highlight set until ${selectedDate} (${daysDiff} days) for scheduled call`);
+        console.log(`✅ Callback scheduled for ${selectedDate} at ${selectedTime}`);
         console.log(`✅ Reach-out marked as COMPLETE with timestamp: ${leads[leadIndex].reachOut.completedAt}`);
     }
 
-    // Close popup (skip email confirmation since call is scheduled)
+    // Close popup
     document.querySelector('.call-scheduled-modal').remove();
 
-    // Refresh the table to show green highlighting
-    if (window.displayLeads) {
-        setTimeout(() => window.displayLeads(), 100);
-    }
+    // Show notification
+    showNotification(`Callback scheduled for ${selectedDate} at ${selectedTime}`, 'success');
 
-    // Refresh the lead profile if it's open to update reach-out section
+    // Refresh the lead profile if it's open
     console.log('🔄 Checking for open profile to refresh...');
     const currentProfile = document.querySelector('.lead-profile-modal');
     if (currentProfile && currentProfile.style.display !== 'none') {
@@ -3970,11 +5076,12 @@ window.confirmCallScheduled = function(leadId) {
         if (String(profileLeadId) === String(leadId)) {
             console.log('✅ Profile matches target lead, refreshing...');
             setTimeout(() => {
-                if (window.showLeadProfile) {
-                    console.log('🔄 Calling showLeadProfile to refresh...');
-                    window.showLeadProfile(leadId);
-                } else {
-                    console.log('❌ showLeadProfile not available');
+                const updatedLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+                const updatedLead = updatedLeads.find(l => String(l.id) === String(leadId));
+                if (updatedLead && window.createEnhancedProfile) {
+                    console.log('🔄 FORCE REFRESH: Creating new profile with updated data...');
+                    console.log(`📊 Updated lead data:`, updatedLead);
+                    window.createEnhancedProfile(updatedLead);
                 }
             }, 300);
         }
@@ -3982,16 +5089,10 @@ window.confirmCallScheduled = function(leadId) {
         console.log('❌ No profile modal found or not visible');
     }
 
-    // ALSO try alternative refresh method
+    // Also refresh the leads table to show any changes
     setTimeout(() => {
-        const updatedLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-        const updatedLead = updatedLeads.find(l => String(l.id) === String(leadId));
-        if (updatedLead) {
-            console.log('🔄 FORCE REFRESH: Creating new profile with updated data...');
-            console.log(`📊 Updated lead reach-out data:`, updatedLead.reachOut);
-            if (window.createEnhancedProfile) {
-                window.createEnhancedProfile(updatedLead);
-            }
+        if (window.displayLeads) {
+            window.displayLeads();
         }
     }, 500);
 };
@@ -4041,7 +5142,7 @@ window.showEmailConfirmationPopup = function(leadId) {
 
         <div style="text-align: center; margin-bottom: 25px;">
             <div style="font-size: 18px; font-weight: 600; color: #1f2937; margin-bottom: 15px;">Did the lead confirm they received your email?</div>
-            <div style="font-size: 14px; color: #6b7280;">This affects how long the lead will be highlighted green</div>
+            <div style="font-size: 14px; color: #6b7280;">This will schedule your next callback timing</div>
         </div>
 
         <!-- Response Options -->
@@ -4059,7 +5160,7 @@ window.showEmailConfirmationPopup = function(leadId) {
                 transition: all 0.2s;
             " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
                 <i class="fas fa-check"></i> Yes
-                <div style="font-size: 12px; margin-top: 4px;">7 days green</div>
+                <div style="font-size: 12px; margin-top: 4px;">schedule in 5 days 2pm</div>
             </button>
             <button onclick="handleEmailConfirmation('${leadId}', false)" style="
                 background: #ef4444;
@@ -4074,7 +5175,7 @@ window.showEmailConfirmationPopup = function(leadId) {
                 transition: all 0.2s;
             " onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">
                 <i class="fas fa-times"></i> No
-                <div style="font-size: 12px; margin-top: 4px;">2 days green</div>
+                <div style="font-size: 12px; margin-top: 4px;">schedule call 2 days 2pm</div>
             </button>
         </div>
 
@@ -4101,11 +5202,13 @@ window.showEmailConfirmationPopup = function(leadId) {
 // Function to handle email confirmation response
 window.handleEmailConfirmation = function(leadId, confirmed) {
     console.log(`📧 Email confirmation for lead ${leadId}: ${confirmed ? 'YES' : 'NO'}`);
-    console.log(`📧 NOTE: Email confirmation will NOT create fake call logs - only tracks email response`);
+    console.log(`📧 NOTE: Email confirmation will schedule callback instead of green highlight`);
 
-    const days = confirmed ? 7 : 2;
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + days);
+    const days = confirmed ? 5 : 2; // 5 days if confirmed, 2 days if not confirmed
+    const callbackDate = new Date();
+    callbackDate.setDate(callbackDate.getDate() + days);
+    // Set callback to 2 PM
+    callbackDate.setHours(14, 0, 0, 0); // 2 PM
 
     // Get leads and complete reach-out
     const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
@@ -4151,16 +5254,58 @@ window.handleEmailConfirmation = function(leadId, confirmed) {
         leads[leadIndex].reachOut.reachOutCompletedAt = new Date().toISOString();
         leads[leadIndex].reachOut.emailConfirmed = true; // More accurate than 'called'
 
-        // Set green highlight (using existing format)
-        if (!leads[leadIndex].reachOut) {
-            leads[leadIndex].reachOut = {};
+        // Schedule callback instead of green highlight
+        const callbacksKey = 'scheduled_callbacks';
+        const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+
+        if (!callbacks[leadId]) {
+            callbacks[leadId] = [];
         }
-        leads[leadIndex].reachOut.greenHighlightUntil = expiryDate.toISOString();
-        leads[leadIndex].reachOut.greenHighlightDays = days;
+
+        // Create new callback
+        const newCallback = {
+            id: Date.now().toString(),
+            dateTime: callbackDate.toISOString(),
+            notes: `Email follow-up - ${confirmed ? 'Lead confirmed email, schedule follow-up in 5 days' : 'Lead did not confirm email, follow up in 2 days'}`,
+            completed: false,
+            createdAt: new Date().toISOString()
+        };
+
+        callbacks[leadId].push(newCallback);
+        localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
+        if (window.CallbackNotifications && window.CallbackNotifications.refresh) window.CallbackNotifications.refresh();
+
+        console.log(`📅 Scheduled callback for ${days} days at 2 PM:`, newCallback);
 
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
 
-        // Save to server
+        // Save callback to server using same API as working callback scheduler
+        const saveCallbackToServer = async () => {
+            try {
+                const response = await fetch('/api/callbacks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        callback_id: newCallback.id.toString(),
+                        lead_id: leadId,
+                        date_time: newCallback.dateTime,
+                        notes: newCallback.notes
+                    })
+                });
+
+                if (response.ok) {
+                    console.log('✅ Email confirmation callback saved to server');
+                } else {
+                    console.log(`❌ Server callback save failed: ${response.status}`);
+                }
+            } catch (error) {
+                console.log('❌ Error saving callback to server:', error.message);
+            }
+        };
+
+        saveCallbackToServer();
+
+        // Save reach-out completion to leads API
         const updateData = {
             reachOut: leads[leadIndex].reachOut
         };
@@ -4172,7 +5317,7 @@ window.handleEmailConfirmation = function(leadId, confirmed) {
         }).then(response => response.json())
         .then(data => {
             if (data.success) {
-                console.log('✅ Reach-out completion and green highlight saved to server');
+                console.log('✅ Reach-out completion saved to server');
             }
         }).catch(error => console.error('❌ Error saving completion data:', error));
 
@@ -4189,9 +5334,12 @@ window.handleEmailConfirmation = function(leadId, confirmed) {
         }
 
         // Mark reach-out as COMPLETE with green styling
-        markReachOutComplete(leadId, leads[leadIndex].reachOut.completedAt);
+        markReachOutComplete(leadId, leads[leadIndex].reachOut.completedAt, leads[leadIndex]);
 
-        showNotification(`Email confirmed! Reach-out completed. Lead will stay green for ${days} days.`, 'success');
+        const confirmationMessage = confirmed
+            ? `Email confirmed! Callback scheduled for ${days} days at 2 PM.`
+            : `Email not confirmed. Follow-up callback scheduled for ${days} days at 2 PM.`;
+        showNotification(confirmationMessage, 'success');
     }
 
     // Close modal
@@ -4237,203 +5385,16 @@ window.handleEmailConfirmation = function(leadId, confirmed) {
     }, 300);
 };
 
-// Function to show green highlight duration popup
+// Function to show green highlight duration popup (DISABLED - popup removed)
 window.showGreenHighlightDurationPopup = function(leadId) {
-    console.log(`🟢 Showing green highlight duration popup for lead: ${leadId}`);
-
-    // Check if this lead has "REACH OUT" todo
-    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-    const lead = leads.find(l => String(l.id) === String(leadId));
-
-    if (!lead) {
-        console.log(`❌ Lead ${leadId} not found, skipping popup`);
-        return;
-    }
-
-    // Check if lead is in a reachout scenario
-    const todoText = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) : '').toLowerCase();
-
-    // Check for reachout scenarios:
-    // 1. Todo text includes "reach out"
-    // 2. Stages like "info requested", "loss runs requested", "quote sent" with called box checked
-    const stage = (lead.stage || '').toLowerCase();
-    const hasCalled = lead.reachOut && lead.reachOut.called;
-
-    const isReachOutScenario = todoText.includes('reach out') ||
-                              (stage.includes('info_requested') && hasCalled) ||
-                              (stage.includes('loss_runs_requested') && hasCalled) ||
-                              (stage.includes('quote_sent') && hasCalled) ||
-                              (stage.includes('contact_attempted') && hasCalled);
-
-    if (!isReachOutScenario) {
-        console.log(`⏭️ Lead ${leadId} not in reachout scenario (stage: "${stage}", called: ${hasCalled}, todo: "${todoText}"), skipping popup`);
-        return;
-    }
-
-    console.log(`✅ Lead ${leadId} is in reachout scenario (stage: "${stage}", called: ${hasCalled}, todo: "${todoText}"), showing popup`);
-
-    // Create modal for green highlight duration selection
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000004;
-    `;
-
-    const modalContent = document.createElement('div');
-    modalContent.style.cssText = `
-        background: white;
-        padding: 30px;
-        border-radius: 12px;
-        max-width: 400px;
-        width: 90%;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-    `;
-
-    modalContent.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 15px;">
-            <h2 style="margin: 0; color: #1f2937;"><i class="fas fa-highlight" style="color: #10b981;"></i> Set Green Highlight Duration</h2>
-            <button onclick="this.closest('.green-highlight-modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">&times;</button>
-        </div>
-
-        <p style="color: #6b7280; margin-bottom: 20px; text-align: center;">How long should this lead stay highlighted in green?</p>
-
-        <!-- Duration Options -->
-        <div style="margin-bottom: 25px;">
-            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px;">
-                <button onclick="setGreenHighlightDuration('${leadId}', 2)" style="padding: 12px; border: 2px solid #e5e7eb; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;"
-                        onmouseover="this.style.borderColor='#10b981'; this.style.background='#f0fdf4';"
-                        onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';">
-                    2 Days<br><span style="font-size: 12px; color: #6b7280;">Standard</span>
-                </button>
-                <button onclick="setGreenHighlightDuration('${leadId}', 3)" style="padding: 12px; border: 2px solid #e5e7eb; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;"
-                        onmouseover="this.style.borderColor='#10b981'; this.style.background='#f0fdf4';"
-                        onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';">
-                    3 Days
-                </button>
-                <button onclick="setGreenHighlightDuration('${leadId}', 5)" style="padding: 12px; border: 2px solid #e5e7eb; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;"
-                        onmouseover="this.style.borderColor='#10b981'; this.style.background='#f0fdf4';"
-                        onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';">
-                    5 Days
-                </button>
-                <button onclick="setGreenHighlightDuration('${leadId}', 7)" style="padding: 12px; border: 2px solid #e5e7eb; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;"
-                        onmouseover="this.style.borderColor='#10b981'; this.style.background='#f0fdf4';"
-                        onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';">
-                    7 Days
-                </button>
-                <button onclick="setGreenHighlightDuration('${leadId}', 14)" style="padding: 12px; border: 2px solid #e5e7eb; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;"
-                        onmouseover="this.style.borderColor='#10b981'; this.style.background='#f0fdf4';"
-                        onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';">
-                    14 Days
-                </button>
-                <button onclick="showCustomDurationInput('${leadId}')" style="padding: 12px; border: 2px solid #e5e7eb; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;"
-                        onmouseover="this.style.borderColor='#10b981'; this.style.background='#f0fdf4';"
-                        onmouseout="this.style.borderColor='#e5e7eb'; this.style.background='white';">
-                    Custom
-                </button>
-            </div>
-        </div>
-
-        <!-- Custom Duration Input (initially hidden) -->
-        <div id="customDurationDiv" style="display: none; margin-bottom: 20px; padding: 15px; background: #f9fafb; border-radius: 8px;">
-            <label style="font-weight: 600; margin-bottom: 10px; display: block;">Custom Duration (days):</label>
-            <input type="number" id="customDays" min="1" max="365" placeholder="Enter days" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 6px; margin-bottom: 10px;">
-            <div style="display: flex; gap: 10px;">
-                <button onclick="setGreenHighlightDuration('${leadId}', document.getElementById('customDays').value)" style="flex: 1; padding: 8px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Set Custom</button>
-                <button onclick="document.getElementById('customDurationDiv').style.display='none'" style="flex: 1; padding: 8px; background: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Cancel</button>
-            </div>
-        </div>
-
-        <!-- Close Button -->
-        <div style="text-align: center;">
-            <button onclick="this.closest('.green-highlight-modal').remove()" style="background: #6b7280; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
-                Skip
-            </button>
-        </div>
-    `;
-
-    modal.className = 'green-highlight-modal';
-    modal.appendChild(modalContent);
-    document.body.appendChild(modal);
-
-    // Close modal when clicking outside
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
+    console.log(`🟢 Green highlight duration popup disabled for lead: ${leadId}`);
+    return; // Exit early - popup disabled
 };
 
-// Function to show custom duration input
-window.showCustomDurationInput = function(leadId) {
-    document.getElementById('customDurationDiv').style.display = 'block';
-};
-
-// Function to set green highlight duration
+// Function to set green highlight duration (DISABLED - popup removed)
 window.setGreenHighlightDuration = function(leadId, days) {
-    const daysNum = parseInt(days) || 2;
-    console.log(`🟢 Setting green highlight duration for lead ${leadId}: ${daysNum} days`);
-
-    let leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-    const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
-
-    if (leadIndex !== -1) {
-        // Set green highlight expiration
-        const expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + daysNum);
-
-        if (!leads[leadIndex].reachOut) {
-            leads[leadIndex].reachOut = {};
-        }
-
-        leads[leadIndex].reachOut.greenHighlightUntil = expirationDate.toISOString();
-        leads[leadIndex].reachOut.greenHighlightDays = daysNum;
-
-        // Save to localStorage
-        localStorage.setItem('insurance_leads', JSON.stringify(leads));
-
-        console.log(`✅ Green highlight set until: ${expirationDate.toLocaleDateString()}`);
-
-        // CRITICAL FIX: Save green highlight duration to server
-        const updateData = {
-            reachOut: leads[leadIndex].reachOut
-        };
-
-        fetch(`/api/leads/${leadId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(updateData)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                console.log(`✅ Green highlight duration saved to server: ${daysNum} days until ${expirationDate.toLocaleDateString()}`);
-            } else {
-                console.error('❌ Server save failed for green highlight duration:', data.error);
-            }
-        })
-        .catch(error => {
-            console.error('❌ Server save error for green highlight duration:', error);
-        });
-    }
-
-    // Close the modal
-    const modal = document.querySelector('.green-highlight-modal');
-    if (modal) {
-        modal.remove();
-    }
-
-    // Show notification
-    showNotification(`Lead will stay green for ${daysNum} ${daysNum === 1 ? 'day' : 'days'}`, 'success');
+    console.log(`🟢 Green highlight duration function disabled for lead ${leadId} (${days} days)`);
+    return; // Function disabled since popup was removed
 };
 
 // Custom modal for Next Callback scheduling
@@ -4538,7 +5499,7 @@ function showNextCallbackPopup(leadId) {
         document.body.removeChild(modalOverlay);
         console.log('📞 NEXT CALLBACK: User chose to schedule next callback');
 
-        // Show the callback scheduler (reuse existing function if available)
+        // Show the callback scheduler
         setTimeout(() => {
             showCallbackScheduler(leadId);
         }, 200);
@@ -4575,7 +5536,6 @@ function showNextCallbackPopup(leadId) {
 function completeAllCallbacksForLead(leadId) {
     console.log('✅ COMPLETING ALL CALLBACKS for lead', leadId);
 
-    // CRITICAL FIX: Complete callbacks silently without showing popup
     // Get all callbacks for this lead and complete them individually
     const callbacksKey = 'scheduled_callbacks';
     let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
@@ -4589,20 +5549,19 @@ function completeAllCallbacksForLead(leadId) {
 
             // CRITICAL FIX: Complete callback silently without showing popup
             // Use completeCallbackAfterOutcome directly with 'answered' outcome
-            if (typeof completeCallbackAfterOutcome === 'function') {
-                completeCallbackAfterOutcome(leadId, callback.id, 'answered');
-            } else {
-                // Fallback: Direct localStorage cleanup (SILENT MODE)
-                console.log('🔧 FALLBACK: Using direct callback removal for', callback.id);
-                callbacks[leadId] = callbacks[leadId].filter(cb =>
-                    String(cb.id) !== String(callback.id) &&
-                    (!cb.callback_id || String(cb.callback_id) !== String(callback.id))
-                );
-                localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
-            }
+            completeCallbackAfterOutcome(leadId, callback.id, 'answered');
         });
     } else {
         console.log('📋 No callbacks found for lead', leadId);
+
+        // Still refresh the display and table
+        if (typeof displayScheduledCallbacks === 'function') {
+            displayScheduledCallbacks(leadId); // Note: intentionally not awaited to avoid blocking
+        }
+
+        if (typeof updateTableAfterCallbackComplete === 'function') {
+            updateTableAfterCallbackComplete(leadId);
+        }
     }
 
     // Also update the table to remove callback messages
@@ -4613,7 +5572,7 @@ function completeAllCallbacksForLead(leadId) {
     }, 500);
 }
 
-// Function to show callback scheduler (reuse existing or create simple one)
+// Function to show callback scheduler
 function showCallbackScheduler(leadId) {
     console.log('📅 CALLBACK SCHEDULER: Opening scheduler for lead', leadId);
 
@@ -4666,7 +5625,7 @@ function showCallbackScheduler(leadId) {
                 <i class="fas fa-calendar-alt" style="font-size: 24px; color: #3b82f6;"></i>
             </div>
             <h3 style="margin: 0 0 10px 0; color: #1f2937; font-size: 20px; font-weight: 600;">Schedule Next Call</h3>
-            <p style="margin: 0; color: #6b7280; font-size: 14px;">
+            <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px;">
                 Lead: <strong>${lead.name}</strong>
             </p>
         </div>
@@ -4716,24 +5675,55 @@ function showCallbackScheduler(leadId) {
         }
 
         // Save the callback
-        saveCallback(leadId, dateTime, notes);
+        saveCallbackToLocalStorageAndServer(leadId, dateTime, notes);
         document.body.removeChild(modalOverlay);
     });
 
 }
 
 // Function to save callback
-async function saveCallback(leadId, dateTime, notes) {
+async function saveCallbackToLocalStorageAndServer(leadId, dateTime, notes) {
     console.log('💾 SAVING CALLBACK:', { leadId, dateTime, notes });
 
-    // Save to localStorage
+    // FIRST: Complete any existing overdue callbacks for this lead
     const callbacksKey = 'scheduled_callbacks';
-    const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+    let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+    const now = new Date();
 
-    if (!callbacks[leadId]) {
+    if (callbacks[leadId]) {
+        const originalCallbacks = [...callbacks[leadId]];
+        console.log('🧹 AUTO-COMPLETE DEBUG: Checking callbacks for lead', leadId);
+        console.log('🧹 AUTO-COMPLETE DEBUG: Original callbacks:', originalCallbacks);
+        console.log('🧹 AUTO-COMPLETE DEBUG: Current time:', now.toLocaleString());
+
+        // Check each callback
+        originalCallbacks.forEach((cb, index) => {
+            const callbackTime = new Date(cb.dateTime);
+            const isOverdue = callbackTime <= now;
+            console.log(`🧹 AUTO-COMPLETE DEBUG: Callback ${index}: ${cb.dateTime} - isOverdue: ${isOverdue}, completed: ${cb.completed}`);
+        });
+
+        const overdueCallbacks = callbacks[leadId].filter(cb => {
+            const callbackTime = new Date(cb.dateTime);
+            return callbackTime <= now && !cb.completed;
+        });
+
+        if (overdueCallbacks.length > 0) {
+            console.log('🧹 AUTO-COMPLETE: Found', overdueCallbacks.length, 'overdue callbacks to complete before scheduling new one');
+            console.log('🧹 AUTO-COMPLETE: Removing callbacks:', overdueCallbacks.map(cb => cb.dateTime));
+
+            // Remove overdue callbacks
+            callbacks[leadId] = callbacks[leadId].filter(cb => !(new Date(cb.dateTime) <= now && !cb.completed));
+            console.log('🧹 AUTO-COMPLETE: Removed overdue callbacks. Count:', originalCallbacks.length, '->', callbacks[leadId].length);
+        } else {
+            console.log('🧹 AUTO-COMPLETE: No overdue incomplete callbacks found for removal');
+        }
+    } else {
         callbacks[leadId] = [];
+        console.log('🧹 AUTO-COMPLETE: No existing callbacks for lead', leadId);
     }
 
+    // THEN: Add the new callback
     const callbackId = Date.now(); // Simple ID
     const newCallback = {
         id: callbackId,
@@ -4746,17 +5736,13 @@ async function saveCallback(leadId, dateTime, notes) {
 
     callbacks[leadId].push(newCallback);
     localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
-
-    // Schedule exact-timer alarm for the new callback immediately
-    if (window.CallbackNotifications && window.CallbackNotifications.refresh) {
-        window.CallbackNotifications.refresh();
-    }
+    if (window.CallbackNotifications && window.CallbackNotifications.refresh) window.CallbackNotifications.refresh();
+    console.log('✅ CALLBACK ADDED: New callback added to localStorage');
 
     // Save to server
     try {
         const urls = [
-            'http://162-220-14-239.nip.io:3001/api/callbacks',
-            'http://localhost:3001/api/callbacks'
+            '/api/callbacks'
         ];
 
         for (const url of urls) {
@@ -4766,7 +5752,12 @@ async function saveCallback(leadId, dateTime, notes) {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(newCallback)
+                    body: JSON.stringify({
+                        callback_id: newCallback.id.toString(),
+                        lead_id: leadId,
+                        date_time: newCallback.dateTime,
+                        notes: newCallback.notes
+                    })
                 });
 
                 if (response.ok) {
@@ -4792,8 +5783,29 @@ async function saveCallback(leadId, dateTime, notes) {
     });
 
     alert(`✅ Callback scheduled for ${formattedDate}`);
-
     console.log('📅 CALLBACK SCHEDULED: New callback set for', formattedDate);
+
+    // Refresh the callback display to show the new callback and remove any old ones
+    if (typeof displayScheduledCallbacks === 'function') {
+        // FORCE CLEAR container first to prevent stuck UI from rescheduling
+        const container = document.getElementById(`scheduled-callbacks-${leadId}`);
+        if (container) {
+            container.innerHTML = '';
+            container.style.display = 'none';
+            // Force reflow to ensure clearing takes effect
+            container.offsetHeight;
+            container.style.display = 'block';
+            console.log('🧹 RESCHEDULE FIX: Force cleared callback container before refresh');
+        }
+
+        // Use force refresh to ensure stuck UI is cleared
+        if (typeof forceRefreshCallbackDisplay === 'function') {
+            forceRefreshCallbackDisplay(leadId);
+        } else {
+            displayScheduledCallbacks(leadId); // Fallback
+        }
+        console.log('🔄 DISPLAY REFRESHED: Updated callback display after scheduling');
+    }
 }
 
 // Custom modal for Contact Attempted confirmation
@@ -4891,11 +5903,19 @@ function showContactAttemptedModal(leadId, callback) {
     noBtn.addEventListener('click', () => {
         document.body.removeChild(modalOverlay);
         callback(false);
+        // Show callback scheduling popup after contact attempt popup
+        setTimeout(() => {
+            showCallbackSchedulingPopup(leadId);
+        }, 300);
     });
 
     yesBtn.addEventListener('click', () => {
         document.body.removeChild(modalOverlay);
         callback(true);
+        // Show callback scheduling popup after contact attempt popup
+        setTimeout(() => {
+            showCallbackSchedulingPopup(leadId);
+        }, 300);
     });
 
     // Handle escape key
@@ -5081,8 +6101,6 @@ function continueStageUpdate(leadId, stage, contactAttemptedCompleted) {
         // Update stage and timestamp
         leads[leadIndex].stage = stage;
         leads[leadIndex].stageUpdatedAt = now;
-        // Add lastModified timestamp for smart merge protection
-        leads[leadIndex].lastModified = now;
 
         // Reset reach-out data when stage changes
         // Check for email confirmations as valid completions
@@ -5235,13 +6253,28 @@ protectedFunctions.viewLead = async function(leadId) {
                 console.log('🔍 SERVER DATA emailConfirmed:', serverLead.reachOut?.emailConfirmed);
                 console.log('🔍 LOCAL DATA emailConfirmed:', lead.reachOut?.emailConfirmed);
 
-                // Update localStorage lead with server data
+                // Merge: server is the base (has authoritative server-side fields like
+                // transcriptText, transcriptWords, premium, recordingPath, etc.).
+                // Local non-empty values win on top (preserving user-made changes like stage, notes, reachOut).
                 const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
                 if (leadIndex !== -1) {
-                    leads[leadIndex] = serverLead;
+                    const localLead = leads[leadIndex];
+
+                    // Start with server data (authoritative base), filter out empty values
+                    const cleanServerData = Object.fromEntries(
+                        Object.entries(serverLead).filter(([_, v]) => v !== undefined && v !== null && v !== '')
+                    );
+
+                    // Local non-empty values win (user-made changes survive the sync)
+                    const cleanLocalData = Object.fromEntries(
+                        Object.entries(localLead).filter(([_, v]) => v !== undefined && v !== null && v !== '')
+                    );
+
+                    leads[leadIndex] = { ...cleanServerData, ...cleanLocalData };
+
                     localStorage.setItem('insurance_leads', JSON.stringify(leads));
-                    lead = serverLead; // Use fresh server data
-                    console.log('✅ Lead synced with server data');
+                    lead = leads[leadIndex]; // Use merged data
+                    console.log('✅ Lead synced with server data (local changes preserved)');
                 }
             }
         } catch (error) {
@@ -5273,6 +6306,27 @@ protectedFunctions.updateLeadStatus = function(leadId, status) {
 
 protectedFunctions.updateWinLossStatus = function(leadId, winLoss) {
     protectedFunctions.updateLeadField(leadId, 'winLoss', winLoss);
+};
+
+protectedFunctions.updateConfirmedPremiumStatus = function(leadId, confirmedPremium) {
+    console.log('💰 updateConfirmedPremiumStatus called:', leadId, confirmedPremium);
+
+    // Update the field in localStorage
+    protectedFunctions.updateLeadField(leadId, 'confirmedPremium', confirmedPremium);
+
+    // Update the premium field styling immediately
+    const premiumField = document.getElementById(`lead-premium-${leadId}`);
+    if (premiumField) {
+        if (confirmedPremium === 'yes') {
+            premiumField.style.color = '#16a34a';
+            premiumField.style.fontWeight = '600';
+        } else {
+            premiumField.style.color = '';
+            premiumField.style.fontWeight = '';
+        }
+    }
+
+    console.log('✅ Confirmed premium status updated:', confirmedPremium);
 };
 
 protectedFunctions.updateLeadAssignedTo = function(leadId, assignedTo) {
@@ -6046,8 +7100,701 @@ protectedFunctions.loadQuoteApplications = function(leadId) {
 
 protectedFunctions.addQuoteSubmission = function(leadId) {
     console.log('Add quote submission for lead:', leadId);
-    // Placeholder - can be expanded later
-    alert('Quote submission functionality coming soon');
+
+    // Find the quote submissions container
+    const container = document.getElementById('quote-submissions-container');
+    if (!container) {
+        console.error('Quote submissions container not found');
+        alert('Error: Cannot find quote container. Please refresh and try again.');
+        return;
+    }
+
+    // Check if form already exists
+    let existingForm = document.getElementById('quote-entry-form');
+    if (existingForm) {
+        existingForm.remove();
+    }
+
+    // Create the quote entry modal
+    const modal = document.createElement('div');
+    modal.id = 'quote-entry-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999999;
+    `;
+
+    // Force z-index with !important using style property
+    modal.style.setProperty('z-index', '999999999', 'important');
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+        position: relative;
+        z-index: 999999999;
+    `;
+
+    // Force z-index on modal content as well
+    modalContent.style.setProperty('z-index', '999999999', 'important');
+
+    modalContent.innerHTML = `
+        <div style="flex: 1;">
+            <h3 style="margin: 0 0 20px 0; color: #374151; font-size: 18px; font-weight: 600; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
+                <i class="fas fa-file-alt" style="color: #059669; margin-right: 8px;"></i>Quote #1
+            </h3>
+            <form class="quote-form" data-quote-number="1">
+                <!-- Carrier Selection -->
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151; font-size: 16px;">
+                        <i class="fas fa-building" style="color: #059669; margin-right: 8px;"></i>Insurance Carrier
+                    </label>
+                    <select id="carrier-selection-1" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px;
+                                       font-size: 15px; transition: border-color 0.2s ease; background: white;">
+                        <option value="">Select a carrier...</option>
+                        <option value="Progressive">Progressive</option>
+                        <option value="Geico">Geico</option>
+                        <option value="Northland">Northland</option>
+                        <option value="Canal">Canal</option>
+                        <option value="Occidental">Occidental</option>
+                        <option value="Crum & Forster">Crum & Forster</option>
+                        <option value="Nico">Nico</option>
+                        <option value="Berkley Prime">Berkley Prime</option>
+                    </select>
+                </div>
+
+                <!-- Physical Coverage -->
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151; font-size: 16px;">
+                        <i class="fas fa-shield-alt" style="color: #3b82f6; margin-right: 8px;"></i>Physical Coverage
+                    </label>
+                    <input type="text" id="physical-coverage-1" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px;
+                                      font-size: 15px; transition: border-color 0.2s ease;" placeholder="Enter physical coverage amount">
+                </div>
+
+                <!-- Cargo Cost -->
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151; font-size: 16px;">
+                        <i class="fas fa-dollar-sign" style="color: #059669; margin-right: 8px;"></i>Cargo Cost: 100K
+                    </label>
+                    <input type="text" id="cargo-cost-1" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px;
+                                      font-size: 15px; transition: border-color 0.2s ease;" inputmode="numeric" pattern="[0-9]*" placeholder="Enter cargo cost">
+                </div>
+
+                <!-- Liability Per Unit -->
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151; font-size: 16px;">
+                        <i class="fas fa-shield-alt" style="color: #8b5cf6; margin-right: 8px;"></i>Liability
+                    </label>
+                    <input type="text" id="liability-per-unit-1" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px;
+                                      font-size: 15px; transition: border-color 0.2s ease;" inputmode="numeric" pattern="[0-9]*" placeholder="Enter liability amount">
+                </div>
+
+                <!-- Total Premium -->
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151; font-size: 16px;">
+                        <i class="fas fa-dollar-sign" style="color: #dc2626; margin-right: 8px;"></i>Total Premium
+                    </label>
+                    <input type="text" id="total-premium-1" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px;
+                                      font-size: 15px; transition: border-color 0.2s ease;" inputmode="numeric" pattern="[0-9]*" placeholder="Enter total premium amount">
+                </div>
+
+                <!-- File Upload -->
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #374151; font-size: 16px;">
+                        <i class="fas fa-file-pdf" style="color: #ef4444; margin-right: 8px;"></i>Quote Document
+                    </label>
+                    <input type="file" id="quote-document-1" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 8px;
+                                      font-size: 15px; transition: border-color 0.2s ease; background: white;">
+                    <small style="color: #6b7280; font-size: 13px;">Upload quote document (PDF, DOC, or image files)</small>
+                </div>
+
+                <!-- Action Buttons -->
+                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 30px; border-top: 1px solid #e5e7eb; padding-top: 20px;">
+                    <button type="button" onclick="closeQuoteModal()" style="background: #6b7280; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">
+                        <i class="fas fa-times" style="margin-right: 8px;"></i>Cancel
+                    </button>
+                    <button type="button" onclick="saveQuoteSubmission('${leadId}')" style="background: #10b981; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">
+                        <i class="fas fa-save" style="margin-right: 8px;"></i>Save Quote
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    // Close modal when clicking outside
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+};
+
+// Helper function to close quote modal
+window.closeQuoteModal = function() {
+    const modal = document.getElementById('quote-entry-modal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+// Helper function to save quote submission
+window.saveQuoteSubmission = async function(leadId) {
+    console.log('Saving quote submission for lead:', leadId);
+
+    // Get form data
+    const carrier = document.getElementById('carrier-selection-1').value;
+    const physicalCoverage = document.getElementById('physical-coverage-1').value;
+    const cargoCost = document.getElementById('cargo-cost-1').value;
+    const liability = document.getElementById('liability-per-unit-1').value;
+    const totalPremium = document.getElementById('total-premium-1').value;
+    const documentFile = document.getElementById('quote-document-1').files[0];
+
+    // Validate required fields
+    if (!carrier) {
+        alert('Please select an insurance carrier');
+        return;
+    }
+
+    if (!totalPremium) {
+        alert('Please enter the total premium amount');
+        return;
+    }
+
+    // Show loading state
+    const saveButton = document.querySelector('button[onclick*="saveQuoteSubmission"]');
+    const originalText = saveButton.innerHTML;
+    saveButton.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Saving...';
+    saveButton.disabled = true;
+
+    try {
+        // Create FormData for file upload
+        const formData = new FormData();
+        formData.append('leadId', leadId);
+        formData.append('insuranceCarrier', carrier);
+        formData.append('physicalCoverage', physicalCoverage);
+        formData.append('cargoCost', cargoCost);
+        formData.append('liability', liability);
+        formData.append('totalPremium', totalPremium);
+        formData.append('notes', ''); // Add notes field
+
+        if (documentFile) {
+            formData.append('file', documentFile);
+        }
+
+        // Send to server
+        const response = await fetch('/api/quotes', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('Quote saved successfully to server:', result);
+
+        // Also save to localStorage for offline access and immediate display
+        const quoteData = {
+            id: result.quote.id || `quote_${Date.now()}`,
+            leadId: leadId,
+            insuranceCarrier: carrier,
+            physicalCoverage: physicalCoverage,
+            cargoCost: cargoCost,
+            liability: liability,
+            totalPremium: totalPremium,
+            fileName: result.quote.fileName || null,
+            filePath: result.quote.filePath || null,
+            fileSize: result.quote.fileSize || null,
+            created_date: result.quote.created_date || new Date().toISOString(),
+            status: result.quote.status || 'submitted',
+            synced: true
+        };
+
+        // Update localStorage
+        let quotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+        quotes.push(quoteData);
+        localStorage.setItem('lead_quotes', JSON.stringify(quotes));
+
+        // Close modal
+        closeQuoteModal();
+
+        // Show success message
+        alert('Quote saved successfully to server!');
+
+        // Refresh the quotes display
+        await refreshQuotesDisplay(leadId);
+
+    } catch (error) {
+        console.error('Error saving quote to server:', error);
+
+        // Fallback: Save to localStorage only
+        console.log('Falling back to localStorage save...');
+
+        const quoteData = {
+            id: `quote_${Date.now()}`,
+            leadId: leadId,
+            insuranceCarrier: carrier,
+            physicalCoverage: physicalCoverage,
+            cargoCost: cargoCost,
+            liability: liability,
+            totalPremium: totalPremium,
+            fileName: documentFile ? documentFile.name : null,
+            filePath: null,
+            fileSize: documentFile ? documentFile.size : null,
+            created_date: new Date().toISOString(),
+            status: 'submitted',
+            synced: false // Flag to indicate local-only storage
+        };
+
+        let quotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+        quotes.push(quoteData);
+        localStorage.setItem('lead_quotes', JSON.stringify(quotes));
+
+        // Close modal
+        closeQuoteModal();
+
+        // Show warning message
+        alert('Warning: Could not save to server. Quote saved locally only.\n\nError: ' + error.message);
+
+        // Refresh the quotes display
+        await refreshQuotesDisplay(leadId);
+
+    } finally {
+        // Restore button state
+        if (saveButton) {
+            saveButton.innerHTML = originalText;
+            saveButton.disabled = false;
+        }
+    }
+};
+
+// Function to refresh and display quotes for a lead
+window.refreshQuotesDisplay = async function(leadId) {
+    console.log('Refreshing quotes display for lead:', leadId);
+
+    // Get the quotes container
+    const quotesContainer = document.getElementById(`quotes-container-${leadId}`);
+    if (!quotesContainer) {
+        console.warn('Quotes container not found for lead:', leadId);
+        return;
+    }
+
+    let leadQuotes = [];
+
+    // First try to load quotes from server
+    try {
+        const response = await fetch(`/api/quotes/${leadId}`);
+        if (response.ok) {
+            const result = await response.json();
+            leadQuotes = result.quotes || [];
+            console.log(`Loaded ${leadQuotes.length} quotes from server for lead ${leadId}`);
+
+            // Update localStorage with server data for offline access
+            const allLocalQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+            const otherLeadQuotes = allLocalQuotes.filter(quote => String(quote.leadId) !== String(leadId));
+            const combinedQuotes = [...otherLeadQuotes, ...leadQuotes];
+            localStorage.setItem('lead_quotes', JSON.stringify(combinedQuotes));
+        } else {
+            throw new Error(`Server returned ${response.status}`);
+        }
+    } catch (error) {
+        console.log('Failed to load quotes from server, using localStorage:', error.message);
+        // Fallback to localStorage
+        const allQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+        leadQuotes = allQuotes.filter(quote => String(quote.leadId) === String(leadId));
+    }
+
+    // Separate quotes by carrier
+    const progressiveQuote = leadQuotes.find(quote =>
+        (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('progressive')
+    );
+    const geicoQuote = leadQuotes.find(quote =>
+        (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('geico')
+    );
+    const otherQuotes = leadQuotes.filter(quote => {
+        const carrier = (quote.insuranceCarrier || quote.carrier || '').toLowerCase();
+        return !carrier.includes('progressive') && !carrier.includes('geico');
+    });
+
+    // Function to create quote HTML
+    function createQuoteHTML(quote, quoteNumber) {
+        return `
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 15px; background: white;">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                    <h4 style="margin: 0; color: #374151; font-size: 16px; font-weight: 600;">
+                        <i class="fas fa-file-contract" style="color: #3b82f6; margin-right: 8px;"></i>Quote #${quoteNumber} - ${quote.insuranceCarrier || quote.carrier || 'No Carrier'}
+                    </h4>
+                    <div style="display: flex; gap: 8px;">
+                        ${(quote.fileName || quote.documentName) ? `
+                            <button onclick="viewQuoteDocument('${quote.id}')" style="background: #3b82f6; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">
+                                <i class="fas fa-eye"></i> View Document
+                            </button>
+                        ` : ''}
+                        <button onclick="deleteQuoteFromServer('${quote.id}', '${leadId}')" style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; font-size: 13px;">
+                    <div>
+                        <strong style="color: #374151;">Physical Coverage:</strong><br>
+                        <span style="color: #6b7280;">${quote.physicalCoverage || 'Not specified'}</span>
+                    </div>
+                    <div>
+                        <strong style="color: #374151;">Cargo Cost:</strong><br>
+                        <span style="color: #6b7280;">$${quote.cargoCost ? parseInt(quote.cargoCost).toLocaleString() : 'Not specified'}</span>
+                    </div>
+                    <div>
+                        <strong style="color: #374151;">Liability:</strong><br>
+                        <span style="color: #6b7280;">$${quote.liability ? parseInt(quote.liability).toLocaleString() : 'Not specified'}</span>
+                    </div>
+                    <div>
+                        <strong style="color: #374151;">Total Premium:</strong><br>
+                        <span style="color: #dc2626; font-weight: 600; font-size: 14px;">$${quote.totalPremium ? parseInt(quote.totalPremium).toLocaleString() : 'Not specified'}</span>
+                    </div>
+                </div>
+
+                ${quote.documentName ? `
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #f3f4f6;">
+                        <small style="color: #6b7280;">
+                            <i class="fas fa-paperclip" style="margin-right: 4px;"></i>Document: ${quote.documentName}
+                        </small>
+                    </div>
+                ` : ''}
+
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #f3f4f6;">
+                    <small style="color: #9ca3af;">
+                        Created: ${new Date(quote.created_date || quote.dateCreated || Date.now()).toLocaleDateString()} ${new Date(quote.created_date || quote.dateCreated || Date.now()).toLocaleTimeString()}
+                    </small>
+                </div>
+            </div>
+        `;
+    }
+
+    // Function to create placeholder HTML
+    function createPlaceholderHTML(carrier, savedStatus = null) {
+        // Set initial styling based on saved status
+        let bgColor = '#f3f4f6';
+        let borderColor = '#d1d5db';
+        let opacity = '0.85';
+        let statusDisplay = 'none';
+        let statusText = '';
+        let statusColor = '';
+
+        if (savedStatus) {
+            if (savedStatus.status === 'eligible') {
+                bgColor = '#dcfce7';
+                borderColor = '#10b981';
+                opacity = '1';
+                statusDisplay = 'block';
+                statusText = 'Eligible';
+                statusColor = '#059669';
+            } else if (savedStatus.status === 'ineligible') {
+                bgColor = '#fef2f2';
+                borderColor = '#ef4444';
+                opacity = '1';
+                statusDisplay = 'block';
+                statusText = 'Ineligible';
+                statusColor = '#dc2626';
+            }
+        }
+
+        return `
+            <div id="${carrier.toLowerCase()}-placeholder-${leadId}" style="border: 2px solid ${borderColor}; border-radius: 8px; padding: 15px; margin-bottom: 15px; background: ${bgColor}; opacity: ${opacity};">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                    <h4 style="margin: 0; color: #6b7280; font-size: 16px; font-weight: 600;">
+                        <i class="fas fa-file-contract" style="color: #9ca3af; margin-right: 8px;"></i>${carrier}
+                    </h4>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="handlePlaceholderAction('${carrier.toLowerCase()}', '${leadId}', 'reject')" style="background: #9ca3af; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='#6b7280'" onmouseout="this.style.background='#9ca3af'">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button onclick="handlePlaceholderAction('${carrier.toLowerCase()}', '${leadId}', 'accept')" style="background: #9ca3af; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='#6b7280'" onmouseout="this.style.background='#9ca3af'">
+                            <i class="fas fa-check"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="${carrier.toLowerCase()}-status-${leadId}" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb; display: ${statusDisplay};">
+                    <small id="${carrier.toLowerCase()}-status-text-${leadId}" style="font-weight: 600; color: ${statusColor};">${statusText}</small>
+                </div>
+            </div>
+        `;
+    }
+
+    // Load saved placeholder states from server
+    let placeholderStates = {};
+    try {
+        const statusResponse = await fetch(`/api/placeholder-status/${leadId}`);
+        if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            placeholderStates = statusData.statuses || {};
+            console.log('Loaded placeholder states:', placeholderStates);
+        }
+    } catch (error) {
+        console.error('Error loading placeholder states:', error);
+    }
+
+    // Build the HTML content
+    let quotesHTML = '';
+    let quoteCounter = 0;
+
+    // Progressive (either real quote or placeholder)
+    if (progressiveQuote) {
+        quotesHTML += createQuoteHTML(progressiveQuote, ++quoteCounter);
+    } else {
+        const progressiveStatus = placeholderStates.progressive || null;
+        quotesHTML += createPlaceholderHTML('Progressive', progressiveStatus);
+    }
+
+    // Geico (either real quote or placeholder)
+    if (geicoQuote) {
+        quotesHTML += createQuoteHTML(geicoQuote, ++quoteCounter);
+    } else {
+        const geicoStatus = placeholderStates.geico || null;
+        quotesHTML += createPlaceholderHTML('Geico', geicoStatus);
+    }
+
+    // Other quotes
+    otherQuotes.forEach(quote => {
+        quotesHTML += createQuoteHTML(quote, ++quoteCounter);
+    });
+
+    quotesContainer.innerHTML = quotesHTML;
+    console.log(`Displayed ${leadQuotes.length} quotes for lead ${leadId}`);
+};
+
+// Function to handle placeholder button actions
+window.handlePlaceholderAction = async function(carrier, leadId, action) {
+    console.log(`Placeholder action: ${action} for ${carrier} on lead ${leadId}`);
+
+    const placeholder = document.getElementById(`${carrier}-placeholder-${leadId}`);
+    const statusDiv = document.getElementById(`${carrier}-status-${leadId}`);
+    const statusText = document.getElementById(`${carrier}-status-text-${leadId}`);
+
+    if (!placeholder || !statusDiv || !statusText) {
+        console.error('Could not find placeholder elements');
+        return;
+    }
+
+    // Update UI immediately
+    if (action === 'accept') {
+        // Highlight green and show "Eligible"
+        placeholder.style.background = '#dcfce7';
+        placeholder.style.borderColor = '#10b981';
+        placeholder.style.opacity = '1';
+
+        statusDiv.style.display = 'block';
+        statusText.style.color = '#059669';
+        statusText.textContent = 'Eligible';
+
+        console.log(`Marked ${carrier} as eligible for lead ${leadId}`);
+
+    } else if (action === 'reject') {
+        // Highlight red and show "Ineligible"
+        placeholder.style.background = '#fef2f2';
+        placeholder.style.borderColor = '#ef4444';
+        placeholder.style.opacity = '1';
+
+        statusDiv.style.display = 'block';
+        statusText.style.color = '#dc2626';
+        statusText.textContent = 'Ineligible';
+
+        console.log(`Marked ${carrier} as ineligible for lead ${leadId}`);
+    }
+
+    // Save to server
+    try {
+        const response = await fetch('/api/placeholder-status', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                leadId: leadId,
+                carrier: carrier.toLowerCase(),
+                status: action === 'accept' ? 'eligible' : 'ineligible',
+                timestamp: new Date().toISOString()
+            })
+        });
+
+        if (!response.ok) {
+            console.error('Failed to save placeholder status:', response.status);
+            // Could show user notification here
+        } else {
+            const result = await response.json();
+            console.log(`✅ Saved ${carrier} status for lead ${leadId}:`, result);
+        }
+    } catch (error) {
+        console.error('Error saving placeholder status:', error);
+        // Could show user notification here
+    }
+};
+
+// Function to view quote document
+window.viewQuoteDocument = function(quoteId) {
+    console.log('Viewing document for quote:', quoteId);
+
+    // Get quote data from localStorage (which should now include server data)
+    const allQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+    let quote = allQuotes.find(q => String(q.id) === String(quoteId));
+
+    if (!quote) {
+        console.log('Quote not found in localStorage, searching by different ID formats...');
+        // Try different ID format matches
+        quote = allQuotes.find(q =>
+            q.id === quoteId ||
+            String(q.id) === String(quoteId) ||
+            q.id === parseInt(quoteId) ||
+            q.id === `quote_${quoteId}`
+        );
+    }
+
+    if (!quote) {
+        console.error('Quote not found. Available quotes:', allQuotes.map(q => ({id: q.id, leadId: q.leadId})));
+        alert(`Quote not found. Quote ID: ${quoteId}\n\nAvailable quotes: ${allQuotes.length}\n\nThis might be a sync issue. Please refresh the page and try again.`);
+        return;
+    }
+
+    // Check if this quote has a document
+    const fileName = quote.fileName || quote.documentName;
+    const filePath = quote.filePath;
+
+    if (!fileName) {
+        alert('No document found for this quote');
+        return;
+    }
+
+    // For server-stored files, open directly in new tab
+    if (filePath && quote.synced) {
+        const viewUrl = `https://162-220-14-239.nip.io/api/quotes/file/${quote.leadId}/${filePath.split('/').pop()}`;
+        window.open(viewUrl, '_blank');
+        return;
+    }
+
+    // For local-only files, show message
+    alert('This document is stored locally only and cannot be viewed online. Please re-upload the document to store it on the server for viewing.');
+};
+
+
+// Function to load and display quotes when a lead profile is opened
+window.loadQuotesForLead = async function(leadId) {
+    console.log('Loading quotes for lead profile:', leadId);
+
+    // Simply call refreshQuotesDisplay which now handles server loading
+    await refreshQuotesDisplay(leadId);
+};
+
+// Function to delete a quote
+window.deleteQuote = async function(quoteId, leadId) {
+    if (!confirm('Are you sure you want to delete this quote? This action cannot be undone.')) {
+        return;
+    }
+
+    console.log('Deleting quote:', quoteId);
+
+    // Get all quotes
+    let allQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+
+    // Filter out the quote to delete
+    allQuotes = allQuotes.filter(quote => quote.id !== quoteId);
+
+    // Save back to localStorage
+    localStorage.setItem('lead_quotes', JSON.stringify(allQuotes));
+
+    console.log('Quote deleted successfully');
+
+    // Refresh the display
+    await refreshQuotesDisplay(leadId);
+};
+
+// Function to load and display quotes when a lead profile is opened
+window.loadQuotesForLead = async function(leadId) {
+    console.log('Loading quotes for lead profile:', leadId);
+
+    // Load quotes from server first
+    try {
+        const response = await fetch(`/api/quotes?leadId=${leadId}`);
+        if (response.ok) {
+            const serverQuotes = await response.json();
+            console.log('Loaded quotes from server:', serverQuotes);
+
+            // Merge with localStorage quotes (in case some are local-only)
+            let localQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+            const leadLocalQuotes = localQuotes.filter(quote => quote.leadId === leadId);
+
+            // Combine server quotes with any local-only quotes
+            const serverQuoteIds = serverQuotes.map(q => q.id);
+            const localOnlyQuotes = leadLocalQuotes.filter(q => !serverQuoteIds.includes(q.id));
+
+            // Update localStorage with server data
+            const otherLeadQuotes = localQuotes.filter(quote => quote.leadId !== leadId);
+            const allQuotes = [...otherLeadQuotes, ...serverQuotes, ...localOnlyQuotes];
+            localStorage.setItem('lead_quotes', JSON.stringify(allQuotes));
+
+            console.log(`Synced ${serverQuotes.length} server quotes, ${localOnlyQuotes.length} local-only quotes`);
+        }
+    } catch (error) {
+        console.warn('Could not load quotes from server:', error.message);
+        // Continue with localStorage-only quotes
+    }
+
+    // Small delay to ensure the DOM is ready
+    setTimeout(() => {
+        refreshQuotesDisplay(leadId);
+    }, 100);
+};
+
+// Function to delete quote from both server and localStorage
+window.deleteQuoteFromServer = async function(quoteId, leadId) {
+    if (!confirm('Are you sure you want to delete this quote? This action cannot be undone.')) {
+        return;
+    }
+
+    console.log('Deleting quote from server:', quoteId);
+
+    try {
+        // Try to delete from server first
+        const response = await fetch(`/api/quotes/${leadId}/${quoteId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            console.log('Quote deleted from server successfully');
+        } else {
+            console.warn('Could not delete from server, proceeding with local delete');
+        }
+    } catch (error) {
+        console.warn('Server delete failed:', error.message);
+    }
+
+    // Always delete from localStorage regardless of server response
+    let allQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+    allQuotes = allQuotes.filter(quote => quote.id !== quoteId);
+    localStorage.setItem('lead_quotes', JSON.stringify(allQuotes));
+
+    console.log('Quote deleted from localStorage');
+
+    // Refresh the display
+    await refreshQuotesDisplay(leadId);
 };
 
 // PROTECTION: Assign functions to window and protect from overriding
@@ -6166,10 +7913,21 @@ protectedFunctions.sendEmail = async function(leadId) {
     const toField = document.getElementById('email-to-field');
     const subjectField = document.getElementById('email-subject-field');
     const bodyField = document.getElementById('email-body-field');
+    const agentCcField = document.getElementById('email-agent-cc-field');
 
-    const to = toField ? toField.value : '';
+    const to = toField ? toField.value.trim() : '';
     const subject = subjectField ? subjectField.value : '';
     const body = bodyField ? bodyField.value : '';
+
+    // Build CC: visible agent field + always Grant@vigagency.com (hidden)
+    const ALWAYS_CC = 'Grant@vigagency.com';
+    const agentCcRaw = agentCcField ? agentCcField.value.trim() : '';
+    const ccAddresses = [];
+    if (agentCcRaw && agentCcRaw.toLowerCase() !== ALWAYS_CC.toLowerCase()) {
+        ccAddresses.push(agentCcRaw);
+    }
+    ccAddresses.push(ALWAYS_CC);
+    const cc = ccAddresses.join(',');
 
     if (!to) {
         alert('Please enter a recipient email address');
@@ -6187,7 +7945,7 @@ protectedFunctions.sendEmail = async function(leadId) {
     const attachmentCount = attachmentElements.length;
 
     // Show confirmation
-    const confirmMsg = `Send email via Vanguard Insurance?\n\nTo: ${to}\nSubject: ${subject}\nAttachments: ${attachmentCount} files\n\nProceed?`;
+    const confirmMsg = `Send email via Vanguard Insurance?\n\nTo: ${to}\nCC: ${cc}\nSubject: ${subject}\nAttachments: ${attachmentCount} files\n\nProceed?`;
 
     if (!confirm(confirmMsg)) {
         return;
@@ -6412,7 +8170,7 @@ protectedFunctions.sendEmail = async function(leadId) {
             },
             body: JSON.stringify({
                 to: to,
-                cc: '', // CC field not implemented yet
+                cc: cc,
                 bcc: 'contact@vigagency.com', // Always BCC ourselves
                 subject: subject,
                 body: htmlBody,
@@ -6599,10 +8357,10 @@ function enforceGreenHighlightRule() {
             }
         }
 
-        // If no specific TO DO cell found, check around column 6 (common TO DO column)
-        if (!todoCell && cells[6]) {
-            todoCell = cells[6];
-            todoText = (cells[6]?.textContent || '').trim();
+        // If no specific TO DO cell found, check around column 7 (common TO DO column)
+        if (!todoCell && cells[7]) {
+            todoCell = cells[7];
+            todoText = (cells[7]?.textContent || '').trim();
         }
 
         console.log(`Row ${index}: Lead ${leadId}, TO DO: "${todoText}" (length: ${todoText.length})`);
@@ -6656,82 +8414,16 @@ function enforceGreenHighlightRule() {
     console.log(`🧹 CLEANUP COMPLETE: Checked ${totalChecked} rows, fixed ${cleanupCount} green highlight violations`);
 }
 
-// Function to load leads from server and refresh display (SMART MERGE VERSION)
+// Function to load leads from server and refresh display
 async function loadLeadsFromServerAndRefresh() {
-    console.log('🔄 SMART loadLeadsFromServerAndRefresh called - using protective merge...');
-
     try {
         // Load fresh data from server
         const response = await fetch('/api/leads');
         if (response.ok) {
             const serverLeads = await response.json();
-            console.log(`📥 Received ${serverLeads.length} leads from server`);
 
-            // SMART MERGE: Preserve local changes while adding new leads
-            const existingLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-            const mergedLeads = [...existingLeads];
-            const now = Date.now();
-
-            console.log('🧠 SMART SERVER REFRESH: Starting protective merge process...');
-
-            // Track what we're doing
-            let addedCount = 0;
-            let preservedCount = 0;
-            let updatedCount = 0;
-
-            serverLeads.forEach(serverLead => {
-                const localLeadIndex = mergedLeads.findIndex(localLead =>
-                    String(localLead.id) === String(serverLead.id)
-                );
-
-                if (localLeadIndex === -1) {
-                    // New lead from server - add it
-                    console.log('➕ Adding new lead from server:', serverLead.name);
-                    mergedLeads.push(serverLead);
-                    addedCount++;
-                } else {
-                    const localLead = mergedLeads[localLeadIndex];
-
-                    // Check if local lead has recent changes (within last 10 minutes)
-                    const hasRecentChanges = localLead.lastModified &&
-                        (now - new Date(localLead.lastModified).getTime()) < (10 * 60 * 1000);
-
-                    // Check if stage or other important fields were changed locally
-                    const hasLocalStageChange = localLead.stage !== serverLead.stage;
-                    const hasLocalNameChange = localLead.name !== serverLead.name;
-                    const hasLocalPhoneChange = localLead.phone !== serverLead.phone;
-
-                    if (hasRecentChanges || hasLocalStageChange || hasLocalNameChange || hasLocalPhoneChange) {
-                        // PRESERVE local changes - don't overwrite
-                        console.log(`🛡️ PROTECTING: Lead ${localLead.name} (stage: ${localLead.stage} vs server: ${serverLead.stage})`);
-
-                        // Only update non-critical fields from server, keep important local changes
-                        mergedLeads[localLeadIndex] = {
-                            ...serverLead,  // Server data as base
-                            ...localLead,  // Local changes override
-                            // But allow some server updates if they don't conflict
-                            updatedAt: serverLead.updatedAt || localLead.updatedAt,
-                            // Keep local lastModified to track our changes
-                            lastModified: localLead.lastModified || new Date().toISOString()
-                        };
-                        preservedCount++;
-                    } else {
-                        // No recent local changes - safe to update with server data
-                        mergedLeads[localLeadIndex] = {
-                            ...localLead,
-                            ...serverLead,
-                            lastModified: new Date().toISOString()
-                        };
-                        updatedCount++;
-                    }
-                }
-            });
-
-            console.log(`🧠 SMART SERVER REFRESH COMPLETE: Added ${addedCount}, Preserved ${preservedCount}, Updated ${updatedCount}`);
-            console.log(`🛡️ PROTECTION ACTIVE: Local changes saved from server overwrite!`);
-
-            // Save the smartly merged data
-            localStorage.setItem('insurance_leads', JSON.stringify(mergedLeads));
+            // Update localStorage with fresh server data
+            localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
 
             // Trigger display refresh
             if (window.displayLeads) {
@@ -6740,7 +8432,7 @@ async function loadLeadsFromServerAndRefresh() {
                 window.loadLeadsView();
             }
 
-            console.log('✅ Leads refreshed from server with smart merge protection');
+            console.log('✅ Leads refreshed from server');
         }
     } catch (error) {
         console.error('❌ Error refreshing leads from server:', error);
@@ -6819,6 +8511,7 @@ window.updateLeadAssignedTo = protectedFunctions.updateLeadAssignedTo;
 window.updateLeadStatus = protectedFunctions.updateLeadStatus;
 window.updateLeadPriority = protectedFunctions.updateLeadPriority;
 window.updateWinLossStatus = protectedFunctions.updateWinLossStatus;
+window.updateConfirmedPremiumStatus = protectedFunctions.updateConfirmedPremiumStatus;
 window.removeAttachment = protectedFunctions.removeAttachment;
 window.addMoreAttachments = protectedFunctions.addMoreAttachments;
 window.sendEmail = protectedFunctions.sendEmail;
@@ -6942,14 +8635,6 @@ window.handleContactAttemptedCompletion = async function(leadId) {
             }, 1000);
         }
 
-        // CALLBACK COMPLETION: Complete any active callbacks for this lead
-        if (typeof window.completeCallback === 'function') {
-            console.log('✅ CALLBACK COMPLETION: Completing scheduled callbacks for lead', leadId);
-            window.completeCallback(leadId, true);
-        } else {
-            console.log('⚠️  CALLBACK COMPLETION: completeCallback function not available');
-        }
-
     } catch (error) {
         console.error('Error completing Contact Attempted reach-out:', error);
         if (window.showNotification) {
@@ -7038,6 +8723,10 @@ window.addDriver = function(leadId) {
             violations: ''
         });
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Sync to server
+        syncLeadToServer(leadId, { drivers: lead.drivers });
+
         // Refresh the lead profile to show new card
         if (window.showLeadProfile) {
             window.showLeadProfile(leadId);
@@ -7054,6 +8743,9 @@ window.updateVehicle = function(leadId, vehicleIndex, field, value) {
     if (lead && lead.vehicles && lead.vehicles[vehicleIndex]) {
         lead.vehicles[vehicleIndex][field] = value;
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Also save to server to persist changes
+        syncLeadToServer(leadId, { vehicles: lead.vehicles });
         console.log('✅ Vehicle updated');
     }
 };
@@ -7065,6 +8757,9 @@ window.updateTrailer = function(leadId, trailerIndex, field, value) {
     if (lead && lead.trailers && lead.trailers[trailerIndex]) {
         lead.trailers[trailerIndex][field] = value;
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Also save to server to persist changes
+        syncLeadToServer(leadId, { trailers: lead.trailers });
         console.log('✅ Trailer updated');
     }
 };
@@ -7076,6 +8771,9 @@ window.updateDriver = function(leadId, driverIndex, field, value) {
     if (lead && lead.drivers && lead.drivers[driverIndex]) {
         lead.drivers[driverIndex][field] = value;
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Also save to server to persist changes
+        syncLeadToServer(leadId, { drivers: lead.drivers });
         console.log('✅ Driver updated');
     }
 };
@@ -7088,6 +8786,10 @@ window.removeVehicle = function(leadId, vehicleIndex) {
     if (lead && lead.vehicles && lead.vehicles[vehicleIndex] !== undefined) {
         lead.vehicles.splice(vehicleIndex, 1);
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Also save to server to persist changes
+        syncLeadToServer(leadId, { vehicles: lead.vehicles });
+
         // Refresh the lead profile
         if (window.showLeadProfile) {
             window.showLeadProfile(leadId);
@@ -7103,6 +8805,10 @@ window.removeTrailer = function(leadId, trailerIndex) {
     if (lead && lead.trailers && lead.trailers[trailerIndex] !== undefined) {
         lead.trailers.splice(trailerIndex, 1);
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Also save to server to persist changes
+        syncLeadToServer(leadId, { trailers: lead.trailers });
+
         // Refresh the lead profile
         if (window.showLeadProfile) {
             window.showLeadProfile(leadId);
@@ -7118,6 +8824,10 @@ window.removeDriver = function(leadId, driverIndex) {
     if (lead && lead.drivers && lead.drivers[driverIndex] !== undefined) {
         lead.drivers.splice(driverIndex, 1);
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Also save to server to persist changes
+        syncLeadToServer(leadId, { drivers: lead.drivers });
+
         // Refresh the lead profile
         if (window.showLeadProfile) {
             window.showLeadProfile(leadId);
@@ -7897,7 +9607,11 @@ protectedFunctions.fixAllLeadReachOutReferences = function() {
                     // Preserve other important properties
                     ...(lead.reachOut.callLogs && { callLogs: [...(lead.reachOut.callLogs || [])] }),
                     ...(lead.reachOut.completedAt && { completedAt: lead.reachOut.completedAt }),
-                    ...(lead.reachOut.reachOutCompletedAt && { reachOutCompletedAt: lead.reachOut.reachOutCompletedAt })
+                    ...(lead.reachOut.reachOutCompletedAt && { reachOutCompletedAt: lead.reachOut.reachOutCompletedAt }),
+                    ...(lead.reachOut.emailConfirmed !== undefined && { emailConfirmed: lead.reachOut.emailConfirmed }),
+                    ...(lead.reachOut.greenHighlightUntil && { greenHighlightUntil: lead.reachOut.greenHighlightUntil }),
+                    ...(lead.reachOut.greenHighlightDays !== undefined && { greenHighlightDays: lead.reachOut.greenHighlightDays }),
+                    ...(lead.reachOut.emailConfirmations && { emailConfirmations: [...(lead.reachOut.emailConfirmations || [])] })
                 };
                 fixedCount++;
             }
@@ -8020,6 +9734,7 @@ window.viewLead = protectedFunctions.viewLead;
 window.createEnhancedProfile = protectedFunctions.createEnhancedProfile;
 window.showLeadProfile = protectedFunctions.showLeadProfile;
 window.updateReachOut = protectedFunctions.updateReachOut;
+console.log('✅ ASSIGNMENT: window.updateReachOut assigned:', typeof window.updateReachOut);
 window.showCallLogs = protectedFunctions.showCallLogs;
 window.showCallStatus = protectedFunctions.showCallStatus;
 
@@ -8142,6 +9857,1350 @@ window.getReachOutStatus = function(lead) {
     }
 };
 
+// Callback Scheduler Functions
+window.scheduleCallback = async function(leadId) {
+    const dateInput = document.getElementById(`callback-date-${leadId}`);
+    const timeInput = document.getElementById(`callback-time-${leadId}`);
+    const notesInput = document.getElementById(`callback-notes-${leadId}`);
+
+    const date = dateInput.value;
+    const time = timeInput.value;
+    const notes = notesInput.value.trim();
+
+    if (!date || !time) {
+        alert('Please select both date and time for the callback.');
+        return;
+    }
+
+    // Combine date and time
+    const callbackDateTime = new Date(`${date}T${time}`);
+    const now = new Date();
+
+    if (callbackDateTime <= now) {
+        alert('Please select a future date and time for the callback.');
+        return;
+    }
+
+    // Create new callback object
+    const callbackId = Date.now();
+    const newCallback = {
+        id: callbackId,
+        leadId: leadId,
+        date: date,
+        time: time,
+        dateTime: callbackDateTime.toISOString(),
+        notes: notes,
+        completed: false,
+        created: new Date().toISOString()
+    };
+
+    try {
+        // Save to server
+        const response = await fetch(`/api/callbacks`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                callback_id: callbackId.toString(),
+                lead_id: leadId,
+                date_time: callbackDateTime.toISOString(),
+                notes: notes
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to save callback to server');
+        }
+
+        console.log('✅ Callback saved to server');
+
+        // Also save to localStorage for immediate display
+        const callbacksKey = 'scheduled_callbacks';
+        let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+
+        // SINGLE CALLBACK OVERRIDE: Replace any existing callbacks for this lead
+        callbacks[leadId] = [newCallback]; // Only keep the new callback, override all previous ones
+        localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
+
+        // Clear inputs
+        dateInput.value = '';
+        timeInput.value = '';
+        notesInput.value = '';
+
+        // Refresh display
+        displayScheduledCallbacks(leadId); // Note: intentionally not awaited to avoid blocking
+
+        console.log('✅ Callback scheduled (replaced any existing) for:', callbackDateTime);
+    } catch (error) {
+        console.error('❌ Failed to save callback:', error);
+        alert('Failed to save callback. Please try again.');
+    }
+};
+
+window.displayScheduledCallbacks = async function(leadId) {
+    const container = document.getElementById(`scheduled-callbacks-${leadId}`);
+    if (!container) return;
+
+    console.log('📅 CALLBACK DISPLAY: Loading callbacks for lead', leadId, 'from localStorage and server...');
+
+    // Load from localStorage first (legacy storage)
+    const callbacksKey = 'scheduled_callbacks';
+    const localCallbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+    const localLeadCallbacks = localCallbacks[leadId] || [];
+
+    // Load from server/database
+    let serverCallbacks = [];
+    let serverRequestSuccessful = false;
+    try {
+        const response = await fetch(`/api/callbacks?leadId=${leadId}`);
+        if (response.ok) {
+            const data = await response.json();
+            serverCallbacks = data.callbacks || [];
+            serverRequestSuccessful = true;
+            console.log('📋 SERVER CALLBACKS: Loaded', serverCallbacks.length, 'callbacks from server for lead', leadId);
+        } else {
+            console.warn('⚠️ Failed to load callbacks from server:', response.status);
+        }
+    } catch (error) {
+        console.warn('⚠️ Failed to fetch callbacks from server:', error.message);
+    }
+
+    // Convert server callback format to match local format
+    const convertedServerCallbacks = serverCallbacks.map(callback => ({
+        id: callback.callback_id || callback.id,
+        dateTime: callback.date_time,
+        notes: callback.notes,
+        completed: callback.completed === 1,
+        importedFromVicidial: callback.notes && callback.notes.includes('imported from ViciDial')
+    }));
+
+    // CONSERVATIVE CLEANUP: Only clean up localStorage if we're absolutely certain
+    // the server doesn't have callbacks AND the local callbacks are old (>24 hours)
+    if (localLeadCallbacks.length > 0 && convertedServerCallbacks.length === 0 && serverRequestSuccessful) {
+        // Check if local callbacks are old (created more than 24 hours ago)
+        const now = new Date();
+        const oldCallbacks = localLeadCallbacks.filter(callback => {
+            const callbackCreated = new Date(callback.createdAt || callback.dateTime);
+            const hoursDiff = (now - callbackCreated) / (1000 * 60 * 60);
+            return hoursDiff > 24;
+        });
+
+        if (oldCallbacks.length > 0 && oldCallbacks.length === localLeadCallbacks.length) {
+            // Only clean up if ALL callbacks are old (>24 hours)
+            console.log('🧹 CONSERVATIVE CLEANUP: All localStorage callbacks are >24h old and server has none - cleaning up', oldCallbacks.length, 'callbacks');
+            const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+            if (callbacks[leadId]) {
+                delete callbacks[leadId];
+                localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
+                console.log('✅ CLEANUP: Removed old localStorage callbacks for lead', leadId);
+            }
+        } else {
+            console.log('🛡️ PRESERVING: Server has no callbacks but localStorage callbacks are recent - keeping them');
+        }
+    } else if (!serverRequestSuccessful && localLeadCallbacks.length > 0) {
+        console.log('🔧 PRESERVING: Server request failed, keeping localStorage callbacks for lead', leadId);
+    }
+
+    // Combine local and server callbacks, avoiding duplicates
+    const allCallbacks = [...localLeadCallbacks];
+    convertedServerCallbacks.forEach(serverCallback => {
+        const exists = allCallbacks.find(local => String(local.id) === String(serverCallback.id));
+        if (!exists) {
+            allCallbacks.push(serverCallback);
+        }
+    });
+
+    // FILTER OUT COMPLETED CALLBACKS - only show active ones
+    let activeCallbacks = allCallbacks.filter(callback => !callback.completed);
+
+    // SINGLE CALLBACK CONSTRAINT: Only show the most recent callback (sort by creation time or callback time)
+    if (activeCallbacks.length > 1) {
+        console.log('🔧 SINGLE CALLBACK FIX: Found', activeCallbacks.length, 'active callbacks, showing only the most recent');
+
+        // Sort by dateTime (most recent callback time) and take the last one
+        activeCallbacks.sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+        const mostRecentCallback = activeCallbacks[activeCallbacks.length - 1];
+        const oldCallbacks = activeCallbacks.slice(0, -1); // All except the most recent
+
+        // Clean up old callbacks in localStorage
+        if (localCallbacks[leadId]) {
+            localCallbacks[leadId] = [mostRecentCallback];
+            localStorage.setItem(callbacksKey, JSON.stringify(localCallbacks));
+            console.log('🧹 CLEANUP: Removed', oldCallbacks.length, 'old callbacks from localStorage');
+        }
+
+        // Clean up old callbacks on server (async, don't wait)
+        oldCallbacks.forEach(oldCallback => {
+            fetch(`/api/callbacks/${oldCallback.id}`, { method: 'DELETE' })
+                .then(() => console.log('🧹 SERVER CLEANUP: Deleted old callback', oldCallback.id))
+                .catch(err => console.warn('⚠️ Failed to delete old callback:', err));
+        });
+
+        activeCallbacks = [mostRecentCallback]; // Keep only the most recent callback
+    }
+
+    console.log('📋 CALLBACK DISPLAY: Lead', leadId, 'has', allCallbacks.length, 'total callbacks,', activeCallbacks.length, 'active (showing most recent only)');
+    console.log('📋 CALLBACK DETAILS:', activeCallbacks.map(cb => ({ id: cb.id, dateTime: cb.dateTime, notes: cb.notes?.substring(0, 50) })));
+
+    // FORCE CLEAR: Always clear the container first to prevent stuck UI
+    container.innerHTML = '';
+    // Additional aggressive clearing for rescheduling issues
+    container.style.display = 'none';
+    container.offsetHeight; // Force reflow
+    container.style.display = 'block';
+    console.log('🧹 FORCE CLEAR: Aggressively cleared callback container for lead', leadId);
+
+    if (activeCallbacks.length === 0) {
+        console.log('📋 CALLBACK DISPLAY: No active callbacks to show for lead', leadId);
+        return;
+    }
+
+    const now = new Date();
+    let html = '<div style="border-top: 1px solid #0277bd; padding-top: 15px;"><h4 style="margin: 0 0 10px 0; color: #0277bd; font-size: 14px;"><i class="fas fa-clock"></i> Scheduled Callbacks</h4>';
+
+    // Sort callbacks by date/time
+    activeCallbacks.sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+
+    activeCallbacks.forEach(callback => {
+        const callbackTime = new Date(callback.dateTime);
+        const isPast = callbackTime <= now;
+        const isToday = callbackTime.toDateString() === now.toDateString();
+
+        const timeStr = callbackTime.toLocaleDateString() + ' at ' + callbackTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const sourceIcon = callback.importedFromVicidial ? '📞' : '📅';
+        const sourceText = callback.importedFromVicidial ? ' (ViciDial Import)' : '';
+
+        html += `
+            <div style="background: ${isPast ? '#fee2e2' : isToday ? '#fef3c7' : '#f0f9ff'}; padding: 10px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid ${isPast ? '#dc2626' : isToday ? '#f59e0b' : '#0277bd'};">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; color: ${isPast ? '#dc2626' : isToday ? '#f59e0b' : '#0277bd'}; font-size: 13px;">
+                            ${isPast ? '🔴 OVERDUE' : isToday ? '⚡ TODAY' : sourceIcon} ${timeStr}${sourceText}
+                        </div>
+                        ${callback.notes ? `<div style="font-size: 12px; color: #6b7280; margin-top: 5px;">${callback.notes}</div>` : ''}
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        <button onclick="showCallbackScheduler('${leadId}')"
+                                style="background: #3b82f6; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">
+                            <i class="fas fa-calendar-alt"></i> Reschedule
+                        </button>
+                        <button onclick="forceRefreshCallbackDisplay('${leadId}')"
+                                style="background: #6b7280; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;" title="Refresh display if stuck">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+
+    // Set the HTML and force a DOM refresh
+    container.innerHTML = html;
+
+    // Force DOM to refresh by triggering a reflow
+    container.offsetHeight;
+
+    console.log('✅ CALLBACK UI: Successfully refreshed callback display for lead', leadId);
+};
+
+// Force refresh callback display (for stuck UI issues)
+window.forceRefreshCallbackDisplay = function(leadId) {
+    console.log('🔄 FORCE REFRESH: Forcing callback display refresh for lead', leadId);
+
+    // Find and clear the callback container
+    const container = document.getElementById(`scheduled-callbacks-${leadId}`);
+    if (container) {
+        // Clear immediately
+        container.innerHTML = '';
+        container.style.display = 'none';
+
+        // Force reflow
+        container.offsetHeight;
+
+        // Show again and refresh
+        container.style.display = 'block';
+
+        // Delay the refresh slightly to ensure DOM is ready
+        setTimeout(() => {
+            displayScheduledCallbacks(leadId);
+            console.log('✅ FORCE REFRESH: Completed forced refresh for lead', leadId);
+        }, 100);
+    } else {
+        console.log('⚠️ FORCE REFRESH: No callback container found for lead', leadId);
+    }
+}
+
+window.completeCallback = async function(leadId, callbackId) {
+    console.log('✅ COMPLETING CALLBACK:', leadId, callbackId);
+
+    // CRITICAL FIX: Check the call stack to detect if this is from "Not Needed" flow
+    const stackTrace = new Error().stack || '';
+    const isFromCompleteAllCallbacks = stackTrace.includes('completeAllCallbacksForLead') ||
+                                       stackTrace.includes('no-callback-needed') ||
+                                       callbackId === true ||
+                                       callbackId === 'true';
+
+    if (isFromCompleteAllCallbacks) {
+        console.log('🔧 SILENT COMPLETION: Detected call from "Not Needed" flow - completing silently');
+
+        // Complete callback silently using completeCallbackAfterOutcome directly
+        if (callbackId && callbackId !== true && callbackId !== 'true') {
+            console.log('🔧 SILENT: Completing callback', callbackId, 'silently for lead', leadId);
+            completeCallbackAfterOutcome(leadId, callbackId, 'answered');
+        } else {
+            // Complete all callbacks silently
+            const callbacksKey = 'scheduled_callbacks';
+            let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+
+            if (callbacks[leadId] && callbacks[leadId].length > 0) {
+                console.log('🔧 SILENT: Completing', callbacks[leadId].length, 'callbacks silently for lead', leadId);
+                callbacks[leadId].forEach(callback => {
+                    completeCallbackAfterOutcome(leadId, callback.id, 'answered');
+                });
+            }
+        }
+        return;
+    }
+
+    // Show call outcome popup for individual callback completions (when user clicks "Done" button)
+    console.log('🎯 SHOWING POPUP: Regular callback completion from user action');
+    showCallbackOutcomePopup(leadId, callbackId);
+};
+
+// Show callback completion outcome popup
+function showCallbackOutcomePopup(leadId, callbackId) {
+    // CRITICAL FIX: Prevent duplicate popups by checking if one was recently shown
+    const popupKey = `callback_popup_${leadId}_${callbackId}`;
+    const lastShown = window.lastCallbackPopupTimes = window.lastCallbackPopupTimes || {};
+    const now = Date.now();
+
+    if (lastShown[popupKey] && (now - lastShown[popupKey]) < 2000) {
+        console.log('🛑 DUPLICATE PREVENTION: Callback popup was shown recently, skipping duplicate');
+        return;
+    }
+    lastShown[popupKey] = now;
+
+    // Remove any existing popup
+    const existingPopup = document.getElementById('callback-outcome-popup');
+    if (existingPopup) {
+        console.log('🔧 CLEANUP: Removing existing callback outcome popup');
+        existingPopup.remove();
+    }
+
+    // Create backdrop
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000001;
+    `;
+
+    // Create popup
+    const popup = document.createElement('div');
+    popup.id = 'callback-outcome-popup';
+    popup.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: rgba(0, 0, 0, 0.5) 0px 20px 50px;
+        z-index: 1000002;
+        min-width: 400px;
+    `;
+
+    popup.innerHTML = `
+        <div style="text-align: center;">
+            <h3 style="margin-top: 0;">Callback Complete</h3>
+            <p style="font-size: 16px; margin: 20px 0;">Did they answer?</p>
+            <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px;">
+                <button onclick="handleCallbackOutcome('${leadId}', '${callbackId}', true)" style="
+                    background: #10b981;
+                    color: white;
+                    border: none;
+                    padding: 10px 30px;
+                    border-radius: 5px;
+                    font-size: 16px;
+                    cursor: pointer;
+                ">Yes</button>
+                <button onclick="handleCallbackOutcome('${leadId}', '${callbackId}', false)" style="
+                    background: #ef4444;
+                    color: white;
+                    border: none;
+                    padding: 10px 30px;
+                    border-radius: 5px;
+                    font-size: 16px;
+                    cursor: pointer;
+                ">No</button>
+            </div>
+            <div id="callback-voicemail-question" style="display: none;">
+                <p style="font-size: 16px; margin: 20px 0;">Did you leave a voicemail?</p>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button onclick="handleCallbackVoicemailOutcome('${leadId}', '${callbackId}', true)" style="
+                        background: #f59e0b;
+                        color: white;
+                        border: none;
+                        padding: 10px 30px;
+                        border-radius: 5px;
+                        font-size: 16px;
+                        cursor: pointer;
+                    ">Yes</button>
+                    <button onclick="handleCallbackVoicemailOutcome('${leadId}', '${callbackId}', false)" style="
+                        background: #6b7280;
+                        color: white;
+                        border: none;
+                        padding: 10px 30px;
+                        border-radius: 5px;
+                        font-size: 16px;
+                        cursor: pointer;
+                    ">No</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add to page
+    document.body.appendChild(backdrop);
+    document.body.appendChild(popup);
+
+    // Close on backdrop click
+    backdrop.addEventListener('click', () => {
+        backdrop.remove();
+        popup.remove();
+    });
+}
+
+// Handle callback outcome response
+window.handleCallbackOutcome = function(leadId, callbackId, answered) {
+    console.log(`📞 Callback outcome: ${answered ? 'Answered' : 'No answer'} for lead ${leadId}`);
+
+    if (answered) {
+        // They answered - complete the callback
+        completeCallbackAfterOutcome(leadId, callbackId, 'answered');
+
+        // Close popup
+        const popup = document.getElementById('callback-outcome-popup');
+        const backdrop = popup?.previousElementSibling;
+        if (popup) popup.remove();
+        if (backdrop) backdrop.remove();
+    } else {
+        // They didn't answer - show voicemail question
+        const answerSection = document.querySelector('#callback-outcome-popup div[style*="display: flex"]');
+        const voicemailSection = document.getElementById('callback-voicemail-question');
+
+        if (answerSection) answerSection.style.display = 'none';
+        if (voicemailSection) voicemailSection.style.display = 'block';
+    }
+};
+
+// Handle callback voicemail response
+window.handleCallbackVoicemailOutcome = function(leadId, callbackId, leftVoicemail) {
+    console.log(`📞 Callback voicemail: ${leftVoicemail ? 'Left voicemail' : 'No voicemail'} for lead ${leadId}`);
+
+    const outcome = leftVoicemail ? 'voicemail_left' : 'no_answer';
+    completeCallbackAfterOutcome(leadId, callbackId, outcome);
+
+    // Close popup
+    const popup = document.getElementById('callback-outcome-popup');
+    const backdrop = popup?.previousElementSibling;
+    if (popup) popup.remove();
+    if (backdrop) backdrop.remove();
+};
+
+// Complete callback after getting outcome
+async function completeCallbackAfterOutcome(leadId, callbackId, outcome) {
+    console.log('✅ COMPLETING CALLBACK WITH OUTCOME:', leadId, callbackId, outcome);
+
+    // ALWAYS remove from localStorage first (don't wait for server)
+    const callbacksKey = 'scheduled_callbacks';
+    let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+
+    if (callbacks[leadId]) {
+        const originalCount = callbacks[leadId].length;
+        console.log('🔍 LOCAL CALLBACK IDs:', callbacks[leadId].map(cb => ({id: cb.id, type: typeof cb.id})));
+        console.log('🔍 LOOKING FOR ID:', callbackId, 'type:', typeof callbackId);
+
+        callbacks[leadId] = callbacks[leadId].filter(cb => {
+            // Check multiple possible ID formats using string comparison for consistency
+            const matchesId = String(cb.id) !== String(callbackId);
+            const matchesCallbackId = cb.callback_id && String(cb.callback_id) !== String(callbackId);
+            const shouldKeep = matchesId && (matchesCallbackId !== false);
+            console.log('🔍 COMPARING:', {
+                cbId: cb.id,
+                cbCallbackId: cb.callback_id,
+                searchFor: callbackId,
+                keepCallback: shouldKeep
+            });
+            return shouldKeep;
+        });
+
+        localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
+        console.log('✅ LOCAL REMOVAL: Removed callback', callbackId, 'from localStorage. Count:', originalCount, '->', callbacks[leadId].length);
+    }
+
+    // Always refresh display immediately using force refresh
+    if (typeof forceRefreshCallbackDisplay === 'function') {
+        forceRefreshCallbackDisplay(leadId);
+    } else {
+        displayScheduledCallbacks(leadId); // Fallback
+    }
+    console.log('✅ DISPLAY REFRESHED: Callback display updated for lead', leadId);
+
+    // Update the table cell to remove the "Reach out: CALL" message
+    updateTableAfterCallbackComplete(leadId);
+    console.log('✅ TABLE UPDATED: Table cell updated for lead', leadId);
+
+    // Try to mark as complete on server (but don't fail if it doesn't work)
+    try {
+        const response = await fetch(`/api/callbacks/${callbackId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            console.log('✅ SERVER SYNC: Callback marked as complete on server');
+        } else {
+            console.log('⚠️  SERVER SYNC: Server update failed but local removal succeeded');
+        }
+    } catch (error) {
+        console.log('⚠️  SERVER SYNC: Server unavailable but local removal succeeded:', error.message);
+    }
+
+    // TODO: Here we could save the outcome to the lead's history or notes
+    console.log('📋 CALLBACK OUTCOME RECORDED:', outcome);
+}
+
+// Function to update table cell after callback completion
+function updateTableAfterCallbackComplete(leadId) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+
+    if (!lead) return;
+
+    // Find the table row for this lead
+    const tableBody = document.getElementById('leadsTableBody');
+    if (!tableBody) return;
+
+    const rows = tableBody.querySelectorAll('tr');
+    rows.forEach(row => {
+        const checkbox = row.querySelector('.lead-checkbox');
+        if (!checkbox) return;
+
+        const rowLeadId = checkbox.value;
+        if (String(rowLeadId) === String(leadId)) {
+            // Get the TODO cell (7th column, index 6)
+            const todoCell = row.querySelectorAll('td')[6];
+            if (!todoCell) return;
+
+            // Check if there are any remaining callbacks for this lead
+            const callbacksKey = 'scheduled_callbacks';
+            const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+            const leadCallbacks = callbacks[leadId] || [];
+            const now = new Date();
+            const dueCallbacks = leadCallbacks.filter(cb => new Date(cb.dateTime) <= now);
+
+            if (dueCallbacks.length === 0) {
+                // No more due callbacks, revert to normal TODO text
+                const stage = lead.stage || 'new';
+                const nextAction = window.getNextAction ? window.getNextAction(stage, lead) : 'Review lead';
+                todoCell.innerHTML = `<div style="font-weight: bold; color: black;">${nextAction}</div>`;
+                console.log('✅ Table cell reverted to normal TODO for lead', leadId);
+            }
+        }
+    });
+}
+
+// Function to monitor callbacks and update table when due
+function monitorCallbacks() {
+    console.log('🔍 CALLBACK MONITOR: Starting callback check at', new Date().toLocaleString());
+
+    const callbacksKey = 'scheduled_callbacks';
+    const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+    const now = new Date();
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+
+    console.log('🔍 CALLBACK MONITOR: Found', Object.keys(callbacks).length, 'leads with callbacks');
+    console.log('🔍 CALLBACK MONITOR: Current time:', now.toLocaleString());
+
+    // Check for 30-minute warnings (only send once)
+    const warningsSent = JSON.parse(localStorage.getItem('callback_warnings_sent') || '{}');
+    let newWarnings = {...warningsSent};
+
+    // Check for due callbacks
+    Object.keys(callbacks).forEach(leadId => {
+        const leadCallbacks = callbacks[leadId] || [];
+        const lead = leads.find(l => String(l.id) === String(leadId));
+
+        console.log('🔍 CALLBACK MONITOR: Checking lead', leadId, 'with', leadCallbacks.length, 'callbacks');
+
+        if (!lead) {
+            console.log('❌ CALLBACK MONITOR: Lead not found in storage for ID:', leadId);
+            return;
+        }
+
+        console.log('🔍 CALLBACK MONITOR: Found lead data for', lead.name, '- assignedTo:', lead.assignedTo);
+
+        leadCallbacks.forEach(callback => {
+            const callbackTime = new Date(callback.dateTime);
+            const timeDiff = callbackTime.getTime() - now.getTime();
+            const minutesDiff = Math.floor(timeDiff / (1000 * 60));
+
+            console.log('🔍 CALLBACK MONITOR: Lead', lead.name, 'callback scheduled for', callbackTime.toLocaleString());
+            console.log('🔍 CALLBACK MONITOR: Minutes until callback:', minutesDiff);
+
+            // Send 30-minute warning email (only for incomplete callbacks)
+            if (minutesDiff <= 30 && minutesDiff > 25 && !callback.completed && !warningsSent[callback.id]) {
+                console.log('📧 CALLBACK MONITOR: Sending 30-minute warning for lead:', lead.name);
+                sendCallbackWarningEmail(lead, callback);
+                newWarnings[callback.id] = true;
+                console.log('✅ 30-minute callback warning sent for lead:', lead.name);
+            }
+
+            // Update table when callback is due
+            if (callbackTime <= now) {
+                console.log('⏰ CALLBACK MONITOR: Callback is DUE for lead:', lead.name);
+                updateTableForDueCallback(leadId, lead);
+            } else {
+                console.log('⏳ CALLBACK MONITOR: Callback not yet due for lead:', lead.name);
+            }
+        });
+    });
+
+    // Save updated warnings
+    localStorage.setItem('callback_warnings_sent', JSON.stringify(newWarnings));
+
+    console.log('🔍 CALLBACK MONITOR: Monitor check completed');
+
+    // CRITICAL FIX: Rescan green highlighting after callback monitor completes
+    // This ensures any leads that got "Reach out: CALL" text have their green highlighting removed
+    console.log('🔄 CALLBACK RESCAN: Starting green highlight rescan after callback monitor completion');
+    setTimeout(() => {
+        rescanGreenHighlightingAfterCallbacks();
+    }, 100); // Small delay to ensure DOM updates are complete
+}
+
+// Function to send callback warning email to assigned agent
+async function sendCallbackWarningEmail(lead, callback) {
+    console.warn('🚨 CALLBACK EMAIL DEBUG START 🚨');
+    console.warn('📧 EMAIL ALERT: Preparing 30-minute callback reminder email for lead:', lead.name);
+    console.warn('🔍 DEBUG: Full lead object:', JSON.stringify(lead, null, 2));
+    console.warn('🔍 DEBUG: lead.assignedTo value:', lead.assignedTo);
+    console.warn('🔍 DEBUG: lead.assignedTo type:', typeof lead.assignedTo);
+
+    // Determine recipient email based on assigned agent
+    let recipientEmail = 'grant@vigagency.com'; // Default to Grant
+    let recipientName = 'Grant';
+
+    console.warn('🔍 DEBUG: Starting email routing logic...');
+
+    if (lead.assignedTo) {
+        console.warn('🔍 DEBUG: assignedTo field exists, processing...');
+        const assignedTo = lead.assignedTo.toLowerCase();
+        console.warn('🔍 DEBUG: assignedTo (lowercase):', assignedTo);
+
+        console.warn('🔍 DEBUG: Entering switch statement with value:', assignedTo);
+        switch (assignedTo) {
+            case 'hunter':
+                recipientEmail = 'hunter@vigagency.com';
+                recipientName = 'Hunter';
+                console.warn('📧 EMAIL ALERT: ✅ MATCHED HUNTER - Routing to Hunter');
+                break;
+            case 'grant':
+                recipientEmail = 'grant@vigagency.com';
+                recipientName = 'Grant';
+                console.warn('📧 EMAIL ALERT: ✅ MATCHED GRANT - Routing to Grant');
+                break;
+            case 'carson':
+                recipientEmail = 'carson@vigagency.com';
+                recipientName = 'Carson';
+                console.warn('📧 EMAIL ALERT: ✅ MATCHED CARSON - Routing to Carson');
+                break;
+            default:
+                recipientEmail = 'grant@vigagency.com';
+                recipientName = 'Grant';
+                console.warn('📧 EMAIL ALERT: ❌ NO MATCH - Unknown assigned agent "' + assignedTo + '", defaulting to Grant');
+        }
+    } else {
+        console.warn('📧 EMAIL ALERT: ❌ NO assignedTo field found, defaulting to Grant');
+    }
+
+    console.warn('📧 EMAIL ALERT: 🎯 FINAL ROUTING DECISION - Sending callback reminder to', recipientName, 'at', recipientEmail);
+    console.warn('🚨 CALLBACK EMAIL DEBUG END 🚨');
+
+    const callbackData = {
+        leadName: lead.name || 'Unknown Lead',
+        leadPhone: lead.phone || 'No phone number',
+        dateTime: callback.dateTime,
+        notes: callback.notes || 'No notes provided',
+        assignedTo: lead.assignedTo || 'Unassigned'
+    };
+
+    const callbackTime = new Date(callback.dateTime);
+    const formattedTime = callbackTime.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    });
+
+    const subject = `🔔 Callback Reminder - ${lead.name} in 30 minutes`;
+
+    const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #dc2626, #ef4444); color: white; padding: 20px; text-align: center;">
+                <h1>🔔 Callback Reminder</h1>
+                <p style="font-size: 18px; margin: 0;">30 Minutes Until Scheduled Call</p>
+            </div>
+
+            <div style="padding: 30px; background: #f9fafb;">
+                <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #dc2626; margin-bottom: 20px;">
+                    <h2 style="margin-top: 0; color: #1f2937;">Callback Details</h2>
+                    <ul style="list-style: none; padding: 0;">
+                        <li style="margin-bottom: 10px;"><strong>📋 Lead:</strong> ${callbackData.leadName}</li>
+                        <li style="margin-bottom: 10px;"><strong>👤 Assigned To:</strong> ${callbackData.assignedTo}</li>
+                        <li style="margin-bottom: 10px;"><strong>📞 Phone:</strong> ${callbackData.leadPhone}</li>
+                        <li style="margin-bottom: 10px;"><strong>🕒 Scheduled Time:</strong> ${formattedTime}</li>
+                        <li style="margin-bottom: 10px;"><strong>📝 Notes:</strong> ${callbackData.notes}</li>
+                    </ul>
+                </div>
+
+                <div style="background: #fef3c7; padding: 15px; border-radius: 6px; border-left: 4px solid #f59e0b; margin-bottom: 20px;">
+                    <p style="margin: 0; font-weight: 600; color: #92400e;">
+                        ⏰ This call is scheduled to begin in approximately 30 minutes. Please prepare any necessary materials and ensure you're available.
+                    </p>
+                </div>
+
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="https://162-220-14-239.nip.io/#leads"
+                       style="background: #dc2626; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">
+                        🚀 Open Lead Profile
+                    </a>
+                </div>
+
+                <div style="background: #f0f9ff; padding: 15px; border-radius: 6px; margin-top: 20px;">
+                    <h4 style="margin-top: 0; color: #1e40af;">Quick Actions:</h4>
+                    <ul style="margin-bottom: 0;">
+                        <li>Review lead notes and previous interactions</li>
+                        <li>Prepare any quotes or documents needed</li>
+                        <li>Check lead's current stage and requirements</li>
+                        <li>Have contact information readily available</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div style="background: #374151; color: white; padding: 15px; text-align: center;">
+                <p style="margin: 0; font-size: 12px;">
+                    This is an automated reminder from Vanguard Insurance CRM<br>
+                    <strong>Vanguard Insurance Agency</strong> | contact@vigagency.com
+                </p>
+            </div>
+        </div>
+    `;
+
+    try {
+        console.log('📧 EMAIL ALERT: Sending callback reminder email to', recipientEmail);
+
+        // Send email using the server endpoint
+        const response = await fetch('/api/send-callback-reminder', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                to: recipientEmail,
+                subject: subject,
+                html: html
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ EMAIL ALERT: Callback reminder email sent successfully:', result.messageId);
+        } else {
+            const error = await response.json();
+            console.error('❌ EMAIL ALERT: Failed to send callback reminder email:', error);
+        }
+    } catch (error) {
+        console.error('❌ EMAIL ALERT: Network error sending callback reminder:', error);
+    }
+}
+
+// Function to update table cell when callback is due
+function updateTableForDueCallback(leadId, lead) {
+    console.log('🔍 CALLBACK DEBUG: Attempting to update table for lead:', leadId, lead.name);
+
+    const tableBody = document.getElementById('leadsTableBody');
+    if (!tableBody) {
+        console.log('❌ CALLBACK DEBUG: leadsTableBody not found');
+        return;
+    }
+
+    console.log('🔍 CALLBACK DEBUG: Found table body, searching for lead row...');
+
+    const rows = tableBody.querySelectorAll('tr');
+    console.log('🔍 CALLBACK DEBUG: Found', rows.length, 'rows in table');
+
+    let foundRow = false;
+    rows.forEach((row, index) => {
+        const checkbox = row.querySelector('.lead-checkbox');
+        if (!checkbox) {
+            console.log('🔍 CALLBACK DEBUG: Row', index, 'has no checkbox');
+            return;
+        }
+
+        const rowLeadId = checkbox.value;
+        console.log('🔍 CALLBACK DEBUG: Row', index, 'has leadId:', rowLeadId, 'looking for:', leadId);
+
+        if (String(rowLeadId) === String(leadId)) {
+            foundRow = true;
+            console.log('✅ CALLBACK DEBUG: Found matching row for lead', leadId);
+
+            // Get the TODO cell (7th column, index 6)
+            const cells = row.querySelectorAll('td');
+            console.log('🔍 CALLBACK DEBUG: Row has', cells.length, 'cells');
+
+            const todoCell = cells[7];
+            if (!todoCell) {
+                console.log('❌ CALLBACK DEBUG: TODO cell (index 7) not found');
+                return;
+            }
+
+            console.log('🔍 CALLBACK DEBUG: Current TODO cell content:', todoCell.innerHTML);
+
+            // Check if already shows callback message
+            if (todoCell.innerHTML.includes('Reach out: CALL')) {
+                console.log('🔍 CALLBACK DEBUG: Cell already shows callback message, skipping');
+                return;
+            }
+
+            const phone = lead.phone || '(614) 208-8222';
+            const newContent = `
+                <div style="font-weight: bold; color: #dc2626;">
+                    <a href="tel:${phone}"
+                       onclick="handleReachOutCall('${leadId}', '${phone}')"
+                       style="color: #dc2626; font-weight: bold; text-decoration: none; cursor: pointer;">
+                        Reach out: CALL
+                    </a>
+                </div>
+            `;
+
+            todoCell.innerHTML = newContent;
+            console.log('✅ CALLBACK DEBUG: Table updated with callback due message for lead:', lead.name);
+            console.log('🔍 CALLBACK DEBUG: New cell content:', todoCell.innerHTML);
+
+            // CRITICAL FIX: Remove green highlighting after adding "Reach out: CALL"
+            console.log('🔴 CALLBACK FIX: Removing green highlight from lead with new callback message');
+            removeGreenHighlightFromTableRow(leadId);
+        }
+    });
+
+    if (!foundRow) {
+        console.log('❌ CALLBACK DEBUG: No matching row found for leadId:', leadId);
+        console.log('🔍 CALLBACK DEBUG: Available lead IDs in table:');
+        rows.forEach((row, index) => {
+            const checkbox = row.querySelector('.lead-checkbox');
+            if (checkbox) {
+                console.log('   Row', index, ':', checkbox.value);
+            }
+        });
+    }
+}
+
+// DUPLICATE FUNCTION REMOVED - Using the agent-specific version above
+
+// Start callback monitoring when page loads
+let callbackMonitor;
+function startCallbackMonitoring() {
+    // Clear any existing monitor
+    if (callbackMonitor) {
+        clearInterval(callbackMonitor);
+    }
+
+    // Check every 5 seconds for due callbacks (very frequent)
+    callbackMonitor = setInterval(monitorCallbacks, 5000);
+
+    // Run initial check
+    monitorCallbacks();
+
+    console.log('📅 Callback monitoring started - checking every 5 seconds');
+
+    // ULTRA AGGRESSIVE monitoring for overdue callbacks
+    const overdueMonitor = setInterval(() => {
+        const callbacksKey = 'scheduled_callbacks';
+        const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+        const now = new Date();
+        let hasOverdue = false;
+
+        Object.keys(callbacks).forEach(leadId => {
+            const leadCallbacks = callbacks[leadId] || [];
+            leadCallbacks.forEach(callback => {
+                const callbackTime = new Date(callback.dateTime);
+                if (callbackTime <= now) {
+                    hasOverdue = true;
+                }
+            });
+        });
+
+        if (hasOverdue) {
+            console.log('⚡ ULTRA AGGRESSIVE: Overdue callbacks detected - forcing immediate table update');
+            checkAndRestoreCallbackMessages();
+        }
+    }, 2000); // Check every 2 seconds for overdue items
+
+    console.log('⚡ Ultra aggressive overdue monitoring started - checking every 2 seconds');
+
+    // HYPER AGGRESSIVE - Check every second for table changes
+    const hyperMonitor = setInterval(() => {
+        checkAndRestoreCallbackMessages();
+    }, 1000);
+
+    console.log('🚨 HYPER AGGRESSIVE: Checking and restoring callback messages every 1 second');
+
+    // NUCLEAR OPTION: Watch for table cell changes and immediately restore callback messages
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList' || mutation.type === 'subtree') {
+                const target = mutation.target;
+
+                // Check if this is a table cell that might contain TODO text
+                if (target && (target.tagName === 'TD' || target.tagName === 'DIV')) {
+                    // Check if this cell should show a callback message
+                    setTimeout(() => {
+                        checkAndRestoreCallbackMessages();
+                    }, 100);
+                }
+            }
+        });
+    });
+
+    // Observe the entire table for changes
+    const tableBody = document.getElementById('leadsTableBody');
+    if (tableBody) {
+        observer.observe(tableBody, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+        console.log('👀 NUCLEAR MONITOR: Watching table for any changes that override callbacks');
+    }
+}
+
+// Function to quickly check and restore callback messages
+function checkAndRestoreCallbackMessages() {
+    const callbacksKey = 'scheduled_callbacks';
+    const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+    const now = new Date();
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+
+    let restoredCount = 0;
+
+    Object.keys(callbacks).forEach(leadId => {
+        const leadCallbacks = callbacks[leadId] || [];
+        const lead = leads.find(l => String(l.id) === String(leadId));
+        if (!lead) return;
+
+        const hasOverdueCallback = leadCallbacks.some(callback => {
+            const callbackTime = new Date(callback.dateTime);
+            return callbackTime <= now;
+        });
+
+        if (hasOverdueCallback) {
+            // Check if table cell is correct
+            const tableBody = document.getElementById('leadsTableBody');
+            if (!tableBody) return;
+
+            const rows = tableBody.querySelectorAll('tr');
+            rows.forEach(row => {
+                const checkbox = row.querySelector('.lead-checkbox');
+                if (!checkbox || String(checkbox.value) !== String(leadId)) return;
+
+                const todoCell = row.querySelectorAll('td')[6];
+                if (!todoCell) return;
+
+                const currentContent = todoCell.innerHTML.trim();
+
+                // Log what we found
+                if (!currentContent.includes('Reach out: CALL')) {
+                    console.log('🚨 OVERRIDE DETECTED: Lead', lead.name, 'should show callback but shows:', currentContent.substring(0, 50));
+
+                    const phone = lead.phone || '(614) 208-8222';
+                    const newContent = `
+                        <div style="font-weight: bold; color: #dc2626;">
+                            <a href="tel:${phone}"
+                               onclick="handleReachOutCall('${leadId}', '${phone}')"
+                               style="color: #dc2626; font-weight: bold; text-decoration: none; cursor: pointer;">
+                                Reach out: CALL
+                            </a>
+                        </div>
+                    `;
+
+                    todoCell.innerHTML = newContent;
+                    restoredCount++;
+                    console.log('✅ RESTORED: Lead', lead.name, 'callback message restored');
+                } else {
+                    // Already correct - no need to log every time
+                }
+            });
+        }
+    });
+
+    if (restoredCount > 0) {
+        console.log('🎯 RESTORE COMPLETE: Fixed', restoredCount, 'overridden callback messages');
+    }
+}
+
+// Function to load callbacks from server and sync with localStorage
+async function loadCallbacksFromServer() {
+    const possibleUrls = [
+        `/api/callbacks`
+    ];
+
+    for (let url of possibleUrls) {
+        try {
+            console.log('🔄 SERVER SYNC: Trying URL:', url);
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.log('❌ SERVER SYNC: Failed with status:', response.status);
+                continue;
+            }
+
+            const data = await response.json();
+            const serverCallbacks = data.callbacks || [];
+
+            console.log('✅ SERVER SYNC: Successfully connected to:', url);
+            console.log('📥 SERVER SYNC: Loaded', serverCallbacks.length, 'callbacks from server');
+            console.log('📋 SERVER SYNC: Raw server data:', serverCallbacks);
+
+            // Convert server format to localStorage format and MERGE with existing local data
+            const callbacksKey = 'scheduled_callbacks';
+            const existingCallbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+            console.log('🔄 SERVER SYNC: Existing localStorage callbacks:', existingCallbacks);
+
+            const serverCallbacks_converted = {};
+
+            serverCallbacks.forEach((serverCallback, index) => {
+                const leadId = serverCallback.lead_id;
+                const callback = {
+                    id: parseInt(serverCallback.callback_id),
+                    leadId: leadId,
+                    dateTime: serverCallback.date_time,
+                    notes: serverCallback.notes || '',
+                    completed: false,
+                    created: serverCallback.created_at
+                };
+
+                if (!serverCallbacks_converted[leadId]) {
+                    serverCallbacks_converted[leadId] = [];
+                }
+
+                serverCallbacks_converted[leadId].push(callback);
+                console.log(`📝 SERVER SYNC: Converted callback ${index + 1}:`, callback);
+            });
+
+            // MERGE server and local callbacks (prioritize local for conflicts)
+            const mergedCallbacks = {...existingCallbacks};
+
+            Object.keys(serverCallbacks_converted).forEach(leadId => {
+                const serverCallbacksForLead = serverCallbacks_converted[leadId];
+                const localCallbacksForLead = existingCallbacks[leadId] || [];
+
+                console.log(`🔄 MERGE: Lead ${leadId} - Server: ${serverCallbacksForLead.length}, Local: ${localCallbacksForLead.length}`);
+
+                // Create combined list, avoiding duplicates (prefer local version if same ID)
+                const existingIds = localCallbacksForLead.map(cb => cb.id);
+                const newServerCallbacks = serverCallbacksForLead.filter(cb => !existingIds.includes(cb.id));
+
+                mergedCallbacks[leadId] = [...localCallbacksForLead, ...newServerCallbacks];
+                console.log(`✅ MERGE: Lead ${leadId} final count: ${mergedCallbacks[leadId].length}`);
+            });
+
+            // Sort callbacks by date for each lead
+            Object.keys(mergedCallbacks).forEach(leadId => {
+                mergedCallbacks[leadId].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+                console.log(`🗂️ SERVER SYNC: Lead ${leadId} has ${mergedCallbacks[leadId].length} callbacks after merge`);
+            });
+
+            // Save merged data to localStorage
+            localStorage.setItem(callbacksKey, JSON.stringify(mergedCallbacks));
+
+            console.log('✅ SERVER SYNC: Callbacks synced to localStorage');
+            console.log('📂 SERVER SYNC: Final localStorage structure:', mergedCallbacks);
+
+            // Trigger immediate monitoring and display refresh after loading
+            setTimeout(() => {
+                console.log('🔄 SERVER SYNC: Triggering callback monitoring...');
+                monitorCallbacks();
+
+                // Also refresh displays for all leads with callbacks
+                Object.keys(mergedCallbacks).forEach(leadId => {
+                    console.log(`🎨 SERVER SYNC: Refreshing display for lead ${leadId}`);
+                    displayScheduledCallbacks(leadId); // Note: intentionally not awaited to avoid blocking
+                });
+            }, 1000);
+
+            return; // Success - exit the function
+
+        } catch (error) {
+            console.error('❌ SERVER SYNC: Error with URL', url, ':', error);
+            continue; // Try next URL
+        }
+    }
+
+    // If all URLs failed
+    console.error('❌ SERVER SYNC: All URLs failed');
+    console.log('📱 Using localStorage callbacks only');
+
+    // Show current localStorage status for debugging
+    const localCallbacks = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
+    console.log('📱 Current localStorage callbacks:', localCallbacks);
+}
+
+// Load callbacks from server when page loads
+setTimeout(loadCallbacksFromServer, 2000);
+
+// Start monitoring when the script loads - delay to run after other scripts
+setTimeout(startCallbackMonitoring, 5000);
+
+// Hook into common table update functions to reapply callback updates
+function hookTableUpdates() {
+    // Hook into loadLeadsView to reapply callback updates after table loads
+    if (window.loadLeadsView) {
+        const originalLoadLeadsView = window.loadLeadsView;
+        window.loadLeadsView = function() {
+            const result = originalLoadLeadsView.apply(this, arguments);
+
+            // Reapply callback updates after table loads
+            setTimeout(() => {
+                console.log('🔄 CALLBACK HOOK: Reapplying callback updates after loadLeadsView');
+                monitorCallbacks();
+            }, 3000);
+
+            return result;
+        };
+        console.log('🔗 Hooked into loadLeadsView for callback updates');
+    }
+
+    // Hook into displayLeads if it exists
+    if (window.displayLeads) {
+        const originalDisplayLeads = window.displayLeads;
+        window.displayLeads = function() {
+            const result = originalDisplayLeads.apply(this, arguments);
+
+            // Reapply callback updates after table displays
+            setTimeout(() => {
+                console.log('🔄 CALLBACK HOOK: Reapplying callback updates after displayLeads');
+                monitorCallbacks();
+            }, 2000);
+
+            return result;
+        };
+        console.log('🔗 Hooked into displayLeads for callback updates');
+    }
+}
+
+// Apply hooks after other scripts load
+setTimeout(hookTableUpdates, 3000);
+
+// Manual test function to trigger immediate callback check
+window.testCallbackMonitor = function() {
+    console.log('🧪 MANUAL TEST: Triggering callback monitor check...');
+    monitorCallbacks();
+};
+
+// Manual test function to trigger green highlight rescan
+window.testGreenRescan = function() {
+    console.log('🧪 MANUAL TEST: Triggering green highlight rescan...');
+    rescanGreenHighlightingAfterCallbacks();
+};
+
+// Manual test function to send a test email notification
+window.testCallbackEmail = function(leadId) {
+    console.log('🧪 EMAIL TEST: Sending test callback reminder email for lead:', leadId);
+
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+
+    if (!lead) {
+        console.error('❌ EMAIL TEST: Lead not found:', leadId);
+        alert('Lead not found with ID: ' + leadId);
+        return;
+    }
+
+    console.log('🧪 EMAIL TEST: Lead found - Name:', lead.name, 'AssignedTo:', lead.assignedTo);
+
+    const testCallback = {
+        id: Date.now(),
+        dateTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes from now
+        notes: 'Test callback notification - manual test'
+    };
+
+    console.log('🧪 EMAIL TEST: Sending test email for lead:', lead.name, 'assigned to:', lead.assignedTo);
+    sendCallbackWarningEmail(lead, testCallback);
+    alert(`Test email sent for lead: ${lead.name} (assigned to: ${lead.assignedTo || 'Unassigned'})`);
+};
+
+// Manual function to check lead assignment data
+window.checkLeadAssignment = function(leadId) {
+    console.log('🔍 ASSIGNMENT CHECK: Checking assignment for lead:', leadId);
+
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+
+    if (!lead) {
+        console.error('❌ ASSIGNMENT CHECK: Lead not found:', leadId);
+        alert('Lead not found with ID: ' + leadId);
+        return;
+    }
+
+    console.log('🔍 ASSIGNMENT CHECK: Lead data:', JSON.stringify(lead, null, 2));
+    console.log('🔍 ASSIGNMENT CHECK: assignedTo field:', lead.assignedTo);
+    console.log('🔍 ASSIGNMENT CHECK: assignedTo type:', typeof lead.assignedTo);
+
+    alert(`Lead: ${lead.name}\nAssigned To: ${lead.assignedTo || 'Unassigned'}\nType: ${typeof lead.assignedTo}`);
+};
+
+// Manual test function to force update a specific lead's table cell
+window.testUpdateTable = function(leadId) {
+    console.log('🧪 MANUAL TEST: Force updating table for lead:', leadId);
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (lead) {
+        updateTableForDueCallback(leadId, lead);
+    } else {
+        console.log('❌ Lead not found:', leadId);
+    }
+};
+
+// Function to disable debug logging once system is working
+window.disableCallbackDebug = function() {
+    // Override console functions for callback debug messages
+    const originalLog = console.log;
+    console.log = function(...args) {
+        if (args[0] && typeof args[0] === 'string') {
+            if (args[0].includes('CALLBACK DEBUG') ||
+                args[0].includes('CALLBACK MONITOR') ||
+                args[0].includes('CALLBACK HOOK')) {
+                return; // Skip callback debug messages
+            }
+        }
+        originalLog.apply(console, args);
+    };
+    console.log('🔇 Callback debug logging disabled');
+};
+
+// IMMEDIATE FIX function to force callback messages right now
+window.forceCallbackFix = function() {
+    console.log('🚨 FORCE FIX: Immediately applying callback messages to all overdue callbacks');
+    checkAndRestoreCallbackMessages();
+};
+
+// Manual function to force server sync
+window.forceServerSync = function() {
+    console.log('🔄 MANUAL SYNC: Forcing callback sync from server...');
+    loadCallbacksFromServer();
+};
+
+// Function to check all scheduled callbacks and find leads by name
+window.checkCallbacks = function(searchName = null) {
+    console.log('🔍 CALLBACK CHECK: Examining all scheduled callbacks...');
+
+    const callbacksKey = 'scheduled_callbacks';
+    const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const now = new Date();
+
+    console.log('📋 Total leads with callbacks:', Object.keys(callbacks).length);
+
+    if (Object.keys(callbacks).length === 0) {
+        console.log('❌ No scheduled callbacks found');
+        return;
+    }
+
+    Object.keys(callbacks).forEach(leadId => {
+        const leadCallbacks = callbacks[leadId] || [];
+        const lead = leads.find(l => String(l.id) === String(leadId));
+
+        if (!lead) {
+            console.log('❌ Lead not found for callback ID:', leadId);
+            return;
+        }
+
+        const leadName = lead.name || lead.business_name || 'Unknown';
+        const isMatch = searchName ? leadName.toLowerCase().includes(searchName.toLowerCase()) : true;
+
+        if (isMatch) {
+            console.log('📞 LEAD:', leadName, '(ID:', leadId, ')');
+            console.log('   Company:', lead.company || lead.business_name || 'N/A');
+            console.log('   Phone:', lead.phone || 'N/A');
+            console.log('   Stage:', lead.stage || 'N/A');
+
+            leadCallbacks.forEach((callback, index) => {
+                const callbackTime = new Date(callback.dateTime);
+                const timeDiff = callbackTime.getTime() - now.getTime();
+                const minutesDiff = Math.floor(timeDiff / (1000 * 60));
+                const hoursDiff = Math.floor(minutesDiff / 60);
+                const daysDiff = Math.floor(hoursDiff / 24);
+
+                let timeStatus;
+                if (minutesDiff < 0) {
+                    timeStatus = '🔴 OVERDUE';
+                } else if (daysDiff === 0) {
+                    timeStatus = '⚡ TODAY';
+                } else {
+                    timeStatus = '📅 FUTURE';
+                }
+
+                console.log(`   Callback ${index + 1}: ${timeStatus}`);
+                console.log(`     Scheduled: ${callbackTime.toLocaleString()}`);
+                console.log(`     Time until: ${minutesDiff} minutes`);
+                console.log(`     Notes: ${callback.notes || 'None'}`);
+                console.log(`     Callback ID: ${callback.id}`);
+            });
+        }
+    });
+
+    if (searchName) {
+        console.log('🔍 Search completed for:', searchName);
+    }
+};
+
+// Function to find a lead by partial name match
+window.findLead = function(searchName) {
+    console.log('🔍 LEAD SEARCH: Looking for leads matching:', searchName);
+
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const matches = leads.filter(lead => {
+        const leadName = lead.name || lead.business_name || '';
+        const company = lead.company || lead.business_name || '';
+        return leadName.toLowerCase().includes(searchName.toLowerCase()) ||
+               company.toLowerCase().includes(searchName.toLowerCase());
+    });
+
+    console.log('📋 Found', matches.length, 'matching leads:');
+
+    matches.forEach((lead, index) => {
+        console.log(`${index + 1}. ${lead.name || lead.business_name || 'Unknown'}`);
+        console.log(`   ID: ${lead.id}`);
+        console.log(`   Company: ${lead.company || lead.business_name || 'N/A'}`);
+        console.log(`   Phone: ${lead.phone || 'N/A'}`);
+        console.log(`   Stage: ${lead.stage || 'N/A'}`);
+    });
+
+    return matches;
+};
+
 console.log('🔥 PROTECTED FUNCTIONS NOW ACTIVE - Enhanced profile with Reach Out section should load');
 console.log('🚨 FINAL-PROFILE-FIX-PROTECTED SCRIPT LOADED - VERSION 1000');
 console.log('🔍 Current functions on window:', {
@@ -8150,6 +11209,184 @@ console.log('🔍 Current functions on window:', {
     createEnhancedProfile: typeof window.createEnhancedProfile,
     getReachOutStatus: typeof window.getReachOutStatus
 });
+
+// ================================
+// VICIDIAL CALLBACK PARSING SYSTEM
+// ================================
+
+// Function to parse scheduled callbacks from ViciDial comments
+function parseVicidialCallbackFromComments(comments, leadId, leadName) {
+    if (!comments) return null;
+
+    console.log('📋 VICIDIAL CALLBACK PARSE: Checking comments for lead', leadName, ':', comments);
+
+    // Look for the scheduled call section pattern
+    const scheduledCallPattern = /--scheduled next call-+\s*\n?\s*Date:\s*([0-9]{2}\/[0-9]{2}\/[0-9]{4})\s*Time:\s*([0-9]{1,2}:[0-9]{2}[AP]M)/i;
+    const match = comments.match(scheduledCallPattern);
+
+    if (!match) {
+        console.log('❌ VICIDIAL CALLBACK PARSE: No scheduled callback found in comments for', leadName);
+        return null;
+    }
+
+    const dateStr = match[1]; // MM/DD/YYYY
+    const timeStr = match[2]; // HH:MMAM/PM
+
+    console.log('📅 VICIDIAL CALLBACK PARSE: Found scheduled callback - Date:', dateStr, 'Time:', timeStr);
+
+    try {
+        // Parse the date and time
+        const [month, day, year] = dateStr.split('/');
+        const monthNum = parseInt(month);
+        const dayNum = parseInt(day);
+        const yearNum = parseInt(year);
+
+        // Validate date components
+        if (monthNum < 1 || monthNum > 12) {
+            console.error(`❌ VICIDIAL CALLBACK PARSE: Invalid month ${monthNum} for ${leadName}`);
+            return null;
+        }
+
+        if (dayNum < 1 || dayNum > 31) {
+            console.error(`❌ VICIDIAL CALLBACK PARSE: Invalid day ${dayNum} for ${leadName}`);
+            return null;
+        }
+
+        // Create date and validate it's the same as input (catches invalid dates like Feb 30)
+        const date = new Date(yearNum, monthNum - 1, dayNum); // month is 0-indexed
+
+        // Check if the date rolled over to a different month/day (invalid date)
+        if (date.getMonth() !== (monthNum - 1) || date.getDate() !== dayNum || date.getFullYear() !== yearNum) {
+            console.error(`❌ VICIDIAL CALLBACK PARSE: Invalid date ${dateStr} for ${leadName} - date rolled over to ${date.toDateString()}`);
+            return null;
+        }
+
+        // Parse time (12-hour format)
+        const time12Hour = timeStr.toUpperCase();
+        let [hours, minutes] = time12Hour.replace(/[AP]M/, '').split(':');
+        hours = parseInt(hours);
+        minutes = parseInt(minutes);
+
+        // Validate time components
+        if (hours < 1 || hours > 12) {
+            console.error(`❌ VICIDIAL CALLBACK PARSE: Invalid hours ${hours} for ${leadName}`);
+            return null;
+        }
+
+        if (minutes < 0 || minutes > 59) {
+            console.error(`❌ VICIDIAL CALLBACK PARSE: Invalid minutes ${minutes} for ${leadName}`);
+            return null;
+        }
+
+        // Convert to 24-hour format
+        if (time12Hour.includes('PM') && hours !== 12) {
+            hours += 12;
+        } else if (time12Hour.includes('AM') && hours === 12) {
+            hours = 0;
+        }
+
+        // Set the time on the date
+        date.setHours(hours, minutes, 0, 0);
+
+        const callbackDateTime = date.toISOString();
+
+        console.log('✅ VICIDIAL CALLBACK PARSE: Successfully parsed callback for', leadName, 'at', callbackDateTime);
+
+        return {
+            id: Date.now() + Math.random(), // Unique ID
+            dateTime: callbackDateTime,
+            notes: `Scheduled callback imported from ViciDial - ${leadName}`,
+            completed: false,
+            importedFromVicidial: true,
+            originalComments: comments
+        };
+
+    } catch (error) {
+        console.error('❌ VICIDIAL CALLBACK PARSE: Error parsing date/time for', leadName, ':', error);
+        return null;
+    }
+}
+
+// Function to automatically create callback from ViciDial import
+window.createCallbackFromVicidialImport = function(leadId, leadName, comments) {
+    console.log('🎯 VICIDIAL IMPORT CALLBACK: Processing lead', leadName, 'for automatic callback creation');
+
+    const callbackData = parseVicidialCallbackFromComments(comments, leadId, leadName);
+
+    if (!callbackData) {
+        console.log('⏭️ VICIDIAL IMPORT CALLBACK: No callback found in comments for', leadName);
+        return false;
+    }
+
+    // Check if callback is in the future
+    const callbackTime = new Date(callbackData.dateTime);
+    const now = new Date();
+
+    if (callbackTime <= now) {
+        console.log('⚠️ VICIDIAL IMPORT CALLBACK: Callback time is in the past for', leadName, '- skipping');
+        return false;
+    }
+
+    // Save the callback
+    const callbacksKey = 'scheduled_callbacks';
+    let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+
+    if (!callbacks[leadId]) {
+        callbacks[leadId] = [];
+    }
+
+    // Check for duplicate callbacks (same time)
+    const existingCallback = callbacks[leadId].find(cb => cb.dateTime === callbackData.dateTime);
+    if (existingCallback) {
+        console.log('⚠️ VICIDIAL IMPORT CALLBACK: Duplicate callback already exists for', leadName, 'at', callbackData.dateTime);
+        return false;
+    }
+
+    // Add the callback
+    callbacks[leadId].push(callbackData);
+    localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
+    if (window.CallbackNotifications && window.CallbackNotifications.refresh) window.CallbackNotifications.refresh();
+
+    console.log('✅ VICIDIAL IMPORT CALLBACK: Created callback for', leadName, 'scheduled at', callbackTime.toLocaleString());
+
+    // Also save to server
+    saveCallbackToServer(leadId, callbackData);
+
+    return true;
+};
+
+// Function to save callback to server (extracted from scheduleCallback)
+async function saveCallbackToServer(leadId, callbackData) {
+    try {
+        console.log('💾 Saving ViciDial callback to server for lead:', leadId);
+
+        const response = await fetch(`/api/callbacks`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                callback_id: callbackData.id.toString(),
+                lead_id: leadId,
+                date_time: callbackData.dateTime,
+                notes: callbackData.notes
+            })
+        });
+
+        if (response.ok) {
+            console.log('✅ ViciDial callback saved to server successfully');
+            return true;
+        } else {
+            console.error('❌ Failed to save ViciDial callback to server:', response.status);
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Error saving ViciDial callback to server:', error);
+        return false;
+    }
+}
+
+console.log('📋 ViciDial Callback Parser: Functions loaded - createCallbackFromVicidialImport() and saveCallbackToServer() available');
 
 // ULTIMATE PROTECTION: Use Object.defineProperty to make functions non-configurable and non-writable
 function lockFunctions() {
@@ -8542,130 +11779,6 @@ window.updateNameFieldColor = function(inputElement) {
     }
 };
 
-// Callback Scheduler Functions
-window.scheduleCallback = function(leadId) {
-    const dateInput = document.getElementById(`callback-date-${leadId}`);
-    const timeInput = document.getElementById(`callback-time-${leadId}`);
-    const notesInput = document.getElementById(`callback-notes-${leadId}`);
-
-    const date = dateInput.value;
-    const time = timeInput.value;
-    const notes = notesInput.value.trim();
-
-    if (!date || !time) {
-        alert('Please select both date and time for the callback.');
-        return;
-    }
-
-    // Combine date and time
-    const callbackDateTime = new Date(`${date}T${time}`);
-    const now = new Date();
-
-    if (callbackDateTime <= now) {
-        alert('Please select a future date and time for the callback.');
-        return;
-    }
-
-    // Get existing callbacks from localStorage
-    const callbacksKey = 'scheduled_callbacks';
-    let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
-
-    if (!callbacks[leadId]) {
-        callbacks[leadId] = [];
-    }
-
-    // Create new callback object
-    const newCallback = {
-        id: Date.now(),
-        leadId: leadId,
-        date: date,
-        time: time,
-        dateTime: callbackDateTime.toISOString(),
-        notes: notes,
-        completed: false,
-        created: new Date().toISOString()
-    };
-
-    // Add to callbacks
-    callbacks[leadId].push(newCallback);
-    callbacks[leadId].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
-
-    // Save to localStorage
-    localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
-
-    // Schedule exact-timer alarm for the new callback immediately
-    if (window.CallbackNotifications && window.CallbackNotifications.refresh) {
-        window.CallbackNotifications.refresh();
-    }
-
-    // Clear inputs
-    dateInput.value = '';
-    timeInput.value = '';
-    notesInput.value = '';
-
-    // Refresh display
-    displayScheduledCallbacks(leadId);
-
-    console.log('✅ Callback scheduled for:', callbackDateTime);
-};
-
-window.displayScheduledCallbacks = function(leadId) {
-    const container = document.getElementById(`scheduled-callbacks-${leadId}`);
-    if (!container) return;
-
-    const callbacksKey = 'scheduled_callbacks';
-    const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
-    const leadCallbacks = callbacks[leadId] || [];
-
-    if (leadCallbacks.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
-
-    const now = new Date();
-    let html = '<div style="border-top: 1px solid #0277bd; padding-top: 15px;"><h4 style="margin: 0 0 10px 0; color: #0277bd; font-size: 14px;"><i class="fas fa-clock"></i> Scheduled Callbacks</h4>';
-
-    leadCallbacks.forEach(callback => {
-        const callbackTime = new Date(callback.dateTime);
-        const isPast = callbackTime <= now;
-        const isToday = callbackTime.toDateString() === now.toDateString();
-
-        const timeStr = callbackTime.toLocaleDateString() + ' at ' + callbackTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
-        html += `
-            <div style="background: ${isPast ? '#fee2e2' : isToday ? '#fef3c7' : '#f0f9ff'}; padding: 10px; border-radius: 6px; margin-bottom: 8px; border-left: 4px solid ${isPast ? '#dc2626' : isToday ? '#f59e0b' : '#0277bd'};">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600; color: ${isPast ? '#dc2626' : isToday ? '#f59e0b' : '#0277bd'}; font-size: 13px;">
-                            ${isPast ? '🔴 OVERDUE' : isToday ? '⚡ TODAY' : '📅'} ${timeStr}
-                        </div>
-                        ${callback.notes ? `<div style="font-size: 12px; color: #6b7280; margin-top: 5px;">${callback.notes}</div>` : ''}
-                    </div>
-                    <button onclick="showCallbackScheduler('${leadId}')"
-                            style="background: #3b82f6; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">
-                        <i class="fas fa-calendar-alt"></i> Reschedule
-                    </button>
-                </div>
-            </div>
-        `;
-    });
-
-    html += '</div>';
-    container.innerHTML = html;
-};
-
-window.completeCallback = function(leadId, callbackId) {
-    const callbacksKey = 'scheduled_callbacks';
-    let callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
-
-    if (callbacks[leadId]) {
-        callbacks[leadId] = callbacks[leadId].filter(cb => cb.id !== callbackId);
-        localStorage.setItem(callbacksKey, JSON.stringify(callbacks));
-        displayScheduledCallbacks(leadId);
-        console.log('✅ Callback completed and removed');
-    }
-};
-
 // Set up periodic monitoring to detect and prevent function override
 setInterval(() => {
     // Check if functions are still ours
@@ -8681,3 +11794,480 @@ setInterval(() => {
         lockFunctions();
     }
 }, 2000);
+
+// Function to show callback scheduling popup after contact attempt
+function showCallbackSchedulingPopup(leadId) {
+    console.log(`📞 Showing callback scheduling popup for lead: ${leadId}`);
+
+    // Create modal backdrop
+    const modal = document.createElement('div');
+    modal.className = 'call-scheduled-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0px;
+        left: 0px;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000003;
+    `;
+    modal.setAttribute('data-clickable-processed', 'true');
+
+    // Create modal content
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: rgba(0, 0, 0, 0.3) 0px 10px 30px;
+    `;
+
+    // Get current date and time for defaults
+    const now = new Date();
+    const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+    modalContent.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 15px;">
+            <h2 style="margin: 0; color: #1f2937;"><i class="fas fa-calendar-check" style="color: #3b82f6;"></i> Schedule Callback</h2>
+            <button onclick="this.closest('.call-scheduled-modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">×</button>
+        </div>
+
+        <!-- Initial Response Options -->
+        <div id="initial-options" style="display: none; gap: 15px; justify-content: center; margin-bottom: 20px;">
+            <button onclick="handleCallScheduled('${leadId}', true)" style="background: rgb(16, 185, 129); color: white; border: none; padding: 15px 25px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 16px; min-width: 120px; transition: 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+                <i class="fas fa-check"></i> Yes
+            </button>
+            <button onclick="handleCallScheduled('${leadId}', false)" style="
+                background: #ef4444;
+                color: white;
+                border: none;
+                padding: 15px 25px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 600;
+                font-size: 16px;
+                min-width: 120px;
+                transition: all 0.2s;
+            " onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">
+                <i class="fas fa-times"></i> No
+            </button>
+        </div>
+
+        <!-- Date Selector (Initially Visible) -->
+        <div id="date-selector" style="display: block; text-align: center; margin-top: 20px;">
+            <div style="margin-bottom: 15px;">
+                <label style="font-weight: 600; font-size: 16px; display: block; margin-bottom: 10px;">Select Call Date & Time:</label>
+                <div style="display: flex; gap: 15px; justify-content: center; align-items: center;">
+                    <div>
+                        <label style="font-weight: 500; font-size: 14px; display: block; margin-bottom: 5px;">Date:</label>
+                        <input type="date" id="call-date-${leadId}" min="${currentDate}" value="${currentDate}" style="padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                    </div>
+                    <div>
+                        <label style="font-weight: 500; font-size: 14px; display: block; margin-bottom: 5px;">Time:</label>
+                        <input type="time" id="call-time-${leadId}" value="${currentTime}" style="padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                    </div>
+                </div>
+            </div>
+            <button onclick="confirmCallScheduled('${leadId}')" style="
+                background: #3b82f6;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 600;
+                font-size: 14px;
+            ">
+                <i class="fas fa-calendar-check"></i> Confirm
+            </button>
+        </div>
+    `;
+
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    console.log('✅ Callback scheduling popup displayed after contact attempt');
+}
+
+// Auto-import lead quotes to market tab
+async function autoImportToMarket(leadId, leadName) {
+    console.log(`🔄 Auto-importing quotes from lead ${leadId} (${leadName}) to market tab`);
+
+    // First check eligibility
+    if (typeof checkAutoImportEligibility === 'function') {
+        const eligibility = await checkAutoImportEligibility(leadId);
+
+        if (!eligibility.eligible) {
+            // Show informational message about why it's not eligible
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #f59e0b;
+                color: white;
+                padding: 16px 24px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+                z-index: 10001;
+                animation: slideInRight 0.3s ease-out;
+                font-weight: 600;
+                max-width: 300px;
+            `;
+            notification.innerHTML = `
+                <div style="display: flex; align-items: center;">
+                    <i class="fas fa-info-circle" style="margin-right: 8px; color: #fbbf24;"></i>
+                    <span>Auto-import not available: ${eligibility.reason}</span>
+                </div>
+            `;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.remove();
+            }, 4000);
+
+            console.log(`ℹ️ Auto-import not eligible: ${eligibility.reason}`);
+            return;
+        }
+
+        console.log(`✅ Eligibility check passed: ${eligibility.matchingQuotes} matching quotes from ${eligibility.totalQuotes} total`);
+    }
+
+    // Perform auto-import
+    if (typeof autoImportLeadQuotes === 'function') {
+        await autoImportLeadQuotes(leadId, leadName);
+    } else {
+        console.error('❌ autoImportLeadQuotes function not available');
+        alert('Auto-import functionality not available. Please ensure market functions are loaded.');
+    }
+}
+
+// Make function globally available
+window.autoImportToMarket = autoImportToMarket;
+
+// Manual DOT Lookup function for profile button
+window.triggerManualDOTLookup = async function(leadId, dotNumber) {
+    if (!leadId || !dotNumber) {
+        alert('❌ Lead ID or DOT number missing');
+        return;
+    }
+
+    console.log(`🎯 MANUAL DOT LOOKUP: Triggered for lead ${leadId} with DOT ${dotNumber}`);
+
+    try {
+        // Show loading state
+        const button = event.target;
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Looking up...';
+        button.disabled = true;
+
+        let result = null;
+
+        // Try the manual trigger function first
+        if (window.manualDOTLookupTrigger) {
+            console.log('🔧 Using manualDOTLookupTrigger function');
+            result = await window.manualDOTLookupTrigger(leadId, dotNumber);
+        }
+
+        // If that didn't work, try direct API call
+        if (!result) {
+            console.log('🔧 Trying direct API call');
+            const cleanDOT = dotNumber.toString().trim().replace(/[^\\d]/g, '');
+            const response = await fetch(`/api/test-db/${cleanDOT}`);
+            const data = await response.json();
+
+            if (data.success && data.carrier) {
+                // Calculate years from DOT
+                function calculateYearsFromDOT(dotNumber) {
+                    if (!dotNumber) return '';
+                    const dotNum = parseInt(dotNumber);
+                    if (dotNum < 1000000) return '25+ years';
+                    if (dotNum < 2000000) return '15-20 years';
+                    if (dotNum < 3000000) return '10-15 years';
+                    return '5-10 years';
+                }
+
+                // Manually update the lead
+                const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+                const leadIndex = leads.findIndex(lead => lead.id === leadId || lead.id === leadId.toString());
+
+                if (leadIndex !== -1) {
+                    leads[leadIndex].state = data.carrier.PHY_STATE || data.carrier.state || '';
+                    leads[leadIndex].yearsInBusiness = calculateYearsFromDOT(data.carrier.DOT_NUMBER) || '';
+                    leads[leadIndex].commodityHauled = 'General Freight';
+
+                    console.log(`🔧 MANUAL DOT: Before save - Lead ${leadId}:`, {
+                        state: leads[leadIndex].state,
+                        yearsInBusiness: leads[leadIndex].yearsInBusiness,
+                        commodityHauled: leads[leadIndex].commodityHauled
+                    });
+
+                    // Use protected save with enhanced persistence
+                    window.dotLookupInProgress = true;
+                    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+                    // Force multiple saves to ensure persistence
+                    setTimeout(() => {
+                        localStorage.setItem('insurance_leads', JSON.stringify(leads));
+                        console.log('🔄 MANUAL DOT: Second save completed');
+
+                        setTimeout(() => {
+                            localStorage.setItem('insurance_leads', JSON.stringify(leads));
+                            window.dotLookupInProgress = false;
+                            console.log('🔄 MANUAL DOT: Final save completed');
+
+                            // Verify the data was saved
+                            const verifyLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+                            const verifyLead = verifyLeads.find(lead => lead.id === leadId || lead.id === leadId.toString());
+                            console.log(`✅ MANUAL DOT: Verification - Lead ${leadId} saved data:`, {
+                                state: verifyLead?.state,
+                                yearsInBusiness: verifyLead?.yearsInBusiness,
+                                commodityHauled: verifyLead?.commodityHauled
+                            });
+                        }, 100);
+                    }, 50);
+
+                    result = {
+                        success: true,
+                        state: leads[leadIndex].state,
+                        yearsInBusiness: leads[leadIndex].yearsInBusiness,
+                        commodityHauled: leads[leadIndex].commodityHauled
+                    };
+
+                    console.log('✅ MANUAL DOT LOOKUP: Data populated successfully', result);
+                } else {
+                    console.log('❌ MANUAL DOT LOOKUP: Lead not found for update');
+                }
+            }
+        }
+
+        // Restore button and show result
+        button.innerHTML = originalText;
+        button.disabled = false;
+
+        if (result && result.success !== false) {
+            console.log('✅ MANUAL DOT LOOKUP: Success!', result);
+            alert(`✅ DOT Lookup Success!
+
+State: ${result.state || 'Not found'}
+Years in Business: ${result.yearsInBusiness || 'Not found'}
+Commodity: ${result.commodityHauled || 'Not found'}
+
+Profile will refresh with green backgrounds.`);
+
+            // Refresh the profile to show updated data with updated values - delay to allow localStorage saves
+            setTimeout(() => {
+                // Force update the input fields immediately
+                const stateInput = document.querySelector(`input[onchange*="updateLeadField('${leadId}', 'state'"]`);
+                const yearsInput = document.querySelector(`input[onchange*="updateLeadField('${leadId}', 'yearsInBusiness'"]`);
+                const commodityInput = document.querySelector(`input[onchange*="updateLeadField('${leadId}', 'commodityHauled'"]`);
+
+                if (stateInput && result.state) {
+                    stateInput.value = result.state;
+                    stateInput.style.backgroundColor = '#dcfce7'; // Green background
+                    stateInput.style.borderColor = '#10b981';
+                }
+                if (yearsInput && result.yearsInBusiness) {
+                    yearsInput.value = result.yearsInBusiness;
+                    yearsInput.style.backgroundColor = '#dcfce7'; // Green background
+                    yearsInput.style.borderColor = '#10b981';
+                }
+                if (commodityInput && result.commodityHauled) {
+                    commodityInput.value = result.commodityHauled;
+                    commodityInput.style.backgroundColor = '#dcfce7'; // Green background
+                    commodityInput.style.borderColor = '#10b981';
+                }
+
+                console.log(`🎨 MANUAL DOT: Updated form fields directly for lead ${leadId}`);
+
+                // Fallback: Also try to find by placeholder text and update
+                const allInputs = document.querySelectorAll('input[placeholder*="Auto-populated from DOT lookup"]');
+                allInputs.forEach(input => {
+                    const labelText = input.previousElementSibling?.textContent || '';
+                    if (labelText.includes('State:') && result.state) {
+                        input.value = result.state;
+                        input.style.backgroundColor = '#dcfce7';
+                        input.style.borderColor = '#10b981';
+                    }
+                    if (labelText.includes('Years') && result.yearsInBusiness) {
+                        input.value = result.yearsInBusiness;
+                        input.style.backgroundColor = '#dcfce7';
+                        input.style.borderColor = '#10b981';
+                    }
+                    if (labelText.includes('Commodity') && result.commodityHauled) {
+                        input.value = result.commodityHauled;
+                        input.style.backgroundColor = '#dcfce7';
+                        input.style.borderColor = '#10b981';
+                    }
+                });
+
+                // Then refresh the profile with longer delay
+                if (window.viewLead) {
+                    setTimeout(() => {
+                        window.viewLead(leadId);
+                    }, 1000);
+                }
+            }, 2000);
+        } else {
+            console.log('❌ MANUAL DOT LOOKUP: Failed');
+            alert(`❌ DOT Lookup Failed
+
+No data found for DOT ${dotNumber}
+The DOT number may not exist in our database.`);
+        }
+
+    } catch (error) {
+        console.error('❌ MANUAL DOT LOOKUP ERROR:', error);
+        alert(`❌ DOT Lookup Error
+
+${error.message}`);
+
+        // Restore button
+        if (event.target) {
+            event.target.innerHTML = '<i class="fas fa-sync-alt"></i> Rescan DOT';
+            event.target.disabled = false;
+        }
+    }
+};
+
+// Build word-span HTML from Deepgram word array (with speaker labels)
+function buildTranscriptSpans(words) {
+    let html = '';
+    let currentSpeaker = null;
+    for (const w of words) {
+        if (w.speaker !== currentSpeaker) {
+            if (currentSpeaker !== null) html += '<br>';
+            currentSpeaker = w.speaker;
+            const label = w.speaker === 0 ? 'Agent' : 'Customer';
+            html += `<strong style="color:#374151;">${label}:</strong> `;
+        }
+        html += `<span class="tw" data-s="${w.start}" data-e="${w.end}" style="cursor:pointer;" title="Click to seek" onclick="(function(el){var id=el.closest('[id^=transcript-display-]').id.replace('transcript-display-','');var a=document.getElementById('recording-audio-'+id);if(a){a.currentTime=+el.dataset.s;a.play();}})(this)">${w.word} </span>`;
+    }
+    return html;
+}
+
+// Attach audio timeupdate → word highlight sync
+function initTranscriptSync(leadId) {
+    const audio = document.getElementById(`recording-audio-${leadId}`);
+    const display = document.getElementById(`transcript-display-${leadId}`);
+    if (!audio || !display) return;
+
+    audio.addEventListener('timeupdate', function() {
+        const t = audio.currentTime;
+        let scrollTarget = null;
+        display.querySelectorAll('span.tw').forEach(span => {
+            const s = +span.dataset.s;
+            const e = +span.dataset.e;
+            if (t >= e) {
+                span.style.color = '#2563eb';  // already said — blue
+                span.style.fontWeight = '';
+            } else if (t >= s) {
+                span.style.color = '#1d4ed8';  // current word — darker blue + bold
+                span.style.fontWeight = 'bold';
+                scrollTarget = span;
+            } else {
+                span.style.color = '';
+                span.style.fontWeight = '';
+            }
+        });
+        if (scrollTarget) scrollTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+}
+
+// Transcribe a call recording on demand using Deepgram
+window.transcribeRecording = async function(leadId, recordingPath) {
+    const btn = document.getElementById(`transcribe-btn-${leadId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Transcribing...';
+    }
+
+    try {
+        const response = await fetch('/api/transcribe-recording', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ leadId, recordingPath })
+        });
+        const data = await response.json();
+
+        if (data.error) throw new Error(data.error);
+
+        // Populate the transcript display and save
+        const display = document.getElementById(`transcript-display-${leadId}`);
+        if (display) {
+            if (data.words && data.words.length) {
+                display.innerHTML = buildTranscriptSpans(data.words);
+                initTranscriptSync(leadId);
+            } else {
+                display.innerHTML = data.transcript.replace(/\n/g, '<br>');
+            }
+        }
+        if (window.updateLeadField) window.updateLeadField(leadId, 'transcriptText', data.transcript);
+
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check"></i> Transcribed';
+            btn.style.background = '#10b981';
+        }
+    } catch (err) {
+        console.error('Transcription failed:', err);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-file-alt"></i> Transcribe Recording';
+        }
+        alert('Transcription failed: ' + err.message);
+    }
+};
+
+// Function to toggle DOT lookup button visibility
+window.toggleDOTButton = function(leadId, dotValue) {
+    const button = document.getElementById(`dot-lookup-btn-${leadId}`);
+    if (button) {
+        const shouldShow = dotValue && dotValue.toString().trim() !== '';
+        button.style.display = shouldShow ? 'flex' : 'none';
+        console.log(`🔘 DOT Button toggle for lead ${leadId}: ${shouldShow ? 'SHOW' : 'HIDE'} (DOT: "${dotValue}")`);
+    }
+};
+// Navigate to lead generation tab and auto-search by DOT
+window.acctGoToDOTLookup = function(leadId) {
+    // Get the DOT number from the input field on the current profile
+    const dotInput = document.getElementById('dot-input-' + leadId);
+    const dot = (dotInput ? dotInput.value : '') || '';
+
+    // Close the lead profile modal
+    const modal = document.getElementById('lead-profile-container');
+    if (modal) {
+        if (modal._idProtectionObserver) modal._idProtectionObserver.disconnect();
+        modal.remove();
+    }
+
+    // Navigate to lead generation tab
+    if (typeof navigateToTab === 'function') {
+        navigateToTab('#lead-generation');
+    } else if (typeof setActiveTab === 'function') {
+        setActiveTab('lead-generation');
+    } else {
+        window.location.hash = 'lead-generation';
+    }
+
+    // Wait for the tab to render, then fill and trigger search
+    const attempt = (tries) => {
+        const searchInput = document.getElementById('usdotSearch');
+        const searchBtn = document.querySelector('button[onclick="performLeadSearch()"]');
+        if (searchInput && searchBtn) {
+            searchInput.value = dot;
+            searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            searchBtn.click();
+        } else if (tries > 0) {
+            setTimeout(() => attempt(tries - 1), 150);
+        }
+    };
+    setTimeout(() => attempt(10), 200);
+};

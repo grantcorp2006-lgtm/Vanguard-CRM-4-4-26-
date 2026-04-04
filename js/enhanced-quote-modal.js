@@ -482,7 +482,7 @@ window.createQuoteApplicationSimple = function(leadId) {
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Years in Business:</label>
-                        <input type="text" value="" style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
+                        <input type="text" value="${lead.yearsInBusiness || ''}" style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                     </div>
                 </div>
             </div>
@@ -535,6 +535,13 @@ window.createQuoteApplicationSimple = function(leadId) {
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-size: 12px;">Dumptruck:</label>
+                        <div style="display: flex; align-items: center;">
+                            <input type="text" value="" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
+                            <span style="margin-left: 3px;">%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 3px; font-size: 12px;">Dump Trailer:</label>
                         <div style="display: flex; align-items: center;">
                             <input type="text" value="" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
                             <span style="margin-left: 3px;">%</span>
@@ -765,8 +772,12 @@ window.createQuoteApplicationSimple = function(leadId) {
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Non-Owned Trailer Phys Dam:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
+                            <option value="$20,000/$1,000 Ded.">$20,000/$1,000 Ded.</option>
+                            <option value="$20,000/$2,000 Ded.">$20,000/$2,000 Ded.</option>
                             <option value="$25,000">$25,000</option>
+                            <option value="$40,000/$2,000 Ded.">$40,000/$2,000 Ded.</option>
                             <option value="$50,000" selected>$50,000</option>
+                            <option value="$60,000/$2,000 Ded.">$60,000/$2,000 Ded.</option>
                             <option value="$75,000">$75,000</option>
                             <option value="$100,000">$100,000</option>
                             <option value="$150,000">$150,000</option>
@@ -862,6 +873,187 @@ window.createQuoteApplicationSimple = function(leadId) {
     document.body.appendChild(modal);
     console.log('Enhanced modal created and added to DOM');
 
+    // AUTO-POPULATE from lead profile data with improved timing
+    setTimeout(() => {
+        // Skip auto-population if we're editing an existing application
+        if (window.editingApplicationData) {
+            console.log('⚠️ Skipping auto-population - editing existing application data');
+            return;
+        }
+
+        console.log('🚛 AUTO-POPULATING vehicles, trailers, drivers, and Class of Risk from lead profile...');
+
+        // Function to create rows first, then populate
+        async function autoPopulateWithSequentialTiming() {
+            // Collect all data first
+            let vehiclesToPopulate = [];
+            if (lead.isPolicyQuote && lead.policyVehicles && lead.policyVehicles.length > 0) {
+                console.log(`🚛 Found ${lead.policyVehicles.length} policy vehicles to populate`);
+                vehiclesToPopulate = lead.policyVehicles;
+            } else if (lead.vehicles && lead.vehicles.length > 0) {
+                console.log(`🚛 Found ${lead.vehicles.length} lead vehicles to populate`);
+                vehiclesToPopulate = lead.vehicles;
+            }
+
+            let trailersToPopulate = [];
+            if (lead.trailers && lead.trailers.length > 0) {
+                console.log(`🚚 Found ${lead.trailers.length} trailers to populate`);
+                trailersToPopulate = lead.trailers;
+            }
+
+            let driversToPopulate = [];
+            if (lead.isPolicyQuote && lead.policyDrivers && lead.policyDrivers.length > 0) {
+                console.log(`👥 Found ${lead.policyDrivers.length} policy drivers to populate`);
+                driversToPopulate = lead.policyDrivers;
+            } else if (lead.drivers && lead.drivers.length > 0) {
+                console.log(`👥 Found ${lead.drivers.length} lead drivers to populate`);
+                driversToPopulate = lead.drivers;
+            }
+
+            let commoditiesToPopulate = [];
+            if (lead.commodityHauled && lead.commodityHauled.trim().length > 0) {
+                console.log('📦 Found commodities to populate:', lead.commodityHauled);
+                const commodityString = lead.commodityHauled;
+                commoditiesToPopulate = commodityString.split(',').map(c => c.trim()).filter(c => c.length > 0);
+            }
+
+            // Step 1: Create all required additional rows first
+            console.log('📋 Creating required rows...');
+
+            // Create additional truck rows (skip first one as it exists)
+            for (let i = 1; i < vehiclesToPopulate.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addTruckRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between additions
+                }
+            }
+
+            // Create additional trailer rows
+            for (let i = 1; i < trailersToPopulate.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addTrailerRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+
+            // Create additional driver rows
+            for (let i = 1; i < driversToPopulate.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addDriverRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+
+            // Create additional commodity rows
+            for (let i = 1; i < commoditiesToPopulate.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addCommodityRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+
+            // Step 2: Wait for all rows to be created, then populate
+            await new Promise(resolve => setTimeout(resolve, 300));
+            console.log('📋 All rows created, now populating...');
+
+            // Populate vehicles
+            if (vehiclesToPopulate.length > 0) {
+                const truckRows = modal.querySelectorAll('#trucks-container .truck-row');
+                vehiclesToPopulate.forEach((vehicle, index) => {
+                    if (truckRows[index]) {
+                        const inputs = truckRows[index].querySelectorAll('input');
+                        if (inputs[0]) inputs[0].value = vehicle.year || '';
+                        if (inputs[1]) inputs[1].value = `${vehicle.make || ''} ${vehicle.model || ''}`.trim();
+                        if (inputs[2]) inputs[2].value = vehicle.type || 'Semi Truck';
+                        if (inputs[3]) inputs[3].value = vehicle.vin || '';
+                        if (inputs[4]) inputs[4].value = vehicle.value || '';
+                        if (inputs[5]) inputs[5].value = vehicle.radius || lead.radiusOfOperation || '';
+                        console.log(`🚛 Populated truck row ${index + 1}: ${vehicle.make} ${vehicle.model}`);
+                    } else {
+                        console.error(`🚛 Truck row ${index + 1} not found in DOM`);
+                    }
+                });
+            }
+
+            // Populate trailers
+            if (trailersToPopulate.length > 0) {
+                const trailerRows = modal.querySelectorAll('#trailers-container .trailer-row');
+                trailersToPopulate.forEach((trailer, index) => {
+                    if (trailerRows[index]) {
+                        const inputs = trailerRows[index].querySelectorAll('input');
+                        if (inputs[0]) inputs[0].value = trailer.year || '';
+                        if (inputs[1]) inputs[1].value = `${trailer.make || ''} ${trailer.model || ''}`.trim();
+                        if (inputs[2]) inputs[2].value = trailer.type || '';
+                        if (inputs[3]) inputs[3].value = trailer.vin || '';
+                        if (inputs[4]) inputs[4].value = trailer.value || '';
+                        if (inputs[5]) inputs[5].value = lead.radiusOfOperation || '';
+                        console.log(`🚚 Populated trailer row ${index + 1}: ${trailer.make} ${trailer.model}`);
+                    } else {
+                        console.error(`🚚 Trailer row ${index + 1} not found in DOM`);
+                    }
+                });
+            }
+
+            // Populate drivers
+            if (driversToPopulate.length > 0) {
+                const driverRows = modal.querySelectorAll('#drivers-container .driver-row');
+                driversToPopulate.forEach((driver, index) => {
+                    if (driverRows[index]) {
+                        const inputs = driverRows[index].querySelectorAll('input');
+                        if (inputs[0]) inputs[0].value = driver.name || '';
+                        if (inputs[1]) inputs[1].value = driver.dateOfBirth || '';
+                        if (inputs[2]) inputs[2].value = driver.licenseNumber || driver.dlNumber || '';
+                        if (inputs[3]) inputs[3].value = driver.state || driver.licenseState || '';
+                        if (inputs[4]) inputs[4].value = driver.yearsExperience || driver.cdlExperience || '';
+                        if (inputs[5]) inputs[5].value = driver.dateOfHire || '';
+                        if (inputs[6]) inputs[6].value = driver.accidents || driver.violations || '';
+                        console.log(`👥 Populated driver row ${index + 1}: ${driver.name}`);
+                    } else {
+                        console.error(`👥 Driver row ${index + 1} not found in DOM`);
+                    }
+                });
+            }
+
+            // Populate commodities
+            if (commoditiesToPopulate.length > 0) {
+                // Calculate percentage for each commodity (distribute evenly)
+                const percentage = Math.floor(100 / commoditiesToPopulate.length);
+                let remainingPercentage = 100 - (percentage * commoditiesToPopulate.length);
+
+                const commodityRows = modal.querySelectorAll('#commodities-container .commodity-row');
+                commoditiesToPopulate.forEach((commodity, index) => {
+                    if (commodityRows[index]) {
+                        const inputs = commodityRows[index].querySelectorAll('input');
+                        if (inputs[0]) inputs[0].value = commodity;
+                        // Add remaining percentage to first commodity to ensure 100% total
+                        const thisPercentage = index === 0 ? percentage + remainingPercentage : percentage;
+                        if (inputs[1]) inputs[1].value = thisPercentage + '%';
+                        console.log(`📦 Populated commodity row ${index + 1}: ${commodity} (${thisPercentage}%)`);
+                    }
+                });
+
+                // Auto-populate class of risk based on commodities
+                setTimeout(() => {
+                    populateClassOfRisk(modal, commoditiesToPopulate);
+                }, 100);
+            } else {
+                console.log('📦 No commodities found in lead data');
+            }
+
+            console.log('✅ Auto-population completed');
+        }
+
+        // Start the sequential auto-population
+        autoPopulateWithSequentialTiming().catch(error => {
+            console.error('❌ Error during auto-population:', error);
+        });
+
+    }, 300);
+
     // Check if we're viewing/editing an existing application
     if (window.editingApplicationData) {
         console.log('📝 Pre-filling form with existing application data:', window.editingApplicationData);
@@ -919,7 +1111,7 @@ function prefillApplicationForm(applicationData) {
             const parentDiv = input.closest('div');
             const foundLabel = parentDiv?.querySelector('label')?.textContent?.trim().replace(':', '') ||
                              parentDiv?.previousElementSibling?.textContent?.trim().replace(':', '') ||
-                             parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck)/)?.[1];
+                             parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer)/)?.[1];
             if (foundLabel) {
                 label = foundLabel;
             }
@@ -954,6 +1146,7 @@ function prefillApplicationForm(applicationData) {
             'Box Truck': formData['Box Truck'],
             'Reefer': formData['Reefer'],
             'Dumptruck': formData['Dumptruck'],
+            'Dump Trailer': formData['Dump Trailer'],
 
             // Coverage fields
             'Auto Liability': formData['Auto Liability'],
@@ -991,18 +1184,98 @@ function prefillApplicationForm(applicationData) {
         }
     });
 
-    // Pre-fill dynamic sections using the structured arrays
-    if (formData.drivers && formData.drivers.length > 0) {
-        console.log('🚗 Pre-filling drivers section');
-        formData.drivers.forEach((driver, index) => {
-            if (index > 0) {
-                // Add extra driver rows if needed
-                const addButton = modal.querySelector('button[onclick*="addDriverRow"]');
-                if (addButton) addButton.click();
-            }
+    // Pre-fill dynamic sections using sequential timing approach
+    async function prefillDynamicSections() {
+        console.log('📋 Pre-filling dynamic sections with improved timing...');
 
-            setTimeout(() => {
-                const driverRows = modal.querySelectorAll('#drivers-container .driver-row');
+        const drivers = formData.drivers || [];
+        const trucks = formData.trucks || [];
+        const trailers = formData.trailers || [];
+        const commodities = formData.commodities || [];
+
+        console.log('📊 Data to prefill:', { drivers: drivers.length, trucks: trucks.length, trailers: trailers.length, commodities: commodities.length });
+
+        // Step 0: Clean up any existing blank rows first to prevent accumulation
+        console.log('🧹 Cleaning up blank rows...');
+
+        // Remove all but the first row from each container to start fresh
+        const driverContainer = modal.querySelector('#drivers-container');
+        const driverRows = driverContainer.querySelectorAll('.driver-row');
+        for (let i = driverRows.length - 1; i > 0; i--) {
+            driverRows[i].remove();
+        }
+
+        const truckContainer = modal.querySelector('#trucks-container');
+        const truckRows = truckContainer.querySelectorAll('.truck-row');
+        for (let i = truckRows.length - 1; i > 0; i--) {
+            truckRows[i].remove();
+        }
+
+        const trailerContainer = modal.querySelector('#trailers-container');
+        const trailerRows = trailerContainer.querySelectorAll('.trailer-row');
+        for (let i = trailerRows.length - 1; i > 0; i--) {
+            trailerRows[i].remove();
+        }
+
+        const commodityContainer = modal.querySelector('#commodities-container');
+        const commodityRows = commodityContainer.querySelectorAll('.commodity-row');
+        for (let i = commodityRows.length - 1; i > 0; i--) {
+            commodityRows[i].remove();
+        }
+
+        // Step 1: Create all required rows first
+        if (drivers.length > 1) {
+            console.log(`🚗 Creating ${drivers.length - 1} additional driver rows`);
+            for (let i = 1; i < drivers.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addDriverRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            }
+        }
+
+        if (trucks.length > 1) {
+            console.log(`🚛 Creating ${trucks.length - 1} additional truck rows`);
+            for (let i = 1; i < trucks.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addTruckRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            }
+        }
+
+        if (trailers.length > 1) {
+            console.log(`🚚 Creating ${trailers.length - 1} additional trailer rows`);
+            for (let i = 1; i < trailers.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addTrailerRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            }
+        }
+
+        if (commodities.length > 1) {
+            console.log(`📦 Creating ${commodities.length - 1} additional commodity rows`);
+            for (let i = 1; i < commodities.length; i++) {
+                const addButton = modal.querySelector('button[onclick*="addCommodityRow"]');
+                if (addButton) {
+                    addButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            }
+        }
+
+        // Step 2: Wait for DOM to update, then populate all rows
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Populate drivers
+        if (drivers.length > 0) {
+            console.log('🚗 Pre-filling drivers section');
+            const driverRows = modal.querySelectorAll('#drivers-container .driver-row');
+            drivers.forEach((driver, index) => {
                 if (driverRows[index]) {
                     const inputs = driverRows[index].querySelectorAll('input');
                     if (inputs[0]) inputs[0].value = driver.name || '';
@@ -1012,21 +1285,16 @@ function prefillApplicationForm(applicationData) {
                     if (inputs[4]) inputs[4].value = driver.experience || '';
                     if (inputs[5]) inputs[5].value = driver.hireDate || '';
                     if (inputs[6]) inputs[6].value = driver.accidents || driver.mvr || '';
+                    console.log(`🚗 Pre-filled driver row ${index + 1}: ${driver.name}`);
                 }
-            }, 50 * (index + 1));
-        });
-    }
+            });
+        }
 
-    if (formData.trucks && formData.trucks.length > 0) {
-        console.log('🚛 Pre-filling trucks section');
-        formData.trucks.forEach((truck, index) => {
-            if (index > 0) {
-                const addButton = modal.querySelector('button[onclick*="addTruckRow"]');
-                if (addButton) addButton.click();
-            }
-
-            setTimeout(() => {
-                const truckRows = modal.querySelectorAll('#trucks-container .truck-row');
+        // Populate trucks
+        if (trucks.length > 0) {
+            console.log('🚛 Pre-filling trucks section');
+            const truckRows = modal.querySelectorAll('#trucks-container .truck-row');
+            trucks.forEach((truck, index) => {
                 if (truckRows[index]) {
                     const inputs = truckRows[index].querySelectorAll('input');
                     if (inputs[0]) inputs[0].value = truck.year || '';
@@ -1035,21 +1303,16 @@ function prefillApplicationForm(applicationData) {
                     if (inputs[3]) inputs[3].value = truck.vin || '';
                     if (inputs[4]) inputs[4].value = truck.value || '';
                     if (inputs[5]) inputs[5].value = truck.radius || '';
+                    console.log(`🚛 Pre-filled truck row ${index + 1}: ${truck.year} ${truck.make}`);
                 }
-            }, 100 * (index + 1));
-        });
-    }
+            });
+        }
 
-    if (formData.trailers && formData.trailers.length > 0) {
-        console.log('🚚 Pre-filling trailers section');
-        formData.trailers.forEach((trailer, index) => {
-            if (index > 0) {
-                const addButton = modal.querySelector('button[onclick*="addTrailerRow"]');
-                if (addButton) addButton.click();
-            }
-
-            setTimeout(() => {
-                const trailerRows = modal.querySelectorAll('#trailers-container .trailer-row');
+        // Populate trailers
+        if (trailers.length > 0) {
+            console.log('🚚 Pre-filling trailers section');
+            const trailerRows = modal.querySelectorAll('#trailers-container .trailer-row');
+            trailers.forEach((trailer, index) => {
                 if (trailerRows[index]) {
                     const inputs = trailerRows[index].querySelectorAll('input');
                     if (inputs[0]) inputs[0].value = trailer.year || '';
@@ -1058,30 +1321,33 @@ function prefillApplicationForm(applicationData) {
                     if (inputs[3]) inputs[3].value = trailer.vin || '';
                     if (inputs[4]) inputs[4].value = trailer.value || '';
                     if (inputs[5]) inputs[5].value = trailer.radius || '';
+                    console.log(`🚚 Pre-filled trailer row ${index + 1}: ${trailer.year} ${trailer.make}`);
                 }
-            }, 150 * (index + 1));
-        });
-    }
+            });
+        }
 
-    if (formData.commodities && formData.commodities.length > 0) {
-        console.log('📦 Pre-filling commodities section');
-        formData.commodities.forEach((commodity, index) => {
-            if (index > 0) {
-                const addButton = modal.querySelector('button[onclick*="addCommodityRow"]');
-                if (addButton) addButton.click();
-            }
-
-            setTimeout(() => {
-                const commodityRows = modal.querySelectorAll('#commodities-container .commodity-row');
+        // Populate commodities
+        if (commodities.length > 0) {
+            console.log('📦 Pre-filling commodities section');
+            const commodityRows = modal.querySelectorAll('#commodities-container .commodity-row');
+            commodities.forEach((commodity, index) => {
                 if (commodityRows[index]) {
                     const inputs = commodityRows[index].querySelectorAll('input');
                     if (inputs[0]) inputs[0].value = commodity.commodity || '';
                     if (inputs[1]) inputs[1].value = commodity.percentage || '';
                     if (inputs[2]) inputs[2].value = commodity.maxValue || '';
+                    console.log(`📦 Pre-filled commodity row ${index + 1}: ${commodity.commodity}`);
                 }
-            }, 50 * (index + 1));
-        });
+            });
+        }
+
+        console.log('✅ Dynamic sections pre-filling complete');
     }
+
+    // Start the sequential pre-filling
+    prefillDynamicSections().catch(error => {
+        console.error('❌ Error during pre-filling:', error);
+    });
 
     console.log('✅ Form pre-filling complete');
 }
@@ -1175,7 +1441,7 @@ window.saveQuoteApplication = async function() {
                     // Try to find the label within the same container
                     const label = parentDiv?.querySelector('label')?.textContent?.trim().replace(':', '') ||
                                  parentDiv?.previousElementSibling?.textContent?.trim().replace(':', '') ||
-                                 parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck)/)?.[1];
+                                 parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer)/)?.[1];
 
                     if (label) {
                         rawLabel = label;
@@ -1207,22 +1473,25 @@ window.saveQuoteApplication = async function() {
 
                 // Log Class of Risk fields specifically for debugging
                 if (rawLabel.includes('Dry Van') || rawLabel.includes('Flatbed') || rawLabel.includes('Heavy Haul') ||
-                    rawLabel.includes('Auto Hauler') || rawLabel.includes('Box Truck') || rawLabel.includes('Reefer') || rawLabel.includes('Dumptruck')) {
+                    rawLabel.includes('Auto Hauler') || rawLabel.includes('Box Truck') || rawLabel.includes('Reefer') || rawLabel.includes('Dumptruck') || rawLabel.includes('Dump Trailer')) {
                     console.log(`🔍 Class of Risk field: "${rawLabel}" = "${value}"`);
                 }
             }
         });
 
-        // Collect array data by container rows
+        // Collect array data by container rows - only save non-empty rows
         modal.querySelectorAll('#commodities-container .commodity-row').forEach((row, index) => {
-            const commodity = row.querySelector('input[placeholder*="Commodity"], input')?.value?.trim() || '';
-            const percentage = row.querySelectorAll('input')[1]?.value?.trim() || '';
+            const inputs = row.querySelectorAll('input');
+            const commodity = inputs[0]?.value?.trim() || '';
+            const percentage = inputs[1]?.value?.trim() || '';
 
-            if (commodity || percentage) {
+            // Only save rows that actually have meaningful data
+            if (commodity && commodity.length > 0) {
                 commodities.push({ commodity, percentage });
                 // Also store in old format for compatibility
                 formData[`Commodity_${index}`] = commodity;
                 formData[`% of Loads_${index}`] = percentage;
+                console.log(`💾 Saving commodity row ${index + 1}: ${commodity} (${percentage})`);
             }
         });
 
@@ -1236,7 +1505,8 @@ window.saveQuoteApplication = async function() {
             const hireDate = inputs[5]?.value?.trim() || '';
             const accidents = inputs[6]?.value?.trim() || '';
 
-            if (name || dob || license || state || experience || hireDate || accidents) {
+            // Only save drivers that have at least a name
+            if (name && name.length > 0) {
                 drivers.push({ name, dob, license, state, experience, hireDate, accidents });
                 // Also store in old format for compatibility
                 formData[`Driver Name_${index}`] = name;
@@ -1246,6 +1516,7 @@ window.saveQuoteApplication = async function() {
                 formData[`Years Experience_${index}`] = experience;
                 formData[`Date of Hire_${index}`] = hireDate;
                 formData[`# Accidents/Violations_${index}`] = accidents;
+                console.log(`💾 Saving driver row ${index + 1}: ${name}`);
             }
         });
 
@@ -1258,7 +1529,8 @@ window.saveQuoteApplication = async function() {
             const value = inputs[4]?.value?.trim() || '';
             const radius = inputs[5]?.value?.trim() || '';
 
-            if (year || make || type || vin || value || radius) {
+            // Only save trucks that have at least a year or make/model
+            if ((year && year.length > 0) || (make && make.length > 0)) {
                 trucks.push({ year, make, type, vin, value, radius });
                 // Also store in old format for compatibility
                 formData[`Year_${index}`] = year;
@@ -1267,6 +1539,7 @@ window.saveQuoteApplication = async function() {
                 formData[`VIN_${index}`] = vin;
                 formData[`Value_${index}`] = value;
                 formData[`Radius_${index}`] = radius;
+                console.log(`💾 Saving truck row ${index + 1}: ${year} ${make}`);
             }
         });
 
@@ -1279,7 +1552,8 @@ window.saveQuoteApplication = async function() {
             const value = inputs[4]?.value?.trim() || '';
             const radius = inputs[5]?.value?.trim() || '';
 
-            if (year || make || type || vin || value || radius) {
+            // Only save trailers that have at least a year or make/model
+            if ((year && year.length > 0) || (make && make.length > 0)) {
                 trailers.push({ year, make, type, vin, value, radius });
                 // Also store in old format for compatibility
                 formData[`Trailer Year_${index}`] = year;
@@ -1288,6 +1562,7 @@ window.saveQuoteApplication = async function() {
                 formData[`Trailer VIN_${index}`] = vin;
                 formData[`Trailer Value_${index}`] = value;
                 formData[`Trailer Radius_${index}`] = radius;
+                console.log(`💾 Saving trailer row ${index + 1}: ${year} ${make}`);
             }
         });
 
@@ -1337,6 +1612,9 @@ window.saveQuoteApplication = async function() {
             } else if (parentText.includes('Dumptruck') || grandparentText.includes('Dumptruck')) {
                 formData['Dumptruck'] = value;
                 console.log(`🎯 Explicitly captured Dumptruck: "${value}"`);
+            } else if (parentText.includes('Dump Trailer') || grandparentText.includes('Dump Trailer')) {
+                formData['Dump Trailer'] = value;
+                console.log(`🎯 Explicitly captured Dump Trailer: "${value}"`);
             }
         });
 
@@ -1794,6 +2072,13 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                             <span style="margin-left: 3px;">%</span>
                         </div>
                     </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 3px; font-size: 12px;">Dump Trailer:</label>
+                        <div style="display: flex; align-items: center;">
+                            <input type="text" value="${getSavedValue('Dump Trailer', '')}" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
+                            <span style="margin-left: 3px;">%</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1984,7 +2269,7 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Non-Owned Trailer Phys Dam:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$25,000', '$50,000', '$75,000', '$100,000', '$150,000', 'Not Included'], getSavedValue('Non-Owned Trailer Phys Dam', '$50,000'))}
+                            ${generateDropdownOptions(['$20,000/$1,000 Ded.', '$20,000/$2,000 Ded.', '$25,000', '$40,000/$2,000 Ded.', '$50,000', '$60,000/$2,000 Ded.', '$75,000', '$100,000', '$150,000', 'Not Included'], getSavedValue('Non-Owned Trailer Phys Dam', '$50,000'))}
                         </select>
                     </div>
                     <div>
@@ -2352,6 +2637,9 @@ window.downloadQuoteApplicationPDF = function() {
             } else if (parentText.includes('Dumptruck') || grandparentText.includes('Dumptruck')) {
                 formData['Dumptruck'] = value;
                 console.log(`🎯 Download: Captured Dumptruck: "${value}"`);
+            } else if (parentText.includes('Dump Trailer') || grandparentText.includes('Dump Trailer')) {
+                formData['Dump Trailer'] = value;
+                console.log(`🎯 Download: Captured Dump Trailer: "${value}"`);
             }
         });
 
@@ -3300,5 +3588,141 @@ document.addEventListener('DOMContentLoaded', function() {
 
     observer.observe(document.body, { childList: true, subtree: true });
 });
+
+// Function to auto-populate Class of Risk based on commodity types
+function populateClassOfRisk(modal, commodities) {
+    console.log('🎯 Auto-populating Class of Risk based on commodities:', commodities);
+
+    // Define mapping from commodities to class of risk categories
+    const commodityToRiskMapping = {
+        // Dry Van commodities
+        'general freight': 'Dry Van',
+        'consumer goods': 'Dry Van',
+        'packaged goods': 'Dry Van',
+        'retail goods': 'Dry Van',
+        'clothing': 'Dry Van',
+        'textiles': 'Dry Van',
+        'paper products': 'Dry Van',
+        'food products': 'Dry Van',
+        'beverages': 'Dry Van',
+
+        // Flatbed commodities (matching "Flat Bed" in the form)
+        'construction materials': 'Flat Bed',
+        'building materials': 'Flat Bed',
+        'steel': 'Flat Bed',
+        'lumber': 'Flat Bed',
+        'pipes': 'Flat Bed',
+        'machinery': 'Flat Bed',
+        'equipment': 'Flat Bed',
+        'metal products': 'Flat Bed',
+        'coils': 'Flat Bed',
+        'structural steel': 'Flat Bed',
+
+        // Reefer commodities
+        'refrigerated': 'Reefer',
+        'frozen': 'Reefer',
+        'perishable': 'Reefer',
+        'dairy': 'Reefer',
+        'meat': 'Reefer',
+        'produce': 'Reefer',
+        'pharmaceuticals': 'Reefer',
+        'temperature controlled': 'Reefer',
+        'fresh produce': 'Reefer',
+
+        // Auto Hauler commodities
+        'vehicles': 'Auto Hauler',
+        'cars': 'Auto Hauler',
+        'automobiles': 'Auto Hauler',
+        'auto': 'Auto Hauler',
+
+        // Box Truck commodities
+        'local delivery': 'Box Truck',
+        'packages': 'Box Truck',
+        'small freight': 'Box Truck',
+
+        // Dump Truck commodities
+        'aggregate': 'Dump Truck',
+        'sand': 'Dump Truck',
+        'gravel': 'Dump Truck',
+        'dirt': 'Dump Truck',
+        'rock': 'Dump Truck',
+        'demolition': 'Dump Truck'
+    };
+
+    // Count occurrences of each risk category
+    const riskCategoryCounts = {};
+
+    commodities.forEach(commodity => {
+        const lowerCommodity = commodity.toLowerCase().trim();
+
+        // Find matching risk category
+        let matchedCategory = null;
+        for (const [key, category] of Object.entries(commodityToRiskMapping)) {
+            if (lowerCommodity.includes(key) || key.includes(lowerCommodity)) {
+                matchedCategory = category;
+                break;
+            }
+        }
+
+        // Default to Dry Van if no specific match found
+        if (!matchedCategory) {
+            matchedCategory = 'Dry Van';
+        }
+
+        riskCategoryCounts[matchedCategory] = (riskCategoryCounts[matchedCategory] || 0) + 1;
+        console.log(`📦 Commodity "${commodity}" → ${matchedCategory}`);
+    });
+
+    // Calculate percentages for each risk category
+    const totalCommodities = commodities.length;
+    const riskPercentages = {};
+
+    Object.keys(riskCategoryCounts).forEach(category => {
+        const count = riskCategoryCounts[category];
+        const percentage = Math.floor((count / totalCommodities) * 100);
+        riskPercentages[category] = percentage;
+    });
+
+    // Distribute any remaining percentage to the most common category
+    const totalAssigned = Object.values(riskPercentages).reduce((sum, pct) => sum + pct, 0);
+    const remaining = 100 - totalAssigned;
+
+    if (remaining > 0) {
+        // Find the category with the highest count
+        const mostCommonCategory = Object.keys(riskCategoryCounts).reduce((a, b) =>
+            riskCategoryCounts[a] > riskCategoryCounts[b] ? a : b
+        );
+        riskPercentages[mostCommonCategory] += remaining;
+    }
+
+    console.log('🎯 Calculated risk percentages:', riskPercentages);
+
+    // Now populate the Class of Risk fields
+    setTimeout(() => {
+        Object.keys(riskPercentages).forEach(category => {
+            const percentage = riskPercentages[category];
+
+            // Find the input field for this risk category
+            const inputs = modal.querySelectorAll('input[type="text"]');
+
+            inputs.forEach(input => {
+                const parentText = input.parentElement?.textContent || '';
+                const grandparentText = input.parentElement?.parentElement?.textContent || '';
+
+                // Check if this input corresponds to our risk category
+                if (parentText.includes(category) || grandparentText.includes(category)) {
+                    input.value = percentage + '%';
+                    console.log(`🎯 Set ${category} to ${percentage}%`);
+
+                    // Trigger any change events
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+        });
+
+        console.log('✅ Class of Risk auto-population completed');
+    }, 100);
+}
 
 console.log('✅ Enhanced Quote Application Modal Loaded');

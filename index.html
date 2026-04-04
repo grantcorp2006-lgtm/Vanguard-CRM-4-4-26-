@@ -6,17 +6,22 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <!-- Cache buster: 2025-01-13-VICIDIAL-BUTTON-FIX -->
+    <!-- Cache buster: 2026-02-22-DOT-SPAM-COMPLETELY-DISABLED-V9 -->
     <title>Vanguard Insurance Software - All-in-One Agency Management Platform</title>
     <link rel="icon" type="image/png" href="images/V-Logo.png">
-    <link rel="stylesheet" href="css/styles.css?v=35">
+    <link rel="stylesheet" href="css/styles.css?v=38_WHITE_CLOSE_BTN">
     <link rel="stylesheet" href="css/carrier-profile.css?v=2">
-    <link rel="stylesheet" href="css/policy-modal.css?v=3">
+    <link rel="stylesheet" href="css/carrier-profile-display.css?v=1">
+    <link rel="stylesheet" href="css/policy-modal.css?v=4_BADGE_FIX">
     <link rel="stylesheet" href="css/coi-upload-styles.css?v=1">
-    <link rel="stylesheet" href="css/mobile.css?v=5">
+    <link rel="stylesheet" href="css/mobile.css?v=COI_FIX_v13">
     <link rel="stylesheet" href="css/fix-sidebar-text.css?v=1">
     <!-- Enhanced Lead Management Action Button Fixes -->
     <link rel="stylesheet" href="css/enhanced-lead-actions.css?v=1">
+    <!-- Enhanced Client Management Styles -->
+    <link rel="stylesheet" href="css/enhanced-clients.css?v=2025021001">
+    <!-- Market Page Styles -->
+    <link rel="stylesheet" href="css/market-styles.css?v=1">
     <!-- Sticky Table Header -->
     <link rel="stylesheet" href="css/sticky-table-header.css?v=1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -34,7 +39,7 @@
     <script src="js/jssip.min.js"></script>
     <!-- Twilio Voice SDK for browser-based calling -->
     <script src="https://sdk.twilio.com/js/voice/releases/2.12.0/twilio.min.js"></script>
-    <script src="js/performance-critical-fix.js?v=1"></script>
+    <script src="js/performance-critical-fix.js?v=QUOTA_SAFE_V2"></script>
     <script src="js/fix-localStorage-quota.js?v=1"></script>
     <script src="js/disable-heavy-scripts.js?v=1"></script>
     <script>
@@ -139,66 +144,80 @@
             max-width: 140px !important;
         }
 
-        /* Contact column - centered icons */
+        /* X icon column */
         #leadsTable th:nth-child(3),
         #leadsTable td:nth-child(3) {
+            width: 28px !important;
+            padding: 4px !important;
+            text-align: center !important;
+        }
+
+        /* Contact column - centered icons */
+        #leadsTable th:nth-child(4),
+        #leadsTable td:nth-child(4) {
             width: 80px !important;
             text-align: center !important;
         }
 
         /* Value Level */
-        #leadsTable th:nth-child(4),
-        #leadsTable td:nth-child(4) {
+        #leadsTable th:nth-child(5),
+        #leadsTable td:nth-child(5) {
             width: 160px !important;
         }
 
         /* Premium */
-        #leadsTable th:nth-child(5),
-        #leadsTable td:nth-child(5) {
+        #leadsTable th:nth-child(6),
+        #leadsTable td:nth-child(6) {
             width: 90px !important;
         }
 
         /* Stage */
-        #leadsTable th:nth-child(6),
-        #leadsTable td:nth-child(6) {
+        #leadsTable th:nth-child(7),
+        #leadsTable td:nth-child(7) {
             width: 100px !important;
         }
 
-        /* To Do - NEW COLUMN that was missing */
-        #leadsTable th:nth-child(7),
-        #leadsTable td:nth-child(7) {
+        /* To Do */
+        #leadsTable th:nth-child(8),
+        #leadsTable td:nth-child(8) {
             width: 130px !important;
             max-width: 130px !important;
         }
 
-        /* Renewal Date - needs more space for header + sort arrow */
-        #leadsTable th:nth-child(8),
-        #leadsTable td:nth-child(8) {
+        /* Renewal Date */
+        #leadsTable th:nth-child(9),
+        #leadsTable td:nth-child(9) {
             width: 110px !important;
         }
 
-        #leadsTable th:nth-child(8) {
+        #leadsTable th:nth-child(9) {
             white-space: nowrap !important;
             overflow: hidden !important;
         }
 
         /* Assigned To */
-        #leadsTable th:nth-child(9),
-        #leadsTable td:nth-child(9) {
+        #leadsTable th:nth-child(10),
+        #leadsTable td:nth-child(10) {
+            width: 100px !important;
+        }
+
+        /* Carrier */
+        #leadsTable th:nth-child(11),
+        #leadsTable td:nth-child(11) {
             width: 100px !important;
         }
 
         /* Created */
-        #leadsTable th:nth-child(10),
-        #leadsTable td:nth-child(10) {
+        #leadsTable th:nth-child(12),
+        #leadsTable td:nth-child(12) {
             width: 90px !important;
         }
 
         /* Actions */
-        #leadsTable th:nth-child(11),
-        #leadsTable td:nth-child(11) {
-            width: 110px !important;
-            min-width: 110px !important;
+        #leadsTable th:nth-child(13),
+        #leadsTable td:nth-child(13) {
+            width: 130px !important;
+            min-width: 130px !important;
             text-align: center !important;
         }
 
@@ -231,7 +250,7 @@
         }
 
         /* Ensure Value Level text doesn't wrap unnecessarily */
-        #leadsTableBody td:nth-child(4) {
+        #leadsTableBody td:nth-child(5) {
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
@@ -492,6 +511,49 @@
             outline-offset: -6px !important;
             box-shadow: 0 0 16px rgba(245, 158, 11, 0.8) !important;
         }
+
+        /* Loading Spinner and Error Message Styles */
+        .loading-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 400px;
+            flex-direction: column;
+            font-size: 18px;
+            color: #374151;
+        }
+
+        .loading-spinner i {
+            font-size: 48px;
+            color: #3b82f6;
+            margin-bottom: 20px;
+        }
+
+        .error-message {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 400px;
+            flex-direction: column;
+            text-align: center;
+            padding: 40px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            margin: 20px;
+        }
+
+        .error-message h2 {
+            color: #dc2626;
+            margin-bottom: 16px;
+            font-size: 24px;
+        }
+
+        .error-message p {
+            color: #6b7280;
+            font-size: 16px;
+            line-height: 1.5;
+        }
     </style>
     <!-- Authentication Service -->
     <script src="js/auth-service.js"></script>
@@ -583,12 +645,12 @@
                     <li class="dropdown">
                         <a href="#" class="nav-link">Tools <i class="fas fa-chevron-down"></i></a>
                         <div class="dropdown-menu">
-                            <a href="#" onclick="openPhoneTool(); return false;"><i class="fas fa-phone"></i> Phone</a>
-                            <a href="#" onclick="openEmailTool(); return false;"><i class="fas fa-envelope"></i> Email</a>
                             <a href="#" onclick="openNotepad(); return false;"><i class="fas fa-sticky-note"></i> Notepad</a>
+                            <a href="#" onclick="openTodoList(); return false;"><i class="fas fa-tasks"></i> Todo List</a>
+                            <a href="#" onclick="openCalendar(); return false;"><i class="fas fa-calendar-alt"></i> Calendar</a>
+                            <a href="#" onclick="openTeamChat(); return false;"><i class="fas fa-comments"></i> Team Chat</a>
                         </div>
                     </li>
-                    <li><a href="#analytics" class="nav-link">Analytics</a></li>
                     <li><a href="#integrations" class="nav-link">Integrations</a></li>
                 </ul>
                 <div class="nav-actions">
@@ -640,28 +702,68 @@
                                     return adminUsers.includes(username.toLowerCase());
                                 };
 
-                                // Create admin badge if user is admin
-                                const adminBadge = isAdmin(user.username) ? `
-                                    <span style="
-                                        background: linear-gradient(135deg, #ff6b6b, #ee5a52);
-                                        color: white;
-                                        padding: 2px 6px;
-                                        border-radius: 10px;
-                                        font-size: 10px;
-                                        font-weight: 600;
-                                        text-transform: uppercase;
-                                        letter-spacing: 0.5px;
-                                        margin-left: 6px;
-                                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                                        border: 1px solid rgba(255,255,255,0.3);
-                                    ">
-                                        <i class="fas fa-crown" style="margin-right: 3px; font-size: 9px;"></i>ADMIN
-                                    </span>
-                                ` : '';
+                                // Create badge based on user type
+                                let userBadge = '';
+                                console.log('🔍 DEBUG: Checking user for badge:', user.username, 'lowercase:', user.username.toLowerCase());
+                                if (user.username.toLowerCase() === 'maureen') {
+                                    console.log('✅ Maureen detected - applying EXCLUSIVE badge');
+                                    userBadge = `
+                                        <span style="
+                                            background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+                                            color: white;
+                                            padding: 2px 6px;
+                                            border-radius: 10px;
+                                            font-size: 10px;
+                                            font-weight: 600;
+                                            text-transform: uppercase;
+                                            letter-spacing: 0.5px;
+                                            margin-left: 6px;
+                                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                                            border: 1px solid rgba(255,255,255,0.3);
+                                        ">
+                                            <i class="fas fa-crown" style="margin-right: 3px; font-size: 9px;"></i>EXCLUSIVE
+                                        </span>
+                                    `;
+                                } else if (isAdmin(user.username)) {
+                                    userBadge = `
+                                        <span style="
+                                            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+                                            color: white;
+                                            padding: 2px 6px;
+                                            border-radius: 10px;
+                                            font-size: 10px;
+                                            font-weight: 600;
+                                            text-transform: uppercase;
+                                            letter-spacing: 0.5px;
+                                            margin-left: 6px;
+                                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                                            border: 1px solid rgba(255,255,255,0.3);
+                                        ">
+                                            <i class="fas fa-crown" style="margin-right: 3px; font-size: 9px;"></i>ADMIN
+                                        </span>
+                                    `;
+                                }
+                                const adminBadge = userBadge;
 
                                 nameDisplay.innerHTML = user.username + adminBadge;
                             }
                             if (avatar) avatar.src = `https://ui-avatars.com/api/?name=${user.username}&background=0066cc&color=fff`;
+
+                            // Update company branding for Maureen
+                            console.log('🔍 DEBUG: Checking user for branding:', user.username);
+                            if (user.username.toLowerCase() === 'maureen') {
+                                console.log('✅ Maureen detected - updating to United Software');
+                                const brandText = document.querySelector('.brand-text h1');
+                                if (brandText) {
+                                    brandText.textContent = 'United Software';
+                                    console.log('🏢 Updated company name to United Software for Maureen');
+                                }
+                            } else {
+                                const brandText = document.querySelector('.brand-text h1');
+                                if (brandText) {
+                                    brandText.textContent = 'Vanguard Software';
+                                }
+                            }
 
                             // Control admin UI sections based on user role
                             controlAdminUI(user.username);
@@ -717,9 +819,9 @@
                             // Hide dashboard stats for non-admin users
                             const adminOnlyStats = [
                                 'Active Clients',
-                                'Active Policies',
-                                'All Time Premium',
-                                'Monthly Lead Premium'
+                                'App Sents',
+                                'Last 2 Month New Premium',
+                                'Current Month Lead Premium'
                             ];
 
                             const statCards = document.querySelectorAll('.stat-card');
@@ -849,15 +951,9 @@
                 <span>Tools</span>
             </li>
             <li class="mobile-nav-item">
-                <a href="#lead-gen" class="mobile-nav-link" onclick="setActiveTab('lead-gen'); closeMobileMenu();">
+                <a href="#lead-generation" class="mobile-nav-link" onclick="setActiveTab('lead-generation'); closeMobileMenu();">
                     <i class="fas fa-bullseye"></i>
                     Lead Gen
-                </a>
-            </li>
-            <li class="mobile-nav-item">
-                <a href="#coi-management" class="mobile-nav-link" onclick="setActiveTab('coi-management'); closeMobileMenu();">
-                    <i class="fas fa-certificate"></i>
-                    COI Management
                 </a>
             </li>
             <li class="mobile-nav-item">
@@ -878,9 +974,9 @@
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a href="#producers" class="mobile-nav-link" onclick="setActiveTab('producers'); closeMobileMenu();">
-                    <i class="fas fa-user-friends"></i>
-                    Producers
+                <a href="#compliance" class="mobile-nav-link" onclick="setActiveTab('compliance'); closeMobileMenu();">
+                    <i class="fas fa-shield-alt"></i>
+                    Compliance
                 </a>
             </li>
             <li class="mobile-nav-item">
@@ -909,6 +1005,26 @@
 
     <!-- Mobile Overlay -->
     <div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileMenu()"></div>
+
+    <!-- Notification Sidebar -->
+    <div class="notification-sidebar" id="notificationSidebar">
+        <div class="notification-sidebar-header">
+            <h3>Notifications</h3>
+            <button class="close-sidebar-btn" onclick="closeNotificationSidebar()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="notification-sidebar-content">
+            <div class="notification-empty-state">
+                <i class="fas fa-bell-slash"></i>
+                <p>No notifications yet</p>
+                <small>You'll see important updates here</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Sidebar Overlay -->
+    <div class="notification-overlay" id="notificationOverlay" onclick="closeNotificationSidebar()"></div>
 
     <!-- Main Dashboard -->
     <main class="main-content">
@@ -960,15 +1076,15 @@
                             </a>
                         </li>
                         <li>
-                            <a href="#coi" data-tooltip="COI Management">
-                                <i class="fas fa-certificate"></i>
-                                <span>COI Management</span>
-                            </a>
-                        </li>
-                        <li>
                             <a href="#communications" data-tooltip="Communications">
                                 <i class="fas fa-envelope"></i>
                                 <span>Communications</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#market" data-tooltip="Market">
+                                <i class="fas fa-chart-line"></i>
+                                <span>Market</span>
                             </a>
                         </li>
                     </ul>
@@ -983,9 +1099,9 @@
                             </a>
                         </li>
                         <li>
-                            <a href="#producers" data-tooltip="Producers">
-                                <i class="fas fa-user-tie"></i>
-                                <span>Producers</span>
+                            <a href="#compliance" data-tooltip="Compliance">
+                                <i class="fas fa-shield-alt"></i>
+                                <span>Compliance</span>
                             </a>
                         </li>
                         <li>
@@ -1007,6 +1123,33 @@
                             </a>
                         </li>
                     </ul>
+                </div>
+
+                <!-- Notification Permission Button -->
+                <div style="padding: 12px 8px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: 8px;">
+                    <button id="sidebar-notif-btn" onclick="handleSidebarNotifClick()" style="
+                        width: 100%;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        padding: 10px 12px;
+                        border: none;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 13px;
+                        font-weight: 600;
+                        transition: background 0.2s;
+                        background: rgba(255,255,255,0.07);
+                        color: rgba(255,255,255,0.75);
+                        text-align: left;
+                    ">
+                        <span id="sidebar-notif-icon" style="width:20px; text-align:center; font-size:15px;">🔔</span>
+                        <span id="sidebar-notif-label">Enable Notifications</span>
+                        <span id="sidebar-notif-dot" style="
+                            width: 8px; height: 8px; border-radius: 50%;
+                            background: #f59e0b; margin-left: auto; flex-shrink: 0;
+                        "></span>
+                    </button>
                 </div>
             </div>
         </aside>
@@ -1044,7 +1187,7 @@
                         <i class="fas fa-dollar-sign"></i>
                     </div>
                     <div class="stat-details">
-                        <h3>All Time Premium</h3>
+                        <h3>Last 2 Month New Premium</h3>
                         <p class="stat-number stat-value">$0</p>
                         <span class="stat-change positive">
                             <i class="fas fa-arrow-up"></i> 0% from last month
@@ -1104,6 +1247,51 @@
             <!-- Removed static conflicting HTML to prevent conflicts with JavaScript-generated dashboard -->
 
             <!-- Charts Section Removed -->
+        </section>
+
+        <!-- Market Content -->
+        <section class="market-content" style="display: none;">
+            <div class="market-header">
+                <div class="market-header-content">
+                    <div class="market-header-text">
+                        <h2>Insurance Market Overview</h2>
+                        <p>Carrier ranking by average unit pricing - sorted by competitiveness</p>
+                    </div>
+                    <div class="market-header-actions">
+                        <button class="btn-log-quote-header" onclick="showLogQuoteModal()">
+                            <i class="fas fa-plus" style="margin-right: 8px;"></i>Log Quote
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="market-table-container">
+                <table class="market-table">
+                    <thead>
+                        <tr>
+                            <th class="rank-col">#</th>
+                            <th class="carrier-col">Carrier</th>
+                            <th class="price-col">
+                                Avg Rate Per Unit
+                                <i class="fas fa-cog metric-selector-icon" onclick="showMetricSelector()"
+                                   style="margin-left: 8px; cursor: pointer; color: #94a3b8; font-size: 14px;"
+                                   title="Change metric calculation"></i>
+                            </th>
+                            <th class="volume-col">Quote Volume</th>
+                            <th class="action-col">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Table content will be dynamically generated by market-real-data.js -->
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 40px; color: #6b7280;">
+                                <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px;"></i><br>
+                                Loading market data...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </section>
     </main>
 
@@ -1207,13 +1395,13 @@
 
     <!-- New Client Modal -->
     <div id="clientModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 780px; width: 95%;">
             <div class="modal-header">
                 <h2>Add New Client</h2>
                 <button class="close-btn" onclick="closeModal('clientModal')">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="newClientForm">
+                <form id="newClientForm" style="width: 100%; max-width: none;">
                     <div class="form-row">
                         <div class="form-group">
                             <label>First Name</label>
@@ -1222,6 +1410,10 @@
                         <div class="form-group">
                             <label>Last Name</label>
                             <input type="text" name="lastName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Business Name</label>
+                            <input type="text" name="businessName" placeholder="Company/Business Name">
                         </div>
                     </div>
                     <div class="form-row">
@@ -1233,29 +1425,80 @@
                             <label>Phone</label>
                             <input type="tel" name="clientPhone" required>
                         </div>
+                        <div class="form-group">
+                            <label>Date of Birth</label>
+                            <input type="date" name="dateOfBirth">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Address</label>
-                        <input type="text" name="clientAddress" placeholder="Street Address">
+                        <input type="text" name="clientAddress" placeholder="Street Address (Optional)" style="pointer-events: auto; position: relative; z-index: 100001;">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>City</label>
-                            <input type="text" name="clientCity">
+                            <input type="text" name="clientCity" placeholder="City (Optional)" style="pointer-events: auto; position: relative; z-index: 100001;">
                         </div>
                         <div class="form-group">
                             <label>State</label>
-                            <select name="clientState">
-                                <option>Select State</option>
-                                <option>NY</option>
+                            <select name="clientState" style="pointer-events: auto; position: relative; z-index: 100001;">
+                                <option value="">Select State (Optional)</option>
+                                <option>AL</option>
+                                <option>AK</option>
+                                <option>AZ</option>
+                                <option>AR</option>
                                 <option>CA</option>
-                                <option>TX</option>
+                                <option>CO</option>
+                                <option>CT</option>
+                                <option>DE</option>
                                 <option>FL</option>
+                                <option>GA</option>
+                                <option>HI</option>
+                                <option>ID</option>
+                                <option>IL</option>
+                                <option>IN</option>
+                                <option>IA</option>
+                                <option>KS</option>
+                                <option>KY</option>
+                                <option>LA</option>
+                                <option>ME</option>
+                                <option>MD</option>
+                                <option>MA</option>
+                                <option>MI</option>
+                                <option>MN</option>
+                                <option>MS</option>
+                                <option>MO</option>
+                                <option>MT</option>
+                                <option>NE</option>
+                                <option>NV</option>
+                                <option>NH</option>
+                                <option>NJ</option>
+                                <option>NM</option>
+                                <option>NY</option>
+                                <option>NC</option>
+                                <option>ND</option>
+                                <option>OH</option>
+                                <option>OK</option>
+                                <option>OR</option>
+                                <option>PA</option>
+                                <option>RI</option>
+                                <option>SC</option>
+                                <option>SD</option>
+                                <option>TN</option>
+                                <option>TX</option>
+                                <option>UT</option>
+                                <option>VT</option>
+                                <option>VA</option>
+                                <option>WA</option>
+                                <option>WV</option>
+                                <option>WI</option>
+                                <option>WY</option>
+                                <option>DC</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label>ZIP</label>
-                            <input type="text" name="clientZip">
+                            <input type="text" name="clientZip" placeholder="ZIP Code (Optional)" style="pointer-events: auto; position: relative; z-index: 100001;">
                         </div>
                     </div>
                     <div class="form-row">
@@ -1267,10 +1510,6 @@
                                 <option value="Carson">Carson</option>
                                 <option value="Hunter">Hunter</option>
                             </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Representative</label>
-                            <input type="text" name="representative" placeholder="Sales Representative">
                         </div>
                     </div>
                     <div class="form-actions">
@@ -1389,7 +1628,7 @@
     <script src="js/lead-archive-system.js?v=2"></script>
     <script src="js/api-service.js?v=27"></script>
     <!-- Fix ALL API ports BEFORE any other scripts -->
-    <script src="js/fix-all-api-ports.js"></script>
+    <script src="js/fix-all-api-ports.js?v=HTTPS_API_FIX_V2"></script>
     <script src="js/crm-api.js?v=1"></script>
     <script src="js/crm-integration-override.js?v=1"></script>
     <!-- DISABLED FOR TESTING - These were blocking leads -->
@@ -1418,7 +1657,13 @@
     <script src="js/vanguard-softphone.js?v=9"></script>
     <script src="js/sip-integration-bridge.js?v=1"></script>
     <script src="js/force-policies-refresh.js?v=1"></script>
-    <script src="js/app.js?v=1768160600_DEV_MODE_ADDED"></script>
+    <script src="js/app.js?v=STATE_LABELS_V5"></script>
+
+    <!-- Vicidial Stage Sync - Bidirectional synchronization -->
+    <script src="js/vicidial-stage-sync.js?v=1"></script>
+
+    <!-- Callback Notifications - 30-minute callback alerts -->
+    <script src="js/callback-notifications.js?v=GRANT_TOGGLE_v1"></script>
 
     <!-- Console-Based Stats Tracker - LIVE SITE FIX -->
     <script>
@@ -1564,7 +1809,7 @@
     <!-- Universal Live Stats Fix - MUST load after app.js -->
     <script src="js/fix-all-agent-live-stats.js?v=5"></script>
     <!-- Enhanced Lead Management with DELETE functionality - MUST load after app.js -->
-    <script src="js/enhanced-lead-management.js?v=2"></script>
+    <script src="js/enhanced-lead-management.js?v=3"></script>
 
     <!-- Emergency fixes for hardcoded button IDs -->
     <!-- <script src="js/emergency-viewlead-fix.js?v=1"></script> DISABLED - Breaking other tabs -->
@@ -1587,7 +1832,7 @@
     <!-- <script src="js/nuclear-highlighting-fix.js?v=6"></script> DISABLED - Intercepting viewLead -->
 
     <!-- Protect ViciDial leads stored in database from localStorage clearing -->
-    <script src="js/protect-database-leads.js?v=6_CLEAN_LOGGING"></script>
+    <script src="js/protect-database-leads.js?v=8_RATE_LIMITED_SYNC"></script>
     <!-- Protect campaign modals from global click handler interference -->
     <script src="js/protect-campaign-modal.js?v=1"></script>
 
@@ -1605,7 +1850,7 @@
     <script src="js/fix-archived-leads-permanent.js?v=2"></script>
     <script src="js/ai-functions-fallback.js"></script>
     <script src="debug-agent-save.js"></script>
-    <script src="js/policy-modal.js?v=30"></script>
+    <script src="js/policy-modal.js?v=33"></script>
     <script src="js/policy-quickfill.js?v=1"></script>
     <script src="js/fix-policy-server-save.js?v=1"></script>
     <script src="js/policy-to-client-auto-sync.js?v=1"></script>
@@ -1614,10 +1859,10 @@
     <script src="js/universal-coi-upload.js?v=1"></script>
     <script src="js/fix-policy-types.js"></script>
     <!-- Removed carrier-profile-fixed.js to avoid conflicts -->
-    <script src="js/database-connector.js?v=22"></script>
+    <script src="js/database-connector.js?v=24_GLOBAL_FUNCTIONS"></script>
     <script src="vicidial-config.js"></script>
     <script src="js/vicidial-integration.js"></script>
-    <script src="js/vicidial-uploader.js?v=6"></script>
+    <script src="js/vicidial-uploader.js?v=batch_fix_1771257765"></script>
     <!-- DISABLED: Conflicts with selective sync - <script src="js/vicidial-sync-restored.js"></script> -->
     <!-- Telnyx WebRTC SDK for browser calling -->
     <script src="https://unpkg.com/@telnyx/webrtc@2.10.1/lib/bundle.js"></script>
@@ -1643,7 +1888,7 @@
     <script src="js/debug-script-loading.js?v=1"></script>
     <script src="js/add-test-button.js"></script>
     <!-- Fixed with role-based filtering and assigned column -->
-    <script src="js/fix-clients-view.js?v=1733252400_CLIENTS_FIXED"></script>
+    <script src="js/fix-clients-view.js?v=1733252400_NO_CONFLICTS"></script>
     <!-- DISABLED: Conflicts with original-client-profile.js
     <script src="js/fix-client-profile-policies.js"></script> -->
     <!-- TEMPORARILY DISABLED - This was blocking Vicidial lead imports -->
@@ -1742,7 +1987,7 @@
     <!-- <script src="js/lead-archive-system.js?v=2"></script> -->
     
     <!-- Deduplication System - Prevents duplicates across leads, clients, archives -->
-    <script src="js/deduplication-system.js?v=2"></script>
+    <script src="js/deduplication-system.js?v=3"></script>
     
     <!-- Bulk Client Import - 21 clients ready to import -->
     <script src="js/bulk-import-clients.js?v=2"></script>
@@ -1752,7 +1997,7 @@
     
     <!-- Client Pagination System - 12 clients per page -->
     <!-- DISABLED: Uses outdated client.policies array and wrong premium field
-    <script src="js/client-pagination.js?v=2"></script> -->
+    <script src="js/client-pagination.js?v=2026021302_POLICY_MATCH_FIX"></script> -->
     
     <!-- Fix stuck leads -->
     <!-- <script src="js/fix-stuck-leads.js?v=1"></script> DISABLED - May load leads -->
@@ -1791,7 +2036,7 @@
     -->
 
     <!-- ORIGINAL CLIENT PROFILE - Must be LAST to override all other viewClient functions -->
-    <script src="js/original-client-profile.js?v=2"></script>
+    <script src="js/original-client-profile.js?v=CLIENT_LOOKUP_FIX"></script>
 
     <!-- FINAL PROFILE FIX - Must load AFTER all other lead profile scripts to ensure functions are available -->
     <!-- <script src="js/final-profile-fix.js?v=1005"></script> REPLACED WITH PROTECTED VERSION -->
@@ -1800,13 +2045,49 @@
     <script src="js/test-script-execution.js?v=1"></script>
 
     <!-- FIX PREMIUM DISPLAY -->
-    <script src="js/fix-premium-display.js?v=1733252400_FIX_CLIENT_IDS"></script>
+    <script src="js/fix-premium-display.js?v=2026021302_FRESH_DATA_FIX"></script>
+
+    <!-- CLEAR TEST CLIENTS -->
+    <script src="js/clear-test-clients.js?v=1"></script>
+
+    <!-- POLICY FILTERS FUNCTIONALITY -->
+    <script src="js/policy-filters.js?v=2_PERSONAL_AUTO"></script>
+
+    <!-- EMERGENCY CALLBACK FIX - DISABLED for callback-only logic -->
+    <!-- <script src="js/emergency-callback-fix.js?v=IMMEDIATE_FIX"></script> -->
+
+    <!-- NOTIFICATION MANAGER - Disabled in favor of existing notification system -->
+    <!-- <script src="js/notification-manager.js?v=CRITICAL_PRIORITY_v1"></script> -->
+
+    <!-- MARKET FUNCTIONS - Load before profile to ensure auto-import functions are available -->
+    <script src="js/market-functions.js?v=AUTO_IMPORT_EMPTY_MARKET_v2"></script>
 
     <!-- FINAL PROFILE FIX PROTECTED - MUST BE ABSOLUTELY LAST - Cannot be overridden -->
-    <script src="js/final-profile-fix-protected.js?v=20250115_REMAINING_TIME_FIX"></script>
+    <script src="js/final-profile-fix-protected-FIXED.js?v=PHONE_BTN_POPUP_v1"></script>
+
+    <!-- CONTINUOUS CALLBACK MONITOR - Maintains "Reach out: CALL" buttons independently -->
+    <script src="js/continuous-callback-monitor.js?v=3"></script>
+
+    <!-- GREEN HIGHLIGHT REMOVER - Removes green highlights when TODO has content -->
+    <script src="js/green-highlight-remover.js?v=1"></script>
 
     <!-- Test ReachOut Consistency -->
     <script src="js/test-reachout-consistency.js?v=20250112_163215"></script>
+
+    <!-- Fix Missing Reach Out Text in Table - DISABLED for callback-only logic -->
+    <!-- <script src="js/fix-reach-out-table-text.js?v=20250127_FIX_EXPIRED_REACH_OUT"></script> -->
+
+    <!-- Test Reach Out Fix -->
+    <script src="js/test-reach-out-fix.js?v=20250127_TEST_REACH_OUT"></script>
+
+    <!-- Fix Missing Completion Timestamps -->
+    <script src="js/fix-completion-timestamp-display.js?v=20250127_COMPLETION_FIX"></script>
+
+    <!-- Debug Completion Timestamp Issues -->
+    <script src="js/debug-completion-timestamp.js?v=20250127_DEBUG_COMPLETION"></script>
+
+    <!-- Force Completion Fix (Aggressive) -->
+    <script src="js/force-completion-fix.js?v=20250127_FORCE_FIX"></script>
 
     <!-- Debug Lead ID Corruption -->
     <script src="js/debug-lead-id-corruption.js?v=20250112_164500"></script>
@@ -1906,7 +2187,7 @@
     <!-- Save to Profile functionality - MUST load before ACORD viewers -->
     <script src="js/save-to-profile.js?v=14"></script>
     <!-- Load ACORD Real Viewer for PDF with fillable fields overlay -->
-    <script src="js/acord-real-viewer.js?v=6"></script>
+    <script src="js/acord-real-viewer-vigagency.js?v=2026021302_TI_FIX_ROW"></script>
     <!-- Load the ACORD 25 Display with download/print functions -->
     <!-- Disabled because it conflicts with real viewer -->
     <!-- <script src="js/acord-25-display.js?v=2"></script> -->
@@ -1916,7 +2197,7 @@
     <!-- DISABLED: Interfering with Titan - <script src="js/coi-email-with-pdf.js?v=5"></script> -->
     <!-- DISABLED: Interfering with Titan - <script src="js/coi-email-final-override.js?v=2"></script> -->
     <!-- Fix ACORD Download and Print functions -->
-    <script src="js/fix-acord-download-print.js?v=1"></script>
+    <script src="js/fix-acord-download-print.js?v=EXCLUDE_AUTO_IMPORT_v1"></script>
     <!-- Removed lead-filter-530.js to disable 5/30 Filter button -->
     <!-- Carrier Profile Modal - Shows comprehensive carrier details with inspections -->
     <script src="js/carrier-profile-modal.js?v=5"></script>
@@ -1989,7 +2270,7 @@
     <!-- <script src="js/add-assigned-to-dropdown.js?v=2"></script> -->
 
     <!-- Authentication Manager -->
-    <script src="js/auth-manager.js?v=1"></script>
+    <script src="js/auth-manager.js?v=PREMIUM_PERMISSIONS_v2"></script>
 
     <!-- User-specific COI Customization -->
     <script src="js/user-coi-customization.js?v=1"></script>
@@ -2033,17 +2314,17 @@
 
     <!-- RESTORE Complete Lead Generation Functionality - MUST BE LAST -->
     <!-- Enabled lead generation scripts for full functionality -->
-    <script src="js/restore-lead-generation-complete.js?v=1"></script>
+    <script src="js/restore-lead-generation-complete.js?v=RPS_DEBUG_FIX_1771285742"></script>
     <!-- <script src="js/counts-only-lead-generation.js?v=3"></script> -->
 
     <!-- Complete Lead Generation with Day Skip feature -->
-    <script src="js/complete-lead-generation-restoration.js?v=11"></script>
+    <script src="js/complete-lead-generation-restoration.js?v=21_STATE_LABELS_V3"></script>
 
-    <!-- Fix Lead Generation to use Matched Carriers CSV Database - MUST LOAD AFTER COMPLETE RESTORATION -->
-    <script src="js/fix-lead-generation-matched-carriers.js?v=10"></script>
+    <!-- Fix Lead Generation to use DB-V3 Database - MUST LOAD AFTER COMPLETE RESTORATION -->
+    <script src="js/fix-lead-generation-matched-carriers.js?v=11_DB_V3_CONNECTION"></script>
 
     <!-- Selective Vicidial Sync - Choose which leads to import - MUST BE ABSOLUTELY LAST -->
-    <script src="js/selective-vicidial-sync-clean.js?v=21"></script>
+    <script src="js/selective-vicidial-sync-clean.js?v=22"></script>
 
     <!-- Fix ViciDial Deleted Filter - Clear ViciDial leads from deleted list -->
     <script src="js/fix-vicidial-deleted-filter.js?v=1"></script>
@@ -2195,6 +2476,14 @@
                                  <input type="text" value="\${lead.phone || ''}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"></div>
                             <div><label style="display: block; font-weight: bold; margin-bottom: 5px;">Email:</label>
                                  <input type="text" value="\${lead.email || ''}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"></div>
+                            <div><label style="display: block; font-weight: bold; margin-bottom: 5px;">DOT Number:</label>
+                                 <input type="text" value="\${lead.dotNumber || ''}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"></div>
+                            <div><label style="display: block; font-weight: bold; margin-bottom: 5px;">State:</label>
+                                 <input type="text" value="\${lead.state || ''}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: \${lead.state ? '#e8f5e8' : '#fff'};" placeholder="Auto-populated from DOT lookup"></div>
+                            <div><label style="display: block; font-weight: bold; margin-bottom: 5px;">Years in Business:</label>
+                                 <input type="text" value="\${lead.yearsInBusiness || ''}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: \${lead.yearsInBusiness ? '#e8f5e8' : '#fff'};" placeholder="Auto-populated from DOT lookup"></div>
+                            <div><label style="display: block; font-weight: bold; margin-bottom: 5px;">Commodity Hauled:</label>
+                                 <input type="text" value="\${lead.commodityHauled || ''}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: \${lead.commodityHauled ? '#e8f5e8' : '#fff'};" placeholder="Auto-populated from DOT lookup"></div>
                         </div>
                     </div>
 
@@ -2323,7 +2612,7 @@
     <script src="js/force-freeze-timestamps.js"></script>
     <script src="js/force-quote-modal-front.js"></script>
     <script src="js/enhanced-quote-form.js"></script>
-    <script src="js/enhanced-quote-modal.js?v=11"></script>
+    <script src="js/enhanced-quote-modal.js?v=NOT_40K_1K_v33"></script>
 
     <!-- Independent Agent Tracking System - Load Early -->
     <script src="js/independent-agent-tracking.js"></script>
@@ -2348,10 +2637,36 @@
             modal.className = 'simple-counter-modal';
             modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white !important;border-radius:12px !important;max-width:1000px !important;width:95% !important;max-height:90vh !important;overflow-y:auto !important;box-shadow:rgba(0,0,0,0.3) 0px 20px 40px !important;z-index:999999;animation:0.3s ease-out 0s 1 normal none running modalSlideIn !important;';
 
-            // Get current counter values - CONSOLE-BASED STATS INTEGRATION
-            let counters = window.getAgentCounters ? window.getAgentCounters(agentName) : {
-                leadCount: 0, callCount: 0, saleCount: 0, resetTimestamp: null
-            };
+            // Get current counter values - CONSOLE-BASED STATS INTEGRATION with period awareness
+            let counters = { leadCount: 0, callCount: 0, saleCount: 0, resetTimestamp: null };
+
+            if (window.getAgentCounters) {
+                // Check if we have an active time filter and use period-aware counters
+                const activeButton = document.querySelector('.time-filter-buttons button[style*="rgb(37, 99, 235)"]');
+                if (activeButton && window.getAgentCountersForPeriod) {
+                    const filterText = activeButton.textContent.trim();
+                    const periodMap = {
+                        'Today': 'day', 'This Week': 'week', 'This Month': 'month',
+                        'Year to Date': 'ytd', 'Custom Range': 'custom'
+                    };
+                    const period = periodMap[filterText];
+                    if (period) {
+                        counters = window.getAgentCountersForPeriod(agentName, period);
+                        console.log(`🎯 MODAL-OVERRIDE: Using period-filtered counters for ${agentName} (${filterText}):`, counters);
+                    } else {
+                        counters = window.getAgentCounters(agentName);
+                    }
+                } else {
+                    // DEFAULT: Use Today filter when no active button (modal creation before filters load)
+                    if (window.getAgentCountersForPeriod) {
+                        counters = window.getAgentCountersForPeriod(agentName, 'day');
+                        console.log(`🎯 MODAL-OVERRIDE: Using default TODAY counters for ${agentName} (no active button yet):`, counters);
+                    } else {
+                        counters = window.getAgentCounters(agentName);
+                        console.log(`🎯 MODAL-OVERRIDE: Using fallback overall counters for ${agentName}:`, counters);
+                    }
+                }
+            }
 
             // The counters already include call duration from getAgentCounters - no override needed!
             // getAgentCounters now includes totalCallDuration from console message tracking
@@ -2445,7 +2760,7 @@
                 <div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h2 style="margin: 0; color: #1f2937; font-size: 24px; font-weight: 600;">
-                            <i class="fas fa-user-circle" style="margin-right: 12px; color: #3b82f6;"></i>${agentName} Performance Profile (Since Reset)
+                            <i class="fas fa-user-circle" style="margin-right: 12px; color: #3b82f6;"></i>${agentName} Performance Profile (Today)
                         </h2>
                         <button onclick="this.closest('.simple-counter-modal').remove()" style="
                             background: none;
@@ -2458,19 +2773,15 @@
                         ">×</button>
                     </div>
                     <div class="time-filter-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button style="padding: 8px 16px; background: rgb(37, 99, 235); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Since Reset</button>
-                        <button onclick="alert('Day view - Coming soon!')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Day</button>
-                        <button onclick="alert('Weekly view - Coming soon!')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Weekly</button>
-                        <button onclick="alert('Monthly view - Coming soon!')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Monthly</button>
-                        <button onclick="alert('YTD view - Coming soon!')" style="padding: 8px 16px; background: rgb(243, 244, 246); color: rgb(55, 65, 81); border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">YTD</button>
-                        <button onclick="alert('Custom date range - Coming soon!')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Custom</button>
-                        <button onclick="
-                            if(window.resetAgentCounter) {
-                                window.resetAgentCounter('${agentName}');
-                                alert('Counter reset to 0!');
-                                window.showSimpleCounter('${agentName}');
-                            }
-                        " style="padding: 8px 16px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 10px;"><i class="fas fa-redo"></i> Reset</button>
+                        <!-- Time period filters -->
+                        <button id="filter-day" onclick="applyTimeFilter('${agentName}', 'day')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Today</button>
+                        <button id="filter-week" onclick="applyTimeFilter('${agentName}', 'week')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">This Week</button>
+                        <button id="filter-month" onclick="applyTimeFilter('${agentName}', 'month')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">This Month</button>
+                        <button id="filter-ytd" onclick="applyTimeFilter('${agentName}', 'ytd')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Year to Date</button>
+                        <button id="filter-custom" onclick="applyTimeFilter('${agentName}', 'custom')" style="padding: 8px 16px; background: #f3f4f6; color: #374151; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Custom Range</button>
+
+                        <!-- Smart Reset Button -->
+                        <button onclick="handleSmartReset('${agentName}')" style="padding: 8px 16px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 10px;"><i class="fas fa-redo"></i> Reset</button>
                     </div>
                 </div>
 
@@ -2640,6 +2951,14 @@
 
             document.body.appendChild(modal);
             console.log('✅ Emergency simple modal created');
+
+            // Automatically apply "Today" filter as default
+            setTimeout(() => {
+                if (window.applyTimeFilter) {
+                    console.log('🕒 AUTO-APPLYING: Setting Today as default filter');
+                    window.applyTimeFilter(agentName, 'day');
+                }
+            }, 100);
         };
 
         // Override everything immediately
@@ -2652,6 +2971,411 @@
             console.log('🎯 [IMMEDIATE BLOCK] Enhanced blocked, using simple counter');
             return window.showSimpleCounter(agentName);
         };
+
+        // Time Period Filter Function for Agent Performance Reports
+        window.applyTimeFilter = function(agentName, period) {
+            console.log(`🕒 Applying time filter: ${period} for agent: ${agentName}`);
+
+            // SPECIAL CASE: Only "since-reset" actually resets the counters
+            if (period === 'since-reset') {
+                console.log('🔄 RESET: Reset Counters button clicked - resetting counters');
+
+                // Determine current active filter and corresponding period
+                let currentFilter = 'Today'; // Default
+                let currentPeriod = 'day'; // Default
+                const activeButton = document.querySelector('.time-filter-buttons button[style*="rgb(37, 99, 235)"]');
+                if (activeButton) {
+                    currentFilter = activeButton.textContent.trim();
+                    // Map display names to period codes
+                    const periodMap = {
+                        'Today': 'day',
+                        'This Week': 'week',
+                        'This Month': 'month',
+                        'Year to Date': 'ytd',
+                        'Custom Range': 'custom'
+                    };
+                    currentPeriod = periodMap[currentFilter] || 'day';
+
+                    // Remove emoji if present
+                    if (currentFilter.includes('🔄')) {
+                        currentFilter = 'All Counters';
+                        currentPeriod = 'all';
+                    }
+                }
+
+                console.log(`🔍 DEBUG: Checking reset function availability - resetAgentCounterForPeriod: ${typeof window.resetAgentCounterForPeriod}, currentPeriod: ${currentPeriod}`);
+
+                if (window.resetAgentCounterForPeriod && currentPeriod !== 'all') {
+                    console.log(`🎯 Using period-specific reset for ${currentPeriod}`);
+                    const confirmReset = confirm(`Reset the ${currentFilter} counter for ${agentName} back to 0?\n\nThis will mark ${currentFilter} as reset and show filtered data from that point forward.`);
+                    if (confirmReset) {
+                        console.log(`🔢 PERIOD RESET: Calling resetAgentCounterForPeriod('${agentName}', '${currentPeriod}')`);
+                        window.resetAgentCounterForPeriod(agentName, currentPeriod);
+
+                        // Refresh the modal to show period-filtered reset values (0s)
+                        setTimeout(() => {
+                            console.log(`🔄 RESET-REFRESH: Refreshing modal after period reset for ${agentName} (${currentFilter})`);
+
+                            // Get the period-filtered counters (should be 0 since we just reset)
+                            const resetCounters = window.getAgentCountersForPeriod ?
+                                window.getAgentCountersForPeriod(agentName, currentPeriod) :
+                                { leadCount: 0, callCount: 0, saleCount: 0, leadsToBrokers: 0, totalCallDuration: 0 };
+
+                            console.log(`🔄 RESET-REFRESH: Post-reset counters for ${currentPeriod}:`, resetCounters);
+
+                            const modal = document.getElementById('agent-profile-modal') ||
+                                         document.querySelector('.simple-counter-modal') ||
+                                         document.querySelector('[class*="modal"]');
+
+                            if (modal) {
+                                console.log(`🔄 RESET-REFRESH: Found modal, updating metrics to show reset values`);
+
+                                // Find and update all metric values
+                                const metricElements = modal.querySelectorAll('[style*="font-size: 28px"], [style*="font-size:28px"]');
+                                console.log(`🔄 RESET-REFRESH: Found ${metricElements.length} metric elements to update`);
+
+                                metricElements.forEach((element, index) => {
+                                    const nextElement = element.nextElementSibling;
+                                    const parentElement = element.parentElement;
+
+                                    if (nextElement && nextElement.textContent) {
+                                        const labelText = nextElement.textContent.trim();
+                                        console.log(`🔄 RESET-REFRESH: Processing metric ${index + 1}: "${labelText}"`);
+
+                                        let newValue = 0;
+                                        let newColor = '#dc2626'; // Red for 0 values
+
+                                        // Update based on label text
+                                        if (labelText.includes('Total Leads')) {
+                                            newValue = resetCounters.leadCount;
+                                            newColor = resetCounters.leadCount > 0 ? '#059669' : '#dc2626';
+                                        } else if (labelText.includes('Total Calls')) {
+                                            newValue = resetCounters.callCount;
+                                            newColor = resetCounters.callCount > 0 ? '#059669' : '#dc2626';
+                                        } else if (labelText.includes('Sales')) {
+                                            newValue = resetCounters.saleCount;
+                                            newColor = resetCounters.saleCount > 0 ? '#059669' : '#dc2626';
+                                        } else if (labelText.includes('Leads to Brokers')) {
+                                            newValue = resetCounters.leadsToBrokers || 0;
+                                            newColor = (resetCounters.leadsToBrokers || 0) > 0 ? '#10b981' : '#dc2626';
+                                        } else if (labelText.includes('Total Call Duration')) {
+                                            newValue = resetCounters.totalCallDuration || 0;
+                                            newColor = (resetCounters.totalCallDuration || 0) > 0 ? '#0ea5e9' : '#dc2626';
+                                        }
+
+                                        console.log(`🔄 RESET-REFRESH: Updating "${labelText}" from ${element.textContent} to ${newValue}`);
+                                        element.textContent = newValue;
+                                        element.style.color = newColor;
+                                        element.style.fontWeight = 'bold';
+
+                                        // Flash green to show update
+                                        element.style.background = '#10b981';
+                                        element.style.color = 'white';
+                                        setTimeout(() => {
+                                            element.style.background = '';
+                                            element.style.color = newColor;
+                                        }, 300);
+                                    }
+                                });
+
+                                console.log(`✅ RESET-REFRESH: Modal updated with reset values for ${agentName} (${currentFilter})`);
+                            } else {
+                                console.log(`❌ RESET-REFRESH: No modal found to update`);
+                            }
+                        }, 200);
+
+                        alert(`✅ ${currentFilter} counter reset for ${agentName}!`);
+                        console.log(`🔢 Period-specific reset applied: ${currentPeriod} for ${agentName}`);
+                        return;
+                    } else {
+                        // User cancelled reset, don't change anything
+                        console.log('❌ Reset cancelled by user');
+                        return;
+                    }
+                } else if (window.resetAgentCounter) {
+                    console.log(`⚠️ FALLBACK: Using full reset - resetAgentCounterForPeriod not available or currentPeriod is 'all'`);
+                    const confirmReset = confirm(`Reset ALL counters for ${agentName} back to 0?\n\nThis will reset all time periods.`);
+                    if (confirmReset) {
+                        console.log(`🔢 FULL RESET: Calling resetAgentCounter('${agentName}')`);
+                        window.resetAgentCounter(agentName);
+                        // Refresh the modal to show reset values
+                        setTimeout(() => {
+                            if (window.showTrueCounterModal) {
+                                window.showTrueCounterModal(agentName);
+                            }
+                        }, 500);
+                        alert(`✅ All counters reset to 0 for ${agentName}!`);
+                        return;
+                    } else {
+                        // User cancelled reset, don't change anything
+                        console.log('❌ Reset cancelled by user');
+                        return;
+                    }
+                }
+                return; // Exit early for reset action
+            }
+
+            // For all other filters: just update the view, don't reset data
+            updateFilterButtonStates(period);
+
+            // Get the current counters with period filtering support
+            let counters = { leadCount: 0, callCount: 0, saleCount: 0, leadsToBrokers: 0, totalCallDuration: 0 };
+            if (window.getAgentCounters) {
+                // Use period-aware counters if available and period is specified
+                if (window.getAgentCountersForPeriod && ['day', 'week', 'month', 'ytd', 'custom'].includes(period)) {
+                    counters = window.getAgentCountersForPeriod(agentName, period);
+                    console.log(`🎯 FILTER-OVERRIDE: Using period-filtered counters for ${agentName} (${period}):`, counters);
+                } else {
+                    counters = window.getAgentCounters(agentName);
+                }
+            }
+
+            // For now, show the current counters with a note about the time period
+            // In the future, this could filter based on actual timestamps
+            let periodLabel = '';
+            let filteredData = { ...counters };
+
+            switch(period) {
+                case 'since-reset':
+                    periodLabel = 'Since Reset';
+                    // This is the default - show all data since last reset
+                    break;
+                case 'day':
+                    periodLabel = 'Today';
+                    // For now, show current data (could be filtered by date in future)
+                    break;
+                case 'week':
+                    periodLabel = 'This Week';
+                    // For now, show current data (could be filtered by date in future)
+                    break;
+                case 'month':
+                    periodLabel = 'This Month';
+                    // For now, show current data (could be filtered by date in future)
+                    break;
+                case 'ytd':
+                    periodLabel = 'Year to Date';
+                    // For now, show current data (could be filtered by date in future)
+                    break;
+                case 'custom':
+                    // Show date picker for custom range
+                    const startDate = prompt('Enter start date (YYYY-MM-DD):');
+                    const endDate = prompt('Enter end date (YYYY-MM-DD):');
+                    if (startDate && endDate) {
+                        periodLabel = `${startDate} to ${endDate}`;
+                    } else {
+                        return; // Cancel if no dates provided
+                    }
+                    break;
+            }
+
+            // Update the modal title to show the time period
+            const titleElement = document.querySelector('.simple-counter-modal h2');
+            if (titleElement) {
+                titleElement.innerHTML = `
+                    <i class="fas fa-user-circle" style="margin-right: 12px; color: #3b82f6;"></i>
+                    ${agentName} Performance Profile (${periodLabel})
+                `;
+                console.log(`🔄 TITLE-UPDATE: Updated header to show ${periodLabel}`);
+            } else {
+                console.log(`🔄 TITLE-UPDATE: Header element not found`);
+            }
+
+            // Show a notification about the filter
+            if (period !== 'since-reset') {
+                // For now, show a note that this will be enhanced with historical data
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    background: #e0f2fe;
+                    border: 1px solid #0288d1;
+                    color: #01579b;
+                    padding: 12px;
+                    border-radius: 8px;
+                    margin: 16px;
+                    font-size: 14px;
+                    text-align: center;
+                `;
+                notification.innerHTML = `
+                    <i class="fas fa-info-circle" style="margin-right: 8px;"></i>
+                    <strong>${periodLabel} View Active</strong><br>
+                    Currently showing latest data. Historical filtering will be enhanced in future updates.
+                `;
+
+                // Find a good place to insert the notification
+                const modal = document.getElementById('agent-profile-modal');
+                const statsContainer = modal?.querySelector('.simple-counter-stats');
+                if (statsContainer && statsContainer.parentNode) {
+                    // Remove any existing notifications
+                    const existingNotification = modal.querySelector('[data-time-filter-notification]');
+                    if (existingNotification) {
+                        existingNotification.remove();
+                    }
+
+                    notification.setAttribute('data-time-filter-notification', 'true');
+                    statsContainer.parentNode.insertBefore(notification, statsContainer);
+                }
+            } else {
+                // Remove notification for "Since Reset" view
+                const modal = document.getElementById('agent-profile-modal');
+                const existingNotification = modal?.querySelector('[data-time-filter-notification]');
+                if (existingNotification) {
+                    existingNotification.remove();
+                }
+            }
+
+            // Refresh the modal to show period-filtered values
+            setTimeout(() => {
+                const modal = document.querySelector('.simple-counter-modal');
+                if (modal) {
+                    console.log(`🔄 MODAL-REFRESH: Refreshing modal for ${agentName} with ${periodLabel} filter`);
+                    console.log(`🔄 MODAL-REFRESH: Should update to show ${counters.callCount} calls`);
+
+                    // Find and update the metric values using the period-aware counters
+                    const metricElements = modal.querySelectorAll('[style*="font-size: 28px"], [style*="font-size:28px"]');
+                    console.log(`🔄 MODAL-REFRESH: Found ${metricElements.length} metric elements`);
+
+                    metricElements.forEach(element => {
+                        const nextElement = element.nextElementSibling;
+                        const parentElement = element.parentElement;
+
+                        // The label comes AFTER the number in this HTML structure
+                        if (nextElement && nextElement.textContent) {
+                            const labelText = nextElement.textContent.trim();
+                            console.log(`🔧 MODAL-UPDATE: Checking element with label "${labelText}" and current value "${element.textContent}"`);
+
+                            // Update the values based on the label
+                            if (labelText.includes('Total Leads')) {
+                                console.log(`🔧 MODAL-UPDATE: Updating Total Leads from ${element.textContent} to ${counters.leadCount}`);
+                                element.textContent = counters.leadCount;
+                                // Keep red color for stats that are below average
+                                element.style.color = '#dc2626';
+                            } else if (labelText.includes('Total Calls')) {
+                                console.log(`🔧 MODAL-UPDATE: Updating Total Calls from ${element.textContent} to ${counters.callCount}`);
+                                element.textContent = counters.callCount;
+                                // Keep red color for stats that are below average
+                                element.style.color = '#dc2626';
+                            } else if (labelText.includes('Sales')) {
+                                element.textContent = counters.saleCount;
+                                element.style.color = counters.saleCount > 0 ? '#059669' : '#dc2626';
+                            } else if (labelText.includes('Leads to Brokers')) {
+                                element.textContent = counters.leadsToBrokers || 0;
+                                element.style.color = (counters.leadsToBrokers || 0) > 0 ? '#10b981' : '#dc2626';
+                            } else if (labelText.includes('Total Call Duration')) {
+                                console.log(`🔧 MODAL-UPDATE: Updating Total Call Duration from ${element.textContent} to ${counters.totalCallDuration || 0}`);
+                                element.textContent = counters.totalCallDuration || 0;
+                                // Keep red color for stats that are below average
+                                element.style.color = '#dc2626';
+                            } else if (labelText.includes('High Value Leads')) {
+                                console.log(`🔧 MODAL-UPDATE: Updating High Value Leads from ${element.textContent} to ${counters.highValueLeads || 0}`);
+                                element.textContent = counters.highValueLeads || 0;
+                                // Keep red color for stats that are below average
+                                element.style.color = '#dc2626';
+                            }
+                        }
+                    });
+
+                    console.log(`✅ MODAL-REFRESH: Updated modal metrics for ${agentName} (${periodLabel})`);
+                }
+            }, 100);
+
+            console.log(`✅ Applied ${periodLabel} filter for ${agentName}`);
+        };
+
+        // Smart Reset Handler - Detects current filter and resets accordingly
+        window.handleSmartReset = function(agentName) {
+            console.log(`🎯 SMART RESET: Handling reset for ${agentName}`);
+
+            // Detect which filter is currently active
+            const activeButton = document.querySelector('.time-filter-buttons button[style*="rgb(37, 99, 235)"]');
+            let activeFilter = 'All';
+            let activePeriod = 'all';
+
+            if (activeButton) {
+                activeFilter = activeButton.textContent.trim();
+                console.log('🎯 ACTIVE FILTER DETECTED:', activeFilter);
+
+                // Map display names to period codes
+                const filterToPeriod = {
+                    'Today': 'day',
+                    'This Week': 'week',
+                    'This Month': 'month',
+                    'Year to Date': 'ytd',
+                    'Custom Range': 'custom'
+                };
+                activePeriod = filterToPeriod[activeFilter] || 'all';
+                console.log('🎯 MAPPED PERIOD:', activePeriod);
+            } else {
+                console.log('⚠️ NO ACTIVE FILTER: Using full reset');
+            }
+
+            // Create appropriate confirmation message
+            const resetMessage = activeFilter !== 'All' ?
+                `Reset only the ${activeFilter} counter to 0? This will reset only ${activeFilter}, leaving other time periods unchanged.` :
+                `Reset ALL counters to 0? This will reset all time periods.`;
+
+            console.log('💬 RESET MESSAGE:', resetMessage);
+
+            // Show confirmation dialog
+            const confirmReset = confirm(resetMessage);
+            if (!confirmReset) {
+                console.log('❌ Reset cancelled by user');
+                return;
+            }
+
+            // Execute the appropriate reset
+            if (activePeriod !== 'all' && window.resetAgentCounterForPeriod) {
+                console.log(`🔄 ACTION: Calling resetAgentCounterForPeriod('${agentName}', '${activePeriod}')`);
+                window.resetAgentCounterForPeriod(agentName, activePeriod);
+                alert(`✅ ${activeFilter} counter reset for ${agentName}!`);
+
+                // Refresh modal after short delay
+                setTimeout(() => {
+                    window.showSimpleCounter(agentName);
+                }, 300);
+            } else if (window.resetAgentCounter) {
+                console.log(`🔄 ACTION: Calling resetAgentCounter('${agentName}') - Full reset`);
+                window.resetAgentCounter(agentName);
+                alert(`✅ All counters reset for ${agentName}!`);
+
+                // Refresh modal after short delay
+                setTimeout(() => {
+                    window.showSimpleCounter(agentName);
+                }, 300);
+            } else {
+                console.error('❌ No reset function available!');
+                alert('Error: Reset functionality not available');
+            }
+        };
+
+        // Helper function to update filter button states
+        function updateFilterButtonStates(activePeriod) {
+            const buttons = document.querySelectorAll('.time-filter-buttons button');
+            buttons.forEach(button => {
+                const isActive = button.id === `filter-${activePeriod}`;
+                const isResetButton = button.id === 'filter-since-reset';
+
+                if (isActive) {
+                    if (isResetButton) {
+                        // Reset button stays red when active
+                        button.style.background = '#dc2626';
+                        button.style.color = 'white';
+                    } else {
+                        // Regular filter buttons turn blue when active
+                        button.style.background = 'rgb(37, 99, 235)';
+                        button.style.color = 'white';
+                    }
+                } else {
+                    if (isResetButton) {
+                        // Reset button uses red when inactive
+                        button.style.background = '#ef4444';
+                        button.style.color = 'white';
+                    } else {
+                        // Regular filter buttons are gray when inactive
+                        button.style.background = '#f3f4f6';
+                        button.style.color = '#374151';
+                    }
+                }
+            });
+        }
     </script>
 
     <!-- True Incremental Counter System - Load Last -->
@@ -2659,8 +3383,22 @@
     <script src="js/vicidial-import-listener.js"></script>
     <script src="js/simple-counter-modal.js"></script>
 
+    <!-- Vicidial DOT Lookup Integration -->
+    <script src="js/vicidial-dot-lookup-integration.js?v=2"></script>
+    <!-- Auto DOT Lookup Hook - Triggers DOT lookup immediately when leads are created -->
+    <script src="js/auto-dot-lookup-hook.js?v=22"></script>
+
     <!-- Mobile Enhancements -->
     <script src="js/mobile-enhancements.js?v=1"></script>
+
+    <!-- Emergency Callback Fix - DISABLED for callback-only logic -->
+    <!-- <script src="js/emergency-callback-fix.js?v=INTEGRATED_COMPLETION"></script> -->
+
+    <!-- POLICY FIXES -->
+    <script src="js/fix-policies-immediate-load.js"></script>
+
+    <!-- CRITICAL: Harry Welling TODO Fix -->
+    <script src="js/comprehensive-final-fix.js"></script>
 
     <!-- Mobile Navigation JavaScript -->
     <script>
@@ -2876,6 +3614,107 @@
 
     <!-- Call logs feature implemented -->
 
+    <!-- REACHOUT INITIALIZATION FIX - Must load before table generation -->
+    <script src="js/fix-reachout-initialization.js?v=2"></script>
+
+    <!-- DEBUG ALASKA LEAD ISSUE -->
+    <script src="js/debug-alaska-lead.js?v=1"></script>
+
+
+    <!-- COMPREHENSIVE TODO/HIGHLIGHTING FIX - Load last to override everything -->
+    <script src="js/comprehensive-final-fix.js?v=CACHE_BUST_2"></script>
+
+    <!-- APP SENT STAGE INDEFINITE HIGHLIGHT FIX -->
+    <script src="js/app-sent-highlight-fix.js?v=3"></script>
+
+    <!-- DIRECT HIGHLIGHT BUTTON CLICK INTERCEPTOR -->
+    <script src="js/highlight-button-interceptor.js?v=2"></script>
+
+
+
+    <!-- APP SENT TODO OVERRIDE - Force empty TODO for app sent stage -->
+    <script src="js/app-sent-todo-override.js?v=2"></script>
+
+    <!-- FINAL APP SENT FIX - Ultimate override for all TODO generation -->
+    <script src="js/final-app-sent-fix.js?v=CALLBACK_FIX_v1"></script>
+    <!-- ADD AL'S TOWING LLC POLICY -->
+    <script src="js/add-als-towing-policy.js?v=1"></script>
+    <!-- ADD BLUE SKY LOGISTICS POLICY -->
+    <script src="js/add-second-policy.js?v=1"></script>
+    <!-- FIX POLICY TABS DISPLAY -->
+    <script src="js/fix-policy-tabs-display.js?v=1"></script>
+    <!-- POLICY TAB CONTENT FILLER -->
+    <script src="js/policy-tab-content-filler.js?v=1"></script>
+    <!-- QUICK POLICY CHECK -->
+    <script src="js/quick-policy-check.js?v=1"></script>
+    <!-- Market navigation is now handled by main app.js navigation system -->
+    <!-- MARKET FUNCTIONS - Details and Log Quote functionality - MOVED TO LOAD EARLIER -->
+    <!-- MARKET REAL DATA - Calculate averages from actual quotes -->
+    <script src="js/market-real-data.js?v=1"></script>
+    <!-- FORCE MARKET LOAD - Immediately populate table -->
+    <script src="js/force-market-load.js?v=1"></script>
+
+    <!-- FIX FIRST TABLE TEMPLATE - Ensure first loading template works correctly -->
+    <script src="js/fix-first-table-template.js?v=1"></script>
+
+    <!-- VERIFICATION: Check if Harry Welling fix is working -->
+    <script src="js/verify-harry-fix.js?v=1"></script>
+
+    <!-- VERIFICATION: Check if app sent stage fix is working -->
+    <script src="js/verify-app-sent-fix.js?v=1"></script>
+
+    <!-- TEST: Verify empty TODO cells have green highlighting -->
+    <script src="js/test-empty-todo-highlighting.js?v=1"></script>
+
+    <!-- TEST: Verify email confirmation persistence after profile refresh -->
+    <script src="js/test-email-confirmation-persistence.js?v=1"></script>
+
+    <!-- DEBUG: Monitor email confirmation sequence in detail -->
+    <script src="js/debug-email-confirmation-sequence.js?v=1"></script>
+
+    <!-- PROTECT: Prevent email confirmations from being reset -->
+    <script src="js/protect-email-confirmations.js?v=1"></script>
+
+    <!-- VERIFY: Test that our scripts are actually loading and working -->
+    <script src="js/verify-scripts-loading.js?v=1"></script>
+
+    <!-- FINAL FIX: Complete email confirmation persistence solution -->
+    <script src="js/final-email-confirmation-fix.js?v=1"></script>
+
+    <!-- TEST: Comprehensive email confirmation fix verification -->
+    <script src="js/test-email-confirmation-fix-complete.js?v=1"></script>
+
+    <!-- FIX: Profile modal completion display for all leads with highlight durations -->
+    <script src="js/fix-profile-completion-display.js?v=1"></script>
+
+    <!-- MANUAL FIX: Console commands for immediate profile completion fixes -->
+    <script src="js/manual-profile-completion-fix.js?v=1"></script>
+
+    <!-- PERSISTENT SYNC: Bulletproof system to ensure profiles always match data -->
+    <script src="js/persistent-profile-completion-sync.js?v=1"></script>
+
+    <!-- FIX: Expired highlight table display - DISABLED for callback-only logic -->
+    <!-- <script src="js/fix-expired-highlight-table-display.js?v=1"></script> -->
+
+    <!-- SIMPLIFIED: Callback-only TO DO logic (overrides complex highlight tracking) -->
+    <script src="js/simplified-todo-logic.js?v=3"></script>
+
+    <!-- ULTIMATE OVERRIDE: Nuclear option to disable ALL competing TO DO systems -->
+    <script src="js/ultimate-callback-only-override.js?v=3"></script>
+
+    <!-- ENHANCED CLIENT MANAGEMENT: Search, filtering, and bulk operations -->
+    <script src="js/enhanced-client-management.js?v=2026021302_AGENT_FILTER_WORKING"></script>
+    <script src="js/client-bulk-operations.js?v=2025021001"></script>
+    <script src="js/validate-client-enhancements.js?v=2025021001"></script>
+    <!-- CLIENT FILTERS: Auto-filter Maureen clients and initialization -->
+    <script src="js/client-filters.js?v=1"></script>
+    <!-- Mobile Navigation JavaScript -->
+    <script src="js/mobile.js?v=1"></script>
+    <!-- Fix for clickable phone/email elements - DISABLED: Conflicts with fix-clients-view.js -->
+    <!-- <script src="js/fix-clickable-elements.js?v=1"></script> -->
+
     <!-- REMOVED: Scripts moved earlier to ensure loading -->
+    <!-- Plaid Link SDK -->
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 </body>
 </html>
