@@ -6031,12 +6031,30 @@ function saveGoalsConfig(cfg) {
 
 // Auto-calc other goal fields when Sales monthly is entered
 window.goalsAutoCalc = function(user, salesInput) {
-    const sales = parseFloat(salesInput.value) || 0;
+    const raw = salesInput.value;
+    if (raw === '' || raw === null) return; // still-typing / empty
+    const val = parseFloat(raw) || 0;
     const ratio = _SALES_RATIOS[user];
-    if (!ratio || sales <= 0) return;
-    const WPM = 4.33; // weeks per month
+    if (!ratio || val < 0) return;
+    const WPM = 4.33;
     const DPM = _WORK_DAYS_PER_MONTH;
-    // Monthly → weekly → daily
+
+    // Convert input period to monthly sales
+    const id = salesInput.id || '';
+    let monthlySales;
+    if (id.includes('-d-sales'))      monthlySales = val * DPM;
+    else if (id.includes('-w-sales')) monthlySales = val * WPM;
+    else                              monthlySales = val; // monthly
+
+    // Sync the other two sales boxes
+    const mSalesEl = document.getElementById('gcfg-' + user + '-m-sales');
+    const wSalesEl = document.getElementById('gcfg-' + user + '-w-sales');
+    const dSalesEl = document.getElementById('gcfg-' + user + '-d-sales');
+    if (mSalesEl && mSalesEl !== salesInput) mSalesEl.value = Math.round(monthlySales * 10) / 10;
+    if (wSalesEl && wSalesEl !== salesInput) wSalesEl.value = Math.round((monthlySales / WPM) * 10) / 10;
+    if (dSalesEl && dSalesEl !== salesInput) dSalesEl.value = Math.round((monthlySales / DPM) * 10) / 10;
+
+    // Populate leads, apps, talk time across all periods (skip callbacks & avgTalkMin)
     function setField(key, monthly) {
         const mEl = document.getElementById('gcfg-' + user + '-m-' + key);
         const wEl = document.getElementById('gcfg-' + user + '-w-' + key);
@@ -6045,15 +6063,9 @@ window.goalsAutoCalc = function(user, salesInput) {
         if (wEl) wEl.value = Math.round((monthly / WPM) * 10) / 10;
         if (dEl) dEl.value = Math.round((monthly / DPM) * 10) / 10;
     }
-    // Also set weekly/daily for the sales field itself
-    const mSalesEl = document.getElementById('gcfg-' + user + '-w-sales');
-    const dSalesEl = document.getElementById('gcfg-' + user + '-d-sales');
-    if (mSalesEl) mSalesEl.value = Math.round((sales / WPM) * 10) / 10;
-    if (dSalesEl) dSalesEl.value = Math.round((sales / DPM) * 10) / 10;
-
-    setField('newLeads',       sales * ratio.newLeads);
-    setField('apps',           sales * ratio.apps);
-    setField('totalTalkHours', sales * ratio.totalTalkHours);
+    setField('newLeads',       monthlySales * ratio.newLeads);
+    setField('apps',           monthlySales * ratio.apps);
+    setField('totalTalkHours', monthlySales * ratio.totalTalkHours);
 };
 
 // Sales ratios per sale (derived from high-estimate target stacks)
@@ -6172,13 +6184,11 @@ window.openGoalsEditor = async function() {
                 const csD = isYellow ? CSS_Y : CSS_D;
                 const csW = isYellow ? CSS_Y : CSS_W;
                 const csM = isYellow ? CSS_Y : CSS_M;
-                // Sales input: add oninput for auto-calc
-                const salesTrigger = f.key === 'sales' ? ` oninput="goalsAutoCalc('${u.key}',this)"` : '';
                 return '<div style="font-size:0.78rem;color:#374151;">' + f.label + '</div>' +
                     '<div style="display:flex;justify-content:center;">' + _miniToggle(fId, isActive) + '</div>' +
                     '<input type="number" id="gcfg-' + u.key + '-d-' + f.key + '" value="' + dVal + '" min="0" style="' + csD + '">' +
                     '<input type="number" id="gcfg-' + u.key + '-w-' + f.key + '" value="' + wVal + '" min="0" style="' + csW + '">' +
-                    '<input type="number" id="gcfg-' + u.key + '-m-' + f.key + '" value="' + mVal + '" min="0" style="' + csM + '"' + salesTrigger + '>';
+                    '<input type="number" id="gcfg-' + u.key + '-m-' + f.key + '" value="' + mVal + '" min="0" style="' + csM + '">';
             }).join('') +
         '</div>';
 
@@ -6229,6 +6239,17 @@ window.openGoalsEditor = async function() {
 
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    // Wire up sales input listeners + auto-calc on open
+    ['grant','carson','hunter'].forEach(u => {
+        ['d','w','m'].forEach(p => {
+            const el = document.getElementById('gcfg-' + u + '-' + p + '-sales');
+            if (el) el.addEventListener('input', () => goalsAutoCalc(u, el));
+        });
+        // Run once on open so all fields reflect current sales value
+        const mEl = document.getElementById('gcfg-' + u + '-m-sales');
+        if (mEl && parseFloat(mEl.value) > 0) goalsAutoCalc(u, mEl);
+    });
 };
 
 window.saveGoalsFromEditor = function() {
@@ -14109,6 +14130,14 @@ function _acctRenderFull(container, isAdmin, currentUser) {
     _acctInjectStyles();
 }
 
+function acctDrillMonth(monthNum, type) {
+    _acct._txMonthFilter = monthNum;
+    _acct._txTypeFilter  = type;
+    _acct._txCatFilter   = '';
+    _acct._txSearch      = '';
+    acctTab('transactions');
+}
+
 function acctTab(tab) {
     _acct.activeTab = tab;
     const body = document.getElementById('acct-body');
@@ -14317,8 +14346,8 @@ function _acctPLHTML() {
       <thead><tr><th>Month</th><th style="text-align:right">Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Net</th></tr></thead>
       <tbody>${(pl.monthly||[]).map(m=>`<tr>
         <td>${m.label}</td>
-        <td style="text-align:right;color:#16a34a">${fmtDollar(m.income)}</td>
-        <td style="text-align:right;color:#ef4444">${fmtDollar(m.expenses)}</td>
+        <td style="text-align:right;color:#16a34a">${m.income>0?`<span style="display:inline-flex;align-items:center;gap:4px;">${fmtDollar(m.income)}<button onclick="acctDrillMonth(${m.month},'income')" title="View ${m.label} income transactions" style="background:none;border:none;cursor:pointer;color:#16a34a;padding:0;line-height:1;font-size:.75rem;"><i class="fas fa-arrow-right"></i></button></span>`:fmtDollar(m.income)}</td>
+        <td style="text-align:right;color:#ef4444">${m.expenses>0?`<span style="display:inline-flex;align-items:center;gap:4px;">${fmtDollar(m.expenses)}<button onclick="acctDrillMonth(${m.month},'expense')" title="View ${m.label} expense transactions" style="background:none;border:none;cursor:pointer;color:#ef4444;padding:0;line-height:1;font-size:.75rem;"><i class="fas fa-arrow-right"></i></button></span>`:fmtDollar(m.expenses)}</td>
         <td style="text-align:right;font-weight:600;color:${m.net>=0?'#16a34a':'#ef4444'}">${fmtDollar(m.net)}</td>
       </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:#9ca3af">No data</td></tr>'}</tbody>
     </table>
@@ -14334,70 +14363,68 @@ function _acctTransactionsHTML(isAdmin) {
     const categories = [...new Set(txs.map(t => t.category).filter(Boolean))].sort();
     const catFilter = _acct._txCatFilter || '';
     const typeFilter = _acct._txTypeFilter || '';
+    const monthFilter = _acct._txMonthFilter || 0;
     const searchFilter = (_acct._txSearch || '').toLowerCase();
+    const MONTH_LABELS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
     let filtered = sorted;
+    if (monthFilter) filtered = filtered.filter(t => t.date && parseInt(t.date.substring(5,7)) === monthFilter);
     if (catFilter) filtered = filtered.filter(t => t.category === catFilter);
     if (typeFilter === 'income') filtered = filtered.filter(t => t.amount > 0);
     if (typeFilter === 'expense') filtered = filtered.filter(t => t.amount < 0);
     if (searchFilter) filtered = filtered.filter(t => (t.description || '').toLowerCase().includes(searchFilter) || (t.category || '').toLowerCase().includes(searchFilter));
 
-    const totalIn = txs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
-    const totalOut = txs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0);
+    const totalIn  = filtered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+    const totalOut = filtered.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0);
 
-    // Build SVG donut chart by category
+    // Build chart data
     const catTotals = {};
-    txs.filter(t => t.amount < 0).forEach(t => {
+    filtered.filter(t => t.amount < 0 && !(t.category||'').toUpperCase().includes('INCOME')).forEach(t => {
         const c = t.category || 'OTHER';
         catTotals[c] = (catTotals[c] || 0) + Math.abs(t.amount);
     });
     const catSorted = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
     const CHART_COLORS = ['#3b82f6','#f59e0b','#10b981','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#6366f1','#14b8a6','#a855f7','#84cc16'];
     const totalExpense = Math.abs(totalOut) || 1;
-    // Build SVG donut
-    const R = 70, cx = 90, cy = 90, strokeW = 34;
-    const circ = 2 * Math.PI * R;
-    let cumOffset = 0;
-    const donutSegs = catSorted.map(([cat, amt], i) => {
-        const frac = amt / totalExpense;
-        const dash = frac * circ;
-        const seg = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${CHART_COLORS[i%CHART_COLORS.length]}" stroke-width="${strokeW}" stroke-dasharray="${dash.toFixed(2)} ${(circ-dash).toFixed(2)}" stroke-dashoffset="${(-cumOffset).toFixed(2)}" style="transition:all 0.4s;"><title>${cat}: ${fmtDollar(amt)} (${Math.round(frac*100)}%)</title></circle>`;
-        cumOffset += dash;
-        return seg;
-    }).join('');
-    const svgDonut = catSorted.length ? `<svg width="180" height="180" viewBox="0 0 180 180" style="flex-shrink:0;transform:rotate(-90deg);">${donutSegs}<circle cx="${cx}" cy="${cy}" r="${R-strokeW/2-2}" fill="white"/></svg>` : '';
-    const legend = catSorted.map(([cat, amt], i) => {
-        const pct = Math.round((amt/totalExpense)*100);
-        return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">
-            <div style="width:10px;height:10px;border-radius:2px;background:${CHART_COLORS[i%CHART_COLORS.length]};flex-shrink:0;"></div>
-            <div style="font-size:0.72rem;color:#374151;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cat}</div>
-            <div style="font-size:0.72rem;color:#6b7280;white-space:nowrap;">${fmtDollar(amt)}</div>
-            <div style="font-size:0.7rem;color:#9ca3af;width:28px;text-align:right;">${pct}%</div>
-        </div>`;
-    }).join('');
+    // Monthly data for line/area/combo
+    const _mIn = new Array(12).fill(0), _mOut = new Array(12).fill(0);
+    filtered.forEach(t => {
+        if (!t.date) return;
+        const mi = parseInt(t.date.substring(5,7)) - 1;
+        if (mi >= 0 && mi < 12) { if (t.amount > 0) _mIn[mi] += t.amount; else _mOut[mi] += Math.abs(t.amount); }
+    });
+    if (!_acct._chartHiddenCats) _acct._chartHiddenCats = new Set();
+    if (!_acct._chartType) _acct._chartType = 'donut';
+    _acct._chartData = { catSorted, CHART_COLORS, totalExpense, monthlyIn: _mIn, monthlyOut: _mOut };
 
     return `
 <div class="acct-card">
   <div class="acct-card-hdr" style="display:flex;justify-content:space-between;align-items:center;">
-    <span>General Ledger — ${txs.length} transactions</span>
+    <span>General Ledger — ${filtered.length}${filtered.length !== txs.length ? ` of ${txs.length}` : ''} transactions</span>
     <div style="display:flex;gap:8px;align-items:center;">
       <span style="color:#16a34a;font-weight:600;font-size:.9rem;">In: ${fmtDollar(totalIn)}</span>
       <span style="color:#ef4444;font-weight:600;font-size:.9rem;">Out: ${fmtDollar(totalOut)}</span>
-      <button class="btn-secondary btn-sm" onclick="(function(){var p=document.getElementById('acct-cat-chart');if(p){var show=p.style.display==='none'||p.style.display==='';p.style.display=show?'flex':'none';this.style.background=show?'#3b82f6':'';this.style.color=show?'white':'';}})" title="Toggle Spending Chart"><i class="fas fa-chart-pie"></i> Chart</button>
+      <button class="btn-secondary btn-sm" id="acct-chart-toggle-btn" onclick="(function(btn){var p=document.getElementById('acct-cat-chart');if(p){var show=p.style.display==='none'||p.style.display==='';p.style.display=show?'block':'none';btn.style.background=show?'#3b82f6':'';btn.style.color=show?'white':'';if(show)acctRedrawChart();}})(this)" title="Toggle Spending Chart"><i class="fas fa-chart-pie"></i> Chart</button>
       ${isAdmin ? `<button class="btn-primary btn-sm" onclick="acctAddTransaction()"><i class="fas fa-plus"></i> Add</button>` : ''}
     </div>
   </div>
-  <div id="acct-cat-chart" style="display:none;background:#f9fafb;border-radius:10px;padding:16px 18px;margin-bottom:14px;border:1px solid #e5e7eb;gap:20px;align-items:center;">
-    <div style="text-align:center;">
-      <div style="font-size:0.75rem;font-weight:700;color:#374151;margin-bottom:6px;">Spending by Category</div>
-      ${svgDonut || '<div style="color:#9ca3af;font-size:0.8rem;padding:20px;">No expense data</div>'}
-      <div style="font-size:0.7rem;color:#6b7280;margin-top:4px;">Total: ${fmtDollar(totalExpense)}</div>
+  <div id="acct-cat-chart" style="display:none;background:#f9fafb;border-radius:10px;padding:14px 16px;margin-bottom:14px;border:1px solid #e5e7eb;">
+    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+      <button class="acct-ctype-btn" data-t="donut" onclick="acctSetChartType('donut')" style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-pie"></i> Pie</button>
+      <button class="acct-ctype-btn" data-t="bar"   onclick="acctSetChartType('bar')"   style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-bar"></i> Bar</button>
+      <button class="acct-ctype-btn" data-t="line"  onclick="acctSetChartType('line')"  style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-line"></i> Line</button>
+      <button class="acct-ctype-btn" data-t="combo" onclick="acctSetChartType('combo')" style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-chart-bar"></i> Combo</button>
+      <button class="acct-ctype-btn" data-t="area"  onclick="acctSetChartType('area')"  style="padding:4px 10px;border-radius:4px;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;"><i class="fas fa-wave-square"></i> Area</button>
     </div>
-    <div style="flex:1;min-width:0;">${legend}</div>
+    <div id="acct-chart-inner" style="display:flex;gap:16px;align-items:flex-start;"></div>
   </div>
 
   <div class="acct-filters">
     <input class="acct-search" type="text" placeholder="Search transactions…" value="${_acct._txSearch||''}" oninput="_acct._txSearch=this.value;acctTab('transactions')">
+    <select onchange="_acct._txMonthFilter=+this.value;acctTab('transactions')">
+      <option value="0">All Months</option>
+      ${MONTH_LABELS.slice(1).map((lbl,i)=>`<option value="${i+1}" ${monthFilter===i+1?'selected':''}>${lbl}</option>`).join('')}
+    </select>
     <select onchange="_acct._txCatFilter=this.value;acctTab('transactions')">
       <option value="">All Categories</option>
       ${categories.map(c=>`<option value="${c}" ${c===catFilter?'selected':''}>${c}</option>`).join('')}
@@ -14420,6 +14447,110 @@ function _acctTransactionsHTML(isAdmin) {
     </tr>`).join('')}</tbody>
   </table>` : `<div class="acct-empty"><i class="fas fa-receipt"></i><p>${txs.length ? 'No matches for filters' : 'No transactions yet — upload a CSV bank statement'}</p></div>`}
 </div>`;
+}
+
+// ── CHART ENGINE ─────────────────────────────────────────────
+const _ACCT_ML = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+window.acctSetChartType = function(type) {
+    _acct._chartType = type;
+    acctRedrawChart();
+};
+window.acctToggleChartCat = function(cat) {
+    if (!_acct._chartHiddenCats) _acct._chartHiddenCats = new Set();
+    if (_acct._chartHiddenCats.has(cat)) _acct._chartHiddenCats.delete(cat);
+    else _acct._chartHiddenCats.add(cat);
+    acctRedrawChart();
+};
+window.acctRedrawChart = function() {
+    const inner = document.getElementById('acct-chart-inner');
+    if (!inner) return;
+    inner.innerHTML = _acctChartInnerHTML();
+    // Highlight active type button
+    document.querySelectorAll('.acct-ctype-btn').forEach(b => {
+        const active = b.dataset.t === (_acct._chartType || 'donut');
+        b.style.background = active ? '#3b82f6' : '#e5e7eb';
+        b.style.color = active ? 'white' : '#374151';
+    });
+};
+
+function _acctChartInnerHTML() {
+    const d = _acct._chartData;
+    if (!d) return '';
+    const type = _acct._chartType || 'donut';
+    const hidden = _acct._chartHiddenCats || new Set();
+    const vis = d.catSorted.filter(([c]) => !hidden.has(c));
+    const visTotal = vis.reduce((s,[,a]) => s+a, 0) || 1;
+
+    let svgHTML = '';
+    if (type === 'donut') {
+        if (!vis.length) { svgHTML = '<div style="color:#9ca3af;padding:30px;text-align:center;font-size:.8rem;">No data</div>'; }
+        else {
+            const R=70,CX=90,CY=90,SW=34, CI=2*Math.PI*R; let off=0;
+            const segs = vis.map(([cat,amt],i) => {
+                const oi = d.catSorted.findIndex(([c])=>c===cat);
+                const color = d.CHART_COLORS[oi%d.CHART_COLORS.length];
+                const f=amt/visTotal, da=f*CI;
+                const s=`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${color}" stroke-width="${SW}" stroke-dasharray="${da.toFixed(2)} ${(CI-da).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" style="transition:all .4s;"><title>${cat}: ${fmtDollar(amt)} (${Math.round(f*100)}%)</title></circle>`;
+                off+=da; return s;
+            }).join('');
+            svgHTML = `<svg width="180" height="180" viewBox="0 0 180 180" style="transform:rotate(-90deg);display:block;">${segs}<circle cx="${CX}" cy="${CY}" r="${R-SW/2-2}" fill="white"/></svg><div style="font-size:.7rem;color:#6b7280;text-align:center;margin-top:4px;">Total: ${fmtDollar(visTotal)}</div>`;
+        }
+    } else if (type === 'bar') {
+        if (!vis.length) { svgHTML = '<div style="color:#9ca3af;padding:30px;text-align:center;font-size:.8rem;">No data</div>'; }
+        else {
+            const bH=20,gap=5,pL=108,pR=64,pT=8,pB=8,W=420;
+            const tH=vis.length*(bH+gap)+pT+pB;
+            const bMax=W-pL-pR, maxAmt=Math.max(...vis.map(([,a])=>a))||1;
+            const bars = vis.map(([cat,amt],i) => {
+                const oi=d.catSorted.findIndex(([c])=>c===cat);
+                const color=d.CHART_COLORS[oi%d.CHART_COLORS.length];
+                const y=pT+i*(bH+gap), w=(amt/maxAmt)*bMax;
+                const lbl=cat.length>14?cat.substring(0,13)+'…':cat;
+                return `<text x="${pL-6}" y="${y+bH/2+4}" text-anchor="end" font-size="10" fill="#374151">${lbl}</text><rect x="${pL}" y="${y}" width="${w.toFixed(1)}" height="${bH}" fill="${color}" rx="3" opacity=".85"><title>${cat}: ${fmtDollar(amt)}</title></rect><text x="${(pL+w+4).toFixed(1)}" y="${y+bH/2+4}" font-size="10" fill="#6b7280">${fmtDollar(amt)}</text>`;
+            }).join('');
+            svgHTML = `<svg width="${W}" height="${tH}" viewBox="0 0 ${W} ${tH}" style="max-width:100%;display:block;">${bars}</svg>`;
+        }
+    } else {
+        // Line / Combo / Area — monthly data
+        const {monthlyIn:mI, monthlyOut:mO} = d;
+        const maxV = Math.max(...mI,...mO,1);
+        const W=380,H=180,pL=52,pR=14,pT=16,pB=26,cW=W-pL-pR,cH=H-pT-pB,bY=pT+cH;
+        const px=(i)=>(pL+(i/11)*cW).toFixed(1);
+        const py=(v)=>(pT+cH-(v/maxV)*cH).toFixed(1);
+        const grid=[.25,.5,.75,1].map(f=>{const y=(pT+cH-f*cH).toFixed(1);return `<line x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}" stroke="#e5e7eb" stroke-width="1"/><text x="${pL-4}" y="${(+y+3).toFixed(1)}" text-anchor="end" font-size="8" fill="#9ca3af">$${(maxV*f/1000).toFixed(0)}k</text>`;}).join('');
+        const xax=_ACCT_ML.map((m,i)=>`<text x="${px(i)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#9ca3af">${m}</text>`).join('');
+        if (type === 'line') {
+            const lpts=(arr,color)=>{const pts=arr.map((_,i)=>`${px(i)},${py(arr[i])}`).join(' ');const dots=arr.map((v,i)=>`<circle cx="${px(i)}" cy="${py(v)}" r="3" fill="${color}"><title>${_ACCT_ML[i]}: ${fmtDollar(v)}</title></circle>`).join('');return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>${dots}`;};
+            svgHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%;display:block;">${grid}${lpts(mI,'#16a34a')}${lpts(mO,'#ef4444')}${xax}<text x="${pL}" y="12" font-size="9" fill="#16a34a">■ Income</text><text x="${pL+58}" y="12" font-size="9" fill="#ef4444">■ Expenses</text></svg>`;
+        } else if (type === 'combo') {
+            const bW=(cW/12)*.55;
+            const bars=mO.map((v,i)=>{const bh=(v/maxV)*cH,x=pL+(i/12)*cW+(cW/12-bW)/2,y=pT+cH-bh;return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bW.toFixed(1)}" height="${bh.toFixed(1)}" fill="#ef4444" opacity=".7" rx="2"><title>${_ACCT_ML[i]} Out: ${fmtDollar(v)}</title></rect>`;}).join('');
+            const lpts=mI.map((_,i)=>`${(pL+(i/12)*cW+cW/24).toFixed(1)},${py(mI[i])}`).join(' ');
+            const dots=mI.map((v,i)=>`<circle cx="${(pL+(i/12)*cW+cW/24).toFixed(1)}" cy="${py(v)}" r="3" fill="#16a34a"><title>${_ACCT_ML[i]} In: ${fmtDollar(v)}</title></circle>`).join('');
+            const xl=_ACCT_ML.map((m,i)=>`<text x="${(pL+(i/12)*cW+cW/24).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#9ca3af">${m}</text>`).join('');
+            svgHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%;display:block;">${grid}${bars}<polyline points="${lpts}" fill="none" stroke="#16a34a" stroke-width="2" stroke-linejoin="round"/>${dots}${xl}<text x="${pL}" y="12" font-size="9" fill="#16a34a">— Income</text><text x="${pL+58}" y="12" font-size="9" fill="#ef4444">■ Expenses</text></svg>`;
+        } else { // area
+            const apath=(arr,color)=>{const pts=arr.map((_,i)=>`${px(i)},${py(arr[i])}`);const path=`M ${pL},${bY} L ${pts.join(' L ')} L ${(pL+cW).toFixed(1)},${bY} Z`;return `<path d="${path}" fill="${color}" opacity=".25"/><polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="2"/>`;};
+            svgHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%;display:block;">${grid}${apath(mO,'#ef4444')}${apath(mI,'#16a34a')}${xax}<text x="${pL}" y="12" font-size="9" fill="#16a34a">■ Income</text><text x="${pL+58}" y="12" font-size="9" fill="#ef4444">■ Expenses</text></svg>`;
+        }
+    }
+
+    // Legend with toggle buttons
+    const legendHTML = d.catSorted.map(([cat,amt],i)=>{
+        const color=d.CHART_COLORS[i%d.CHART_COLORS.length];
+        const isHidden=hidden.has(cat);
+        const pct=Math.round((amt/d.totalExpense)*100);
+        return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;opacity:${isHidden?.35:1};">
+            <div style="width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0;"></div>
+            <div style="font-size:.7rem;color:#374151;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${cat}">${cat}</div>
+            <div style="font-size:.7rem;color:#6b7280;white-space:nowrap;">${fmtDollar(amt)}</div>
+            <div style="font-size:.68rem;color:#9ca3af;width:24px;text-align:right;">${pct}%</div>
+            <button onclick="acctToggleChartCat('${cat.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" title="${isHidden?'Show':'Hide'}" style="background:none;border:none;cursor:pointer;padding:1px 3px;color:${isHidden?'#9ca3af':'#ef4444'};font-size:.72rem;line-height:1;"><i class="fas fa-${isHidden?'eye':'times'}"></i></button>
+        </div>`;
+    }).join('');
+
+    return `<div style="flex:1;min-width:0;overflow:auto;">${svgHTML}</div><div style="width:190px;flex-shrink:0;max-height:240px;overflow-y:auto;padding-left:8px;border-left:1px solid #e5e7eb;"><div style="font-size:.68rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Legend <span style="font-weight:400;color:#9ca3af;cursor:pointer;" onclick="(_acct._chartHiddenCats=new Set())&&acctRedrawChart()" title="Show all">reset</span></div>${legendHTML}</div>`;
 }
 
 // ── CASH FLOW TAB ────────────────────────────────────────────
