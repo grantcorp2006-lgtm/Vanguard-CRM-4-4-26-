@@ -15,6 +15,10 @@ const sqlite3   = require('sqlite3').verbose();
 const jwt       = require('jsonwebtoken');
 const bcrypt    = require('bcryptjs');
 const fs        = require('fs');
+const multer    = require('multer');
+
+// In-memory multer for COI file uploads (no disk writes needed)
+const uploadCOI = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const DB_PATH   = '/var/www/vanguard/vanguard.db';
 const JWT_SECRET = process.env.PORTAL_JWT_SECRET || 'change-me-in-env';
@@ -98,6 +102,66 @@ function requirePortalAuth(req, res, next) {
     }
 }
 
+// ─── Sync portal password status back to CRM clients table ───────────────────
+// The CRM profile card reads client.data.portalPassword to decide whether to
+// show "NOT CREATED" or "●●●●●●●●" and to pass to togglePasswordVisibility.
+// Pass plainText when the admin sets the password (so agents can view it).
+// Pass null when the client sets their own (no plain text available → shows ●●●●●●●●).
+function syncPortalPasswordToCRM(db, clientId, plainText) {
+    if (!clientId) return;
+    const rawId = String(clientId).replace(/\.0$/, '');
+    const value = plainText || '●●●●●●●●';
+    db.get(
+        'SELECT id, data FROM clients WHERE id=? OR id=?',
+        [clientId, rawId],
+        (err, row) => {
+            if (err || !row) return;
+            try {
+                const data = JSON.parse(row.data || '{}');
+                // Always overwrite so the latest value is reflected
+                data.portalPassword = value;
+                db.run('UPDATE clients SET data=? WHERE id=?',
+                    [JSON.stringify(data), row.id]);
+            } catch { /* ignore parse errors */ }
+        }
+    );
+}
+
+// ─── Auto-provision: look up portal_users; if missing, check CRM clients ─────
+// If the email exists in the clients table but has no portal_users row yet,
+// automatically create one (password_hash = NULL → triggers PASSWORD_NOT_SET).
+// Returns the portal_users row via callback(err, row).
+function getOrCreatePortalUser(db, email, callback) {
+    const normalised = email.trim().toLowerCase();
+    db.get('SELECT * FROM portal_users WHERE LOWER(email)=?', [normalised], (err, user) => {
+        if (err) return callback(err);
+        if (user) return callback(null, user);   // already registered
+
+        // Not in portal_users — check if the email belongs to a CRM client
+        db.get(
+            `SELECT id FROM clients WHERE LOWER(json_extract(data,'$.email'))=?`,
+            [normalised],
+            (cErr, client) => {
+                if (cErr) return callback(cErr);
+                if (!client) return callback(null, null);   // genuinely unknown
+
+                // Auto-create a portal account for this CRM client
+                const newId = 'PU-' + Date.now();
+                db.run(
+                    `INSERT OR IGNORE INTO portal_users (id, client_id, email, password_hash)
+                     VALUES (?, ?, ?, NULL)`,
+                    [newId, client.id, normalised],
+                    (iErr) => {
+                        if (iErr) return callback(iErr);
+                        // Re-fetch the row (handles race where another insert beat us)
+                        db.get('SELECT * FROM portal_users WHERE LOWER(email)=?', [normalised], callback);
+                    }
+                );
+            }
+        );
+    });
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const POLICY_TYPE_LABELS = {
     'commercial-auto'   : 'Commercial Auto',
@@ -157,44 +221,40 @@ router.post('/login', (req, res) => {
         return res.status(400).json({ code: 'MISSING_FIELDS', error: 'email and password are required' });
 
     const db = getDb();
-    db.get(
-        'SELECT * FROM portal_users WHERE LOWER(email)=LOWER(?)',
-        [email.trim()],
-        (err, user) => {
-            if (err) { db.close(); return res.status(500).json({ error: 'Database error' }); }
+    getOrCreatePortalUser(db, email, (err, user) => {
+        if (err) { db.close(); return res.status(500).json({ error: 'Database error' }); }
 
-            // ── 404: email not registered ──────────────────────────────────
-            if (!user) {
-                db.close();
-                return res.status(404).json({
-                    code  : 'EMAIL_NOT_FOUND',
-                    error : 'No account found for this email address',
-                });
-            }
-
-            // ── 403: account exists but password not set yet ───────────────
-            if (!user.password_hash) {
-                db.close();
-                return res.status(403).json({
-                    code  : 'PASSWORD_NOT_SET',
-                    error : 'Your account exists but a password has not been set up yet',
-                });
-            }
-
-            // ── 401: password set but wrong ────────────────────────────────
-            bcrypt.compare(password, user.password_hash, (bcErr, match) => {
-                if (!match) {
-                    db.close();
-                    return res.status(401).json({
-                        code  : 'WRONG_PASSWORD',
-                        error : 'Incorrect password',
-                    });
-                }
-                // ── 200: success ───────────────────────────────────────────
-                issueToken(db, user, res);
+        // ── 404: email not in portal_users AND not in CRM clients ─────────
+        if (!user) {
+            db.close();
+            return res.status(404).json({
+                code  : 'EMAIL_NOT_FOUND',
+                error : 'No account found for this email address',
             });
         }
-    );
+
+        // ── 403: account exists but password not set yet ──────────────────
+        if (!user.password_hash) {
+            db.close();
+            return res.status(403).json({
+                code  : 'PASSWORD_NOT_SET',
+                error : 'Your account exists but a password has not been set up yet',
+            });
+        }
+
+        // ── 401: password set but wrong ────────────────────────────────────
+        bcrypt.compare(password, user.password_hash, (bcErr, match) => {
+            if (!match) {
+                db.close();
+                return res.status(401).json({
+                    code  : 'WRONG_PASSWORD',
+                    error : 'Incorrect password',
+                });
+            }
+            // ── 200: success ───────────────────────────────────────────────
+            issueToken(db, user, res);
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -216,7 +276,7 @@ router.post('/setup-password', (req, res) => {
         return res.status(400).json({ code: 'WEAK_PASSWORD', error: 'Password must be at least 8 characters' });
 
     const db = getDb();
-    db.get('SELECT * FROM portal_users WHERE LOWER(email)=LOWER(?)', [email.trim()], (err, user) => {
+    getOrCreatePortalUser(db, email, (err, user) => {
         if (err)  { db.close(); return res.status(500).json({ error: 'Database error' }); }
         if (!user){ db.close(); return res.status(404).json({ code: 'EMAIL_NOT_FOUND', error: 'No account found for this email address' }); }
         if (user.password_hash) {
@@ -228,6 +288,7 @@ router.post('/setup-password', (req, res) => {
             if (hashErr) { db.close(); return res.status(500).json({ error: 'Server error' }); }
             db.run('UPDATE portal_users SET password_hash=? WHERE id=?', [hash, user.id], (e) => {
                 if (e) { db.close(); return res.status(500).json({ error: 'Failed to save password' }); }
+                syncPortalPasswordToCRM(db, user.client_id, newPassword);
                 issueToken(db, { ...user, password_hash: hash }, res);
             });
         });
@@ -311,6 +372,7 @@ router.post('/complete-password-reset', (req, res) => {
                         db.run('UPDATE portal_users SET password_hash=? WHERE id=?', [hash, user.id]);
                         db.run('UPDATE portal_tokens SET used=1 WHERE token=?', [resetToken]);
                     });
+                    syncPortalPasswordToCRM(db, user.client_id, newPassword);
                     issueToken(db, { ...user, password_hash: hash }, res);
                 });
             });
@@ -356,7 +418,12 @@ router.get('/me', requirePortalAuth, (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/policies', requirePortalAuth, (req, res) => {
     const db = getDb();
-    db.all('SELECT id, data FROM policies WHERE client_id=?', [req.portalUser.sub], (err, rows) => {
+    // Policies are stored with client_id lacking the ".0" suffix that JWTs carry
+    const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
+    db.all(
+        'SELECT id, data FROM policies WHERE client_id=? OR client_id=?',
+        [req.portalUser.sub, rawClientId],
+        (err, rows) => {
         db.close();
         if (err) return res.status(500).json({ error: 'Database error' });
 
@@ -392,71 +459,136 @@ router.get('/policies', requirePortalAuth, (req, res) => {
         });
 
         res.json({ policies, count: policies.length });
-    });
+    });   // end db.all callback
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROTECTED: GET /api/portal/policies/:policyId/documents
-// Returns all documents (uploads + COIs) for a specific policy
+// Returns all documents for a policy: COIs + ID cards embedded in policy data
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/policies/:policyId/documents', requirePortalAuth, (req, res) => {
     const { policyId } = req.params;
     const db = getDb();
+    const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
 
-    // Verify ownership first
-    db.get('SELECT id FROM policies WHERE id=? AND client_id=?',
-        [policyId, req.portalUser.sub],
+    // Verify ownership — try both id formats (with and without .0 suffix)
+    db.get(
+        'SELECT id, data FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
+        [policyId, req.portalUser.sub, rawClientId],
         (err, pol) => {
             if (err || !pol) {
                 db.close();
                 return res.status(403).json({ error: 'Policy not found or access denied' });
             }
 
-            db.all(
-                'SELECT * FROM documents WHERE policy_id=?',
+            // Also fetch ID cards from id_cards table (stored separately from policy JSON)
+            db.all('SELECT id, policy_id, name, type, upload_date, size FROM id_cards WHERE policy_id=?',
                 [policyId],
-                (e1, docs) => {
-                    db.all(
-                        'SELECT id, name, type, upload_date FROM coi_documents WHERE policy_id=?',
-                        [policyId],
-                        (e2, cois) => {
-                            db.close();
+                (e2, idCardRows) => {
+                    db.close();
+                    const result = [];
 
-                            const result = [];
+                    try {
+                        const pdata = JSON.parse(pol.data || '{}');
 
-                            for (const d of (docs || [])) {
-                                result.push({
-                                    id          : d.id,
-                                    docType     : docTypeFromName(d.original_name || d.filename),
-                                    name        : d.original_name || d.filename,
-                                    mimeType    : d.file_type,
-                                    fileSize    : d.file_size,
-                                    uploadDate  : d.upload_date,
-                                    downloadUrl : `/api/portal/documents/${d.id}/download`,
-                                    source      : 'upload',
-                                });
-                            }
-
-                            for (const c of (cois || [])) {
-                                result.push({
-                                    id          : c.id,
-                                    docType     : 'coi',
-                                    name        : c.name || 'Certificate of Insurance',
-                                    mimeType    : 'application/pdf',
-                                    uploadDate  : c.upload_date,
-                                    downloadUrl : `/api/portal/coi-documents/${c.id}/download`,
-                                    source      : 'coi_documents',
-                                });
-                            }
-
-                            result.sort((a, b) =>
-                                (b.uploadDate || '').localeCompare(a.uploadDate || ''));
-
-                            res.json({ documents: result, count: result.length });
+                        // ── COIs stored as coiDocuments[] inside the policy JSON ──
+                        for (const c of (pdata.coiDocuments || [])) {
+                            if (!c.id) continue;
+                            result.push({
+                                id          : c.id,
+                                docType     : 'coi',
+                                name        : c.name || 'Certificate of Insurance',
+                                mimeType    : c.type || 'image/png',
+                                uploadDate  : c.uploadDate || '',
+                                downloadUrl : `/api/portal/policies/${policyId}/coi/${c.id}/download`,
+                                source      : 'policy_embedded',
+                            });
                         }
-                    );
+                    } catch { /* unparseable policy data */ }
+
+                    // ── ID cards from id_cards table ──
+                    for (const card of (idCardRows || [])) {
+                        result.push({
+                            id          : card.id,
+                            docType     : 'id_card',
+                            name        : card.name || 'Insurance ID Card',
+                            mimeType    : card.type || 'application/pdf',
+                            fileSize    : card.size,
+                            uploadDate  : card.upload_date || '',
+                            downloadUrl : `/api/portal/policies/${policyId}/id-card/${card.id}/download`,
+                            source      : 'id_cards_table',
+                        });
+                    }
+
+                    result.sort((a, b) =>
+                        (b.uploadDate || '').localeCompare(a.uploadDate || ''));
+
+                    res.json({ documents: result, count: result.length });
                 }
             );
+        }
+    );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROTECTED: GET /api/portal/policies/:policyId/coi/:coiId/download
+// Serves a COI image/PDF stored inside policies.data.coiDocuments[]
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/policies/:policyId/coi/:coiId/download', requirePortalAuth, (req, res) => {
+    const { policyId, coiId } = req.params;
+    const db = getDb();
+    const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
+
+    db.get(
+        'SELECT data FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
+        [policyId, req.portalUser.sub, rawClientId],
+        (err, pol) => {
+            db.close();
+            if (err || !pol) return res.status(403).json({ error: 'Not found' });
+            try {
+                const pdata = JSON.parse(pol.data || '{}');
+                const coi = (pdata.coiDocuments || []).find(c => c.id === coiId);
+                if (!coi || !coi.dataUrl) return res.status(404).json({ error: 'COI not found' });
+                const mimeType = coi.type || 'image/png';
+                const [, b64] = coi.dataUrl.split(',');
+                const buf = Buffer.from(b64 || coi.dataUrl, 'base64');
+                res.setHeader('Content-Type', mimeType);
+                res.setHeader('Content-Disposition', `inline; filename="${coi.name || 'coi.png'}"`);
+                return res.send(buf);
+            } catch { return res.status(500).json({ error: 'Failed to decode COI' }); }
+        }
+    );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROTECTED: GET /api/portal/policies/:policyId/id-card/:cardId/download
+// Serves an ID card from the id_cards table (ownership verified via policy)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/policies/:policyId/id-card/:cardId/download', requirePortalAuth, (req, res) => {
+    const { policyId, cardId } = req.params;
+    const db = getDb();
+    const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
+
+    // Verify the policy belongs to this user, then fetch the ID card
+    db.get(
+        'SELECT id FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
+        [policyId, req.portalUser.sub, rawClientId],
+        (err, pol) => {
+            if (err || !pol) { db.close(); return res.status(403).json({ error: 'Not found' }); }
+
+            db.get('SELECT * FROM id_cards WHERE id=? AND policy_id=?', [cardId, policyId], (e2, card) => {
+                db.close();
+                if (e2 || !card) return res.status(404).json({ error: 'ID card not found' });
+                try {
+                    const mimeType = card.type || 'application/pdf';
+                    const dataUrl  = card.data_url || '';
+                    const [, b64]  = dataUrl.includes(',') ? dataUrl.split(',') : ['', dataUrl];
+                    const buf      = Buffer.from(b64, 'base64');
+                    res.setHeader('Content-Type', mimeType);
+                    res.setHeader('Content-Disposition', `inline; filename="${card.name || 'id-card.pdf'}"`);
+                    return res.send(buf);
+                } catch { return res.status(500).json({ error: 'Failed to decode ID card' }); }
+            });
         }
     );
 });
@@ -567,20 +699,26 @@ router.post('/certificate-holders', requirePortalAuth, (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROTECTED: POST /api/portal/coi/request
-// Submit a COI request from the app
+// Immediately emails the COI to the requested recipients, then logs the request.
 //
 // Body:
 // {
 //   policyId: string,           required
 //   requestType: "myself"|"third_party",
-//   recipientEmails: string[],
-//   certificateHolder: {        optional
+//   recipientEmails: string[],  for third_party; myself uses the portal user's email
+//   certificateHolder: {        for third_party overlay info (included in email body)
 //     name, company, address, city, state, zip
 //   },
 //   additionalNotes: string
 // }
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/coi/request', requirePortalAuth, (req, res) => {
+router.post('/coi/request', requirePortalAuth, (req, res, next) => {
+    // Accept optional multipart/form-data (overlaid PDF from iOS) or plain JSON
+    uploadCOI.single('attachment')(req, res, (err) => {
+        if (err) return res.status(400).json({ error: 'File upload error: ' + err.message });
+        next();
+    });
+}, async (req, res) => {
     const {
         policyId,
         requestType        = 'myself',
@@ -593,50 +731,209 @@ router.post('/coi/request', requirePortalAuth, (req, res) => {
         return res.status(400).json({ error: 'policyId is required' });
 
     const db = getDb();
-    db.get(
-        'SELECT id, data FROM policies WHERE id=? AND client_id=?',
-        [policyId, req.portalUser.sub],
-        (err, pol) => {
-            if (err || !pol) {
-                db.close();
-                return res.status(403).json({ error: 'Policy not found or access denied' });
+    const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
+
+    try {
+        // ── 1. Verify ownership & get policy data ───────────────────────
+        const pol = await new Promise((resolve, reject) => {
+            db.get(
+                'SELECT id, data FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
+                [policyId, req.portalUser.sub, rawClientId],
+                (err, row) => err ? reject(err) : resolve(row)
+            );
+        });
+
+        if (!pol) {
+            db.close();
+            return res.status(403).json({ error: 'Policy not found or access denied' });
+        }
+
+        const pdata       = JSON.parse(pol.data || '{}');
+        const policyInfo  = (pdata.policies || [])[0] || {};
+        const policyNumber = policyInfo.policyNumber || '';
+        const insuredName  = (policyInfo.insured || {})['Name/Business Name']
+                          || (policyInfo.insured || {})['Primary Named Insured']
+                          || req.portalUser.email;
+
+        // ── 2. Always build overlaid PDF from the DB COI + cert holder + date ──
+        // (server-side overlay matches exactly what the CRM browser does)
+        const coiDocs   = pdata.coiDocuments || [];
+        const latestCOI = coiDocs.length ? coiDocs[coiDocs.length - 1] : null;
+        if (!latestCOI || !latestCOI.dataUrl) {
+            db.close();
+            return res.status(404).json({
+                error: 'No COI available for this policy. Please contact your agent to generate one first.'
+            });
+        }
+        const [, b64raw] = latestCOI.dataUrl.includes(',')
+            ? latestCOI.dataUrl.split(',') : ['', latestCOI.dataUrl];
+        const coiImgBuffer = Buffer.from(b64raw, 'base64');
+
+        // Build cert holder text lines (same as CRM overlay)
+        let holderLines = [];
+        if (certificateHolder) {
+            const h = typeof certificateHolder === 'string'
+                ? { name: certificateHolder } : certificateHolder;
+            if (h.name)    holderLines.push(h.name);
+            if (h.company) holderLines.push(h.company);
+            if (h.address) holderLines.push(h.address);
+            const csz = [h.city, h.state, h.zip].filter(Boolean).join(', ');
+            if (csz) holderLines.push(csz);
+        }
+        // For "myself" use insured name
+        if (holderLines.length === 0 && requestType === 'myself') {
+            holderLines = [insuredName];
+        }
+
+        // COI image canvas size (standard ACORD 795×1029)
+        const IMG_W = 795, IMG_H = 1029;
+
+        // Build PDF with pdfkit — page matches image pixel dimensions (points ≈ pixels here)
+        const attachBuffer = await new Promise((resolve, reject) => {
+            const PDFDocument = require('pdfkit');
+            const chunks = [];
+            const doc = new PDFDocument({ size: [IMG_W, IMG_H], margin: 0, autoFirstPage: true });
+            doc.on('data', c => chunks.push(c));
+            doc.on('end',  () => resolve(Buffer.concat(chunks)));
+            doc.on('error', reject);
+
+            // Background: the COI image fills the page
+            doc.image(coiImgBuffer, 0, 0, { width: IMG_W, height: IMG_H });
+
+            // Date overlay — top right (x=695, y=57.5 on 795×1029 canvas, same as CRM)
+            const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+            doc.font('Helvetica').fontSize(9).fillColor('#000000');
+            doc.text(today, 695, 50, { lineBreak: false });
+
+            // Cert holder overlay — bottom left (x=50, y=900, 14px, 20px line spacing)
+            doc.font('Helvetica').fontSize(10.5).fillColor('#000000');
+            holderLines.forEach((line, i) => {
+                doc.text(line.trim(), 50, 900 + i * 15, { lineBreak: false });
+            });
+
+            doc.end();
+        });
+
+        const attachMime = 'application/pdf';
+        const attachName = `COI_${policyNumber}_${Date.now()}.pdf`;
+
+        // ── 3. Build recipient list ─────────────────────────────────────
+        // Support both JSON body and form-data `to` field
+        let toAddresses = [];
+        const toField = req.body.to || '';
+        if (requestType === 'myself') {
+            toAddresses = [req.portalUser.email];
+        } else if (toField) {
+            toAddresses = toField.split(',').map(e => e.trim()).filter(Boolean);
+        } else {
+            toAddresses = (Array.isArray(recipientEmails) ? recipientEmails : [])
+                .map(e => e.trim()).filter(Boolean);
+        }
+        if (requestType !== 'myself' && toAddresses.length === 0) {
+            db.close();
+            return res.status(400).json({ error: 'recipientEmails is required for third_party requests' });
+        }
+
+        // ── 4. Build email subject + body ───────────────────────────────
+        const emailSubject = req.body.subject
+            || `Certificate of Insurance – ${insuredName} – Policy ${policyNumber}`;
+
+        let holderBlock = '';
+        if (certificateHolder && certificateHolder.name) {
+            const h = certificateHolder;
+            holderBlock = `
+<tr><td colspan="2" style="padding-top:16px;font-weight:bold;color:#1a365d;">Certificate Holder</td></tr>
+<tr><td>Name</td><td>${h.name || ''}</td></tr>
+${h.company  ? `<tr><td>Company</td><td>${h.company}</td></tr>` : ''}
+${h.address  ? `<tr><td>Address</td><td>${h.address}</td></tr>` : ''}
+${h.city||h.state||h.zip ? `<tr><td>City/State/Zip</td><td>${[h.city,h.state,h.zip].filter(Boolean).join(', ')}</td></tr>` : ''}`;
+        }
+
+        const plainText = (req.body.message || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+            || `Dear Certificate Holder,\n\nPlease find your Certificate of Insurance attached.\n\nInsured: ${insuredName}\nPolicy: ${policyNumber}\nCarrier: ${policyInfo.carrier || ''}\n\nVanguard Insurance Group LLC`;
+
+        const htmlBody = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#1a365d;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
+    <h2 style="margin:0;">Certificate of Insurance</h2>
+    <p style="margin:4px 0 0;opacity:.85;">Vanguard Insurance Group LLC</p>
+  </div>
+  <div style="background:#f8fafc;padding:24px;border:1px solid #e2e8f0;border-radius:0 0 8px 8px;">
+    <p>Please find your Certificate of Insurance attached.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+      <tr><td style="width:140px;color:#666;padding:4px 0;">Insured</td><td><strong>${insuredName}</strong></td></tr>
+      <tr><td style="color:#666;padding:4px 0;">Policy Number</td><td>${policyNumber}</td></tr>
+      <tr><td style="color:#666;padding:4px 0;">Carrier</td><td>${policyInfo.carrier || ''}</td></tr>
+      <tr><td style="color:#666;padding:4px 0;">Effective</td><td>${policyInfo.effectiveDate || ''}</td></tr>
+      <tr><td style="color:#666;padding:4px 0;">Expiration</td><td>${policyInfo.expirationDate || ''}</td></tr>
+      ${holderBlock}
+    </table>
+    ${additionalNotes ? `<p style="margin-top:16px;"><strong>Notes:</strong> ${additionalNotes}</p>` : ''}
+    <hr style="margin:20px 0;border:none;border-top:1px solid #e2e8f0;">
+    <p style="font-size:12px;color:#666;">Vanguard Insurance Group LLC · (866) 628-9441 · contact@vigagency.com</p>
+  </div>
+</div>`;
+
+        // ── 5. Send email via GoDaddy SMTP ──────────────────────────────
+        const nodemailer = require('nodemailer');
+        const transporter = nodemailer.createTransport({
+            host   : 'smtpout.secureserver.net',
+            port   : 465,
+            secure : true,
+            auth   : {
+                user : 'contact@vigagency.com',
+                pass : process.env.GODADDY_PASSWORD || '25nickc124!'
             }
+        });
 
-            let policyNumber = '';
-            try {
-                const d = JSON.parse(pol.data);
-                policyNumber = ((d.policies || [])[0] || {}).policyNumber || '';
-            } catch {}
+        await transporter.sendMail({
+            from        : '"VIG Agency" <contact@vigagency.com>',
+            to          : toAddresses.join(', '),
+            subject     : emailSubject,
+            text        : plainText,
+            html        : htmlBody,
+            attachments : [{
+                filename    : attachName,
+                content     : attachBuffer,
+                contentType : attachMime,
+            }],
+        });
 
-            const id = 'COIREQ-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+        // ── 6. Log the completed request ────────────────────────────────
+        const reqId = 'COIREQ-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+        await new Promise((resolve) => {
             db.run(
                 `INSERT INTO portal_coi_requests
                  (id, client_id, policy_id, policy_number, request_type,
                   recipient_emails, certificate_holder, additional_notes, status)
-                 VALUES (?,?,?,?,?,?,?,?,'pending')`,
+                 VALUES (?,?,?,?,?,?,?,?,'completed')`,
                 [
-                    id,
+                    reqId,
                     req.portalUser.sub,
                     policyId,
                     policyNumber,
                     requestType,
-                    JSON.stringify(recipientEmails),
+                    JSON.stringify(toAddresses),
                     certificateHolder ? JSON.stringify(certificateHolder) : '',
                     additionalNotes,
                 ],
-                (e) => {
-                    db.close();
-                    if (e) return res.status(500).json({ error: 'Failed to submit request' });
-                    res.status(201).json({
-                        requestId      : id,
-                        status         : 'pending',
-                        message        : 'COI request submitted. Your agent will process it within 1 business day.',
-                        estimatedTime  : '1 business day',
-                    });
-                }
+                resolve
             );
-        }
-    );
+        });
+
+        db.close();
+        res.status(200).json({
+            requestId  : reqId,
+            status     : 'sent',
+            sentTo     : toAddresses,
+            message    : `Certificate of Insurance sent successfully to ${toAddresses.join(', ')}`,
+        });
+
+    } catch (err) {
+        db.close();
+        console.error('COI request error:', err);
+        res.status(500).json({ error: 'Failed to send COI. Please try again or contact your agent.' });
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -671,6 +968,50 @@ router.get('/coi/requests', requirePortalAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: POST /api/portal/admin/set-client-password
+// Set or change a portal password from the CRM agent UI.
+// Updates both portal_users (bcrypt hash) and clients.data.portalPassword (plain text).
+// Body: { clientId, email, password }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/crm/set-password', (req, res) => {
+    const { clientId, email, password } = req.body || {};
+    if (!clientId || !email || !password)
+        return res.status(400).json({ error: 'clientId, email, and password are required' });
+    if (password.length < 8)
+        return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const db = getDb();
+    const rawId = String(clientId).replace(/\.0$/, '');
+    const dotId = rawId + '.0';
+
+    // Verify client exists (try both id forms)
+    db.get('SELECT id FROM clients WHERE id=? OR id=?', [rawId, dotId], (cErr, client) => {
+        if (cErr) { db.close(); return res.status(500).json({ error: 'Database error' }); }
+        if (!client) { db.close(); return res.status(404).json({ error: 'Client not found in CRM' }); }
+
+        bcrypt.hash(password, 10, (hashErr, hash) => {
+            if (hashErr) { db.close(); return res.status(500).json({ error: 'Server error' }); }
+
+            const puId = 'PU-' + Date.now();
+            db.run(
+                `INSERT INTO portal_users (id, client_id, email, password_hash)
+                 VALUES (?, ?, LOWER(?), ?)
+                 ON CONFLICT(LOWER(email)) DO UPDATE SET
+                     password_hash = excluded.password_hash,
+                     client_id     = excluded.client_id`,
+                [puId, client.id, email, hash],
+                (iErr) => {
+                    if (iErr) { db.close(); return res.status(500).json({ error: iErr.message }); }
+                    syncPortalPasswordToCRM(db, client.id, password);
+                    db.close();
+                    res.json({ success: true, message: 'Password updated' });
+                }
+            );
+        });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ADMIN: POST /api/portal/admin/users
 // Create a portal account for a CRM client.
 // password is optional — omit it to create an unactivated account that
@@ -700,8 +1041,9 @@ router.post('/admin/users', (req, res) => {
                      client_id     = excluded.client_id`,
                 [id, clientId, email, hash || null],
                 (e) => {
+                    if (e) { db.close(); return res.status(500).json({ error: e.message }); }
+                    if (hash) syncPortalPasswordToCRM(db, clientId, password); // store plain text so agents can view it
                     db.close();
-                    if (e) return res.status(500).json({ error: e.message });
                     res.status(201).json({
                         id, clientId,
                         email        : email.toLowerCase(),

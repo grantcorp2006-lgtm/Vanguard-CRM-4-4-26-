@@ -11,9 +11,20 @@ async function loadPoliciesFromServer() {
             const serverPolicies = await response.json();
             console.log(`Loaded ${serverPolicies.length} policies from server`);
 
-            // Store in localStorage for offline access
-            localStorage.setItem('insurance_policies', JSON.stringify(serverPolicies));
-            console.log('✅ Policies synced to localStorage');
+            // Merge: preserve local clientId/clientName when server doesn't have them
+            const existingLocal = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const localById = {};
+            existingLocal.forEach(p => { if (p.id) localById[p.id] = p; });
+            const mergedPolicies = serverPolicies.map(sp => {
+                const lp = localById[sp.id];
+                if (!lp) return sp;
+                const merged = { ...sp };
+                if (!sp.clientId && lp.clientId) { merged.clientId = lp.clientId; merged.clientName = lp.clientName || sp.clientName; }
+                if (!sp.contact?.['Owner Name'] && lp.contact?.['Owner Name']) merged.contact = { ...lp.contact, ...sp.contact };
+                return merged;
+            });
+            localStorage.setItem('insurance_policies', JSON.stringify(mergedPolicies));
+            console.log('✅ Policies synced to localStorage (clientId preserved)');
 
             return serverPolicies;
         } else {
@@ -307,9 +318,13 @@ async function loadClientsFromServer(limit = 500) {
                 }
             }
 
-            // Store in localStorage for caching
-            localStorage.setItem('insurance_clients', JSON.stringify(serverClients));
-            console.log('💾 Stored clients in localStorage');
+            // Merge: keep local-only clients (IVANS-created) not yet on server
+            const existingLocalClients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+            const serverClientIds = new Set(serverClients.map(c => String(c.id)));
+            const localOnlyClients = existingLocalClients.filter(c => c.id && !serverClientIds.has(String(c.id)));
+            const mergedClients = [...serverClients, ...localOnlyClients];
+            localStorage.setItem('insurance_clients', JSON.stringify(mergedClients));
+            console.log(`💾 Stored ${mergedClients.length} clients in localStorage (${localOnlyClients.length} local-only preserved)`);
 
             // Store pagination info for later use
             if (data.total) {
@@ -2660,6 +2675,16 @@ function openCalendar() {
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
 
+    // Initialize calendarState BEFORE generating the grid so Maureen's view is correct from the start
+    const _calInitUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+    window.calendarState = {
+        currentMonth: currentMonth,
+        currentYear: currentYear,
+        selectedDate: new Date(),
+        serverCallbacks: [],
+        currentView: 'personal'
+    };
+
     calendarModal.innerHTML = `
         <div class="calendar-header" style="padding: 15px 20px; border-bottom: 2px solid #e5e7eb; background: #f8fafc; cursor: move; user-select: none; display: flex; justify-content: space-between; align-items: center; border-radius: 12px 12px 0 0;">
             <div style="display: flex; align-items: center;">
@@ -2796,14 +2821,11 @@ function openCalendar() {
     // Make calendar draggable
     makeCalendarDraggable(calendarModal);
 
-    // Store current calendar state
-    window.calendarState = {
-        currentMonth: currentMonth,
-        currentYear: currentYear,
-        selectedDate: new Date(),
-        serverCallbacks: [],
-        currentView: 'personal' // Default to personal view
-    };
+    // Hide agency view toggle for Maureen — she only sees her own data
+    if (_calInitUser === 'maureen') {
+        const agencyViewBtn = document.getElementById('agencyViewBtn');
+        if (agencyViewBtn) agencyViewBtn.style.display = 'none';
+    }
 
     // Load server data and refresh calendar display
     Promise.all([
@@ -3216,19 +3238,22 @@ function getEventsForDate(year, month, day) {
     const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
     const currentUser = sessionData.username || '';
     const currentView = window.calendarState?.currentView || 'personal';
+    // Maureen always sees only her own data regardless of view toggle
+    const _isMaureenCal = currentUser.toLowerCase() === 'maureen';
+    const effectiveView = _isMaureenCal ? 'personal' : currentView;
 
     // Filter local events by date
     let filteredLocalEvents = localEvents.filter(event => event.date === dateStr);
 
     // Filter local events by view mode
-    if (currentView === 'personal') {
+    if (effectiveView === 'personal') {
         filteredLocalEvents = filteredLocalEvents.filter(event =>
-            !event.assignedAgent || event.assignedAgent === currentUser
+            !event.assignedAgent || (event.assignedAgent || '').toLowerCase() === currentUser.toLowerCase()
         );
     }
 
     // Get todos for this date and convert them to calendar events
-    const todoStorageKey = currentView === 'personal' ? 'syncedPersonalTodos' : 'syncedAgencyTodos';
+    const todoStorageKey = effectiveView === 'personal' ? 'syncedPersonalTodos' : 'syncedAgencyTodos';
     const allTodos = JSON.parse(localStorage.getItem(todoStorageKey) || '[]');
 
     const todoEvents = allTodos
@@ -3271,15 +3296,15 @@ function getEventsForDate(year, month, day) {
         }));
 
     // Filter server events by view mode
-    if (currentView === 'personal') {
+    if (effectiveView === 'personal') {
         serverCalendarEvents = serverCalendarEvents.filter(event =>
-            !event.assignedAgent || event.assignedAgent === currentUser
+            !event.assignedAgent || (event.assignedAgent || '').toLowerCase() === currentUser.toLowerCase()
         );
     }
 
     // Add server callbacks for this date
     const serverCallbacks = window.calendarState?.serverCallbacks || [];
-    console.log(`🔍 Getting events for ${dateStr}, found ${serverCallbacks.length} server callbacks (${currentView} view for ${currentUser})`);
+    console.log(`🔍 Getting events for ${dateStr}, found ${serverCallbacks.length} server callbacks (${effectiveView} view for ${currentUser})`);
 
     let callbackEvents = serverCallbacks
         .filter(callback => {
@@ -3308,10 +3333,14 @@ function getEventsForDate(year, month, day) {
         }));
 
     // Filter callback events by view mode
-    if (currentView === 'personal') {
+    if (effectiveView === 'personal') {
         const beforeFilter = callbackEvents.length;
         callbackEvents = callbackEvents.filter(event => {
-            const isAssignedToUser = !event.assignedAgent || event.assignedAgent === currentUser;
+            const agentLower = (event.assignedAgent || '').toLowerCase();
+            const userLower = currentUser.toLowerCase();
+            // Maureen: only show callbacks explicitly assigned to her (not unassigned ones)
+            if (_isMaureenCal) return agentLower.includes('maureen');
+            const isAssignedToUser = !event.assignedAgent || agentLower === userLower;
             if (!isAssignedToUser) {
                 console.log(`🚫 Personal view: Filtering out callback "${event.title}" assigned to "${event.assignedAgent}" (current user: "${currentUser}")`);
             }
@@ -5730,6 +5759,15 @@ function loadDashboardView() {
     }).catch(error => {
         console.log('⚠️ Immediate server data load failed (this is normal on first load):', error.message);
     });
+
+    // Hide Agency todo toggle for Maureen (she's United, not Vanguard)
+    const _dashSessionUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+    if (_dashSessionUser === 'maureen') {
+        const agencyBtn = document.getElementById('dashboardAgencyTodoBtn');
+        if (agencyBtn) agencyBtn.style.display = 'none';
+        const personalBtn = document.getElementById('dashboardPersonalTodoBtn');
+        if (personalBtn) { personalBtn.textContent = 'My Tasks'; personalBtn.style.background = '#3b82f6'; personalBtn.style.color = 'white'; }
+    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -8695,60 +8733,6 @@ async function loadLeadsView() {
             </div>
             <!-- End Active Leads Tab -->
 
-            <!-- Archived Leads Tab Content -->
-            <div id="archived-leads-tab" class="tab-content" style="display: none;">
-                <div class="archived-leads-content">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 20px 0;">
-                        <div>
-                            <h3 style="margin: 0; color: #374151;">Archived Leads</h3>
-                            <p style="color: #6b7280; margin: 5px 0 0 0;">Leads that have been archived from the active pipeline</p>
-                        </div>
-                        <div class="archived-actions">
-                            <button class="btn-secondary" onclick="exportArchivedLeads()" style="background: #10b981; border-color: #10b981; color: white;">
-                                <i class="fas fa-download"></i> Export Current Month
-                            </button>
-                            <button class="btn-secondary" onclick="exportAllArchivedLeads()" style="background: #6366f1; border-color: #6366f1; color: white; margin-left: 10px;">
-                                <i class="fas fa-download"></i> Export All
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Monthly Archive Tabs -->
-                    <div class="monthly-archive-tabs" id="monthlyArchiveTabs" style="display: flex; gap: 2px; margin: 20px 0 10px 0; border-bottom: 2px solid #e5e7eb; overflow-x: auto; white-space: nowrap; padding-bottom: 2px;">
-                        <!-- Monthly tabs will be populated here -->
-                    </div>
-
-                    <!-- Archive Summary Stats -->
-                    <div class="archive-stats" id="archiveStats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0;">
-                        <!-- Stats will be populated here -->
-                    </div>
-
-                    <!-- Archived Leads Table -->
-                    <div class="table-container">
-                        <table class="data-table" id="archivedLeadsTable">
-                            <thead>
-                                <tr>
-                                    <th style="width: 40px;">
-                                        <input type="checkbox" id="selectAllArchived" onclick="toggleAllArchived(this)">
-                                    </th>
-                                    <th>Name</th>
-                                    <th>Contact</th>
-                                    <th>Value Level</th>
-                                    <th>Premium</th>
-                                    <th>Final Stage</th>
-                                    <th>Assigned To</th>
-                                    <th>Archived Date</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="archivedLeadsTableBody">
-                                ${generateArchivedLeadRows()}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            <!-- End Archived Leads Tab -->
 
         </div>
     `;
@@ -10818,17 +10802,18 @@ async function generateClientRows(page = 1) {
         console.log(`👑 Admin user - showing all ${clients.length} clients`);
     }
 
-    // Remove duplicates based on name
+    // Remove duplicates based on identity key (name + DOB when available)
     const uniqueClients = [];
-    const seenNames = new Set();
+    const seenKeys = new Set();
 
     clients.forEach(client => {
-        const name = (client.name || '').toUpperCase().trim();
-        if (name && !seenNames.has(name)) {
-            seenNames.add(name);
+        const dob = client.dateOfBirth || client['Date of Birth'] || '';
+        const key = _clientIdentityKey(client.name || client.businessName || '', dob)
+                    || (client.name || '').toUpperCase().trim();
+        if (key && !seenKeys.has(key)) {
+            seenKeys.add(key);
             uniqueClients.push(client);
-        } else if (!name) {
-            // Keep clients without names (shouldn't happen but just in case)
+        } else if (!key) {
             uniqueClients.push(client);
         }
     });
@@ -10871,19 +10856,47 @@ async function generateClientRows(page = 1) {
         let policyCount = 0;
         let totalPremium = 0;
 
+        // Build client identity key for policy matching
+        const clientDob = client.dateOfBirth || client['Date of Birth'] || '';
+        const clientKey = _clientIdentityKey(client.name || client.businessName || '', clientDob);
+
         // Find all policies for this client - ONLY use fresh data
         const clientPolicies = allPolicies.filter(policy => {
-            // Check if policy belongs to this client by clientId
-            if (policy.clientId && String(policy.clientId) === String(client.id)) return true;
+            // 1. If policy has explicit clientId, ONLY count it for the exact match (no double-counting)
+            if (policy.clientId) {
+                return String(policy.clientId) === String(client.id);
+            }
 
-            // Check if the insured name matches
+            // No clientId — use fallback matching for legacy/manual policies
+
+            // 2. Match by identity key (owner name + DOB from contact)
+            const polOwner = policy.contact?.['Owner Name'] || policy.insuredName || '';
+            const polDob   = policy.contact?.['Date of Birth'] || '';
+            const polKey   = _clientIdentityKey(polOwner, polDob);
+            if (clientKey && polKey && polKey === clientKey) return true;
+
+            // 3. Fallback: insured name match (legacy policies without contact.Owner Name)
             const insuredName = policy.insured?.['Name/Business Name'] ||
                                policy.insured?.['Primary Named Insured'] ||
-                               policy.insuredName;
+                               policy.insured?.['Full Name'] ||
+                               policy.insured?.['Business Name'] ||
+                               policy.insuredName ||
+                               policy.clientName;
             if (insuredName && client.name && insuredName.toLowerCase() === client.name.toLowerCase()) return true;
+            // 4. Fuzzy identity key on insuredName/clientName (handles cases where contact.Owner Name is missing)
+            if (insuredName) {
+                const polKeyFallback = _clientIdentityKey(insuredName, '');
+                if (clientKey && polKeyFallback && polKeyFallback === clientKey) return true;
+            }
+            // 5. Business name match: commercial policy's business name matches client's businessName
+            const polBizName = policy.contact?.['Business Name'] ||
+                               (policy.insured?.['Entity Type'] === 'Commercial' ? (policy.insuredName || '') : '');
+            if (polBizName && client.businessName) {
+                const polBizKey    = _clientIdentityKey(polBizName, '');
+                const clientBizKey = _clientIdentityKey(client.businessName, '');
+                if (polBizKey && clientBizKey && polBizKey === clientBizKey) return true;
+            }
 
-            // DO NOT check client.policies array as it may be outdated
-            // Only use the fresh data from insurance_policies storage
             return false;
         });
 
@@ -10971,6 +10984,9 @@ async function loadClientsView() {
                 <div class="header-actions">
                     <button class="btn-secondary" onclick="importClients()">
                         <i class="fas fa-upload"></i> Import
+                    </button>
+                    <button class="btn-secondary" onclick="showIvansUpload()" style="background:#e0f2fe;color:#0369a1;border-color:#7dd3fc;" title="Import IVANS Download Files">
+                        <i class="fas fa-cloud-download-alt"></i> IVANS
                     </button>
                     <button class="btn-primary" onclick="showNewClient()">
                         <i class="fas fa-plus"></i> New Client
@@ -11450,6 +11466,9 @@ function loadPoliciesView() {
                     <button class="btn-secondary" onclick="exportPolicies()">
                         <i class="fas fa-download"></i> Export
                     </button>
+                    <button class="btn-secondary" onclick="showIvansUpload()" style="background:#e0f2fe;color:#0369a1;border-color:#7dd3fc;" title="Import IVANS Download Files">
+                        <i class="fas fa-cloud-download-alt"></i> IVANS
+                    </button>
                     <button class="btn-primary" onclick="showNewPolicy()">
                         <i class="fas fa-plus"></i> New Policy
                     </button>
@@ -11728,53 +11747,64 @@ function loadRenewalsView() {
         }
     }
 
+    // Agency → agent mapping (same as Carriers tab)
+    const RENEWAL_AGENCY_AGENTS = {
+        'Vanguard': ['grant', 'hunter', 'carson'],
+        'United': ['maureen'],
+        'ALL': null
+    };
+
+    const _isMaureenRen = currentUser && currentUser.toLowerCase() === 'maureen';
+
     // Filter policies and clients based on user role - SPECIAL CASE: Maureen gets filtered even though she's admin
-    if (currentUser && currentUser.toLowerCase() === 'maureen') {
+    if (_isMaureenRen) {
         // MAUREEN SPECIAL CASE: Filter to only her renewals despite admin status
         const originalPolicyCount = allPolicies.length;
         const originalClientCount = clients.length;
 
-        // Filter policies by assigned user
         allPolicies = allPolicies.filter(policy => {
-            const assignedTo = policy.assignedTo ||
-                              policy.agent ||
-                              policy.assignedAgent ||
-                              policy.producer ||
-                              'Grant'; // Default to Grant if no assignment
-            return assignedTo.toLowerCase() === 'maureen';
+            const assignedTo = (policy.assignedTo || policy.agent || policy.assignedAgent || policy.producer || '').toLowerCase();
+            return assignedTo.includes('maureen');
         });
-
-        // Filter clients by assigned user
         clients = clients.filter(client => {
-            const assignedTo = client.assignedTo || client.agent || 'Grant';
-            return assignedTo.toLowerCase() === 'maureen';
+            const assignedTo = (client.assignedTo || client.agent || '').toLowerCase();
+            return assignedTo.includes('maureen');
         });
 
-        console.log(`🔒 Maureen special renewals filter: Policies ${originalPolicyCount} -> ${allPolicies.length}, Clients ${originalClientCount} -> ${clients.length} (showing only Maureen's renewals)`);
+        console.log(`🔒 Maureen special renewals filter: Policies ${originalPolicyCount} -> ${allPolicies.length}, Clients ${originalClientCount} -> ${clients.length}`);
     } else if (!isAdmin && currentUser) {
         // Regular non-admin filtering
         const originalPolicyCount = allPolicies.length;
         const originalClientCount = clients.length;
 
-        // Filter policies by assigned user
         allPolicies = allPolicies.filter(policy => {
-            const assignedTo = policy.assignedTo ||
-                              policy.agent ||
-                              policy.assignedAgent ||
-                              policy.producer ||
-                              'Grant'; // Default to Grant if no assignment
-            return assignedTo.toLowerCase() === currentUser.toLowerCase();
+            const assignedTo = (policy.assignedTo || policy.agent || policy.assignedAgent || policy.producer || '').toLowerCase();
+            return assignedTo === currentUser.toLowerCase();
         });
-
-        // Filter clients by assigned user
         clients = clients.filter(client => {
-            const assignedTo = client.assignedTo || client.agent || 'Grant';
-            return assignedTo.toLowerCase() === currentUser.toLowerCase();
+            const assignedTo = (client.assignedTo || client.agent || '').toLowerCase();
+            return assignedTo === currentUser.toLowerCase();
         });
 
         console.log(`🔒 Renewals filtered: Policies ${originalPolicyCount} -> ${allPolicies.length}, Clients ${originalClientCount} -> ${clients.length} (showing only ${currentUser}'s)`);
-    } else if (isAdmin && currentUser && currentUser.toLowerCase() !== 'maureen') {
-        console.log(`👑 Renewals: Admin user (${currentUser}) - showing all ${allPolicies.length} policies and ${clients.length} clients`);
+    } else if (isAdmin && !_isMaureenRen) {
+        // Admin (Grant): apply agency dropdown filter
+        const _renewalAgency = window._renewalAgencyFilter || 'ALL';
+        const _agentSet = RENEWAL_AGENCY_AGENTS[_renewalAgency];
+        if (_agentSet) {
+            const before = allPolicies.length;
+            allPolicies = allPolicies.filter(policy => {
+                const a = (policy.assignedTo || policy.agent || policy.assignedAgent || policy.producer || '').toLowerCase();
+                return _agentSet.some(name => a.includes(name));
+            });
+            clients = clients.filter(client => {
+                const a = (client.assignedTo || client.agent || '').toLowerCase();
+                return _agentSet.some(name => a.includes(name));
+            });
+            console.log(`🏢 Renewals agency filter (${_renewalAgency}): ${before} -> ${allPolicies.length} policies`);
+        } else {
+            console.log(`👑 Renewals: Admin user (${currentUser}) - showing all ${allPolicies.length} policies (ALL agencies)`);
+        }
     }
 
     // Process policies for renewals
@@ -11799,6 +11829,12 @@ function loadRenewalsView() {
                             <i class="fas fa-calendar"></i> Year View
                         </button>
                     </div>
+                    ${!_isMaureenRen ? `
+                    <select onchange="window._renewalAgencyFilter=this.value;loadRenewalsView()" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.875rem;margin-right:8px;">
+                        <option value="ALL" ${(window._renewalAgencyFilter||'ALL')==='ALL'?'selected':''}>All Agencies</option>
+                        <option value="Vanguard" ${window._renewalAgencyFilter==='Vanguard'?'selected':''}>Vanguard</option>
+                        <option value="United" ${window._renewalAgencyFilter==='United'?'selected':''}>United</option>
+                    </select>` : ''}
                     <button class="btn-primary" onclick="exportRenewals()">
                         <i class="fas fa-download"></i> Export
                     </button>
@@ -14102,20 +14138,21 @@ async function loadAccountingView() {
 
     const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
     const isAdmin = typeof isCurrentUserAdmin === 'function' ? isCurrentUserAdmin() : (currentUser.role === 'admin');
+    const _acctOwner = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || 'grant').toLowerCase();
 
     container.innerHTML = `<div style="padding:32px;text-align:center;color:#6b7280;"><i class="fas fa-spinner fa-spin fa-2x"></i><br><br>Loading financial data…</div>`;
 
     try {
         const year = _acct.txYear;
         const [summaryRes, plaidRes, txRes, plRes, cfRes, invRes, ctrRes, taxRes, cpRes, budRes] = await Promise.allSettled([
-            fetch(`/api/accounting/summary`),
+            fetch(`/api/accounting/summary?owner=${_acctOwner}`),
             fetch(`/api/plaid/status`),
-            fetch(`/api/finance/transactions?year=${year}`),
-            fetch(`/api/finance/pl?year=${year}`),
-            fetch(`/api/finance/cashflow?year=${year}`),
+            fetch(`/api/finance/transactions?year=${year}&owner=${_acctOwner}`),
+            fetch(`/api/finance/pl?year=${year}&owner=${_acctOwner}`),
+            fetch(`/api/finance/cashflow?year=${year}&owner=${_acctOwner}`),
             fetch(`/api/finance/invoices`),
             fetch(`/api/finance/contractors`),
-            fetch(`/api/finance/tax-summary?year=${year}`),
+            fetch(`/api/finance/tax-summary?year=${year}&owner=${_acctOwner}`),
             fetch(`/api/finance/client-profitability?year=${year}`),
             fetch(`/api/finance/budget?year=${year}`)
         ]);
@@ -14391,16 +14428,16 @@ function _acctPLHTML() {
     <thead><tr><th>Category</th><th style="text-align:right">Amount</th><th style="text-align:right">% of Rev</th></tr></thead>
     <tbody>
       <tr class="pl-section"><td colspan="3"><strong>INCOME</strong></td></tr>
-      ${income.length ? income.map(i => plRow(i.category, i.total, '', 16)).join('') : '<tr><td colspan="3" style="padding-left:16px;color:#9ca3af">No income recorded — upload transactions</td></tr>'}
+      ${income.length ? income.map(i => plRow(i.category, i.amount||i.total, '', 16)).join('') : '<tr><td colspan="3" style="padding-left:16px;color:#9ca3af">No income recorded — upload transactions</td></tr>'}
       ${plRow('Total Revenue', totalRev, 'pl-total', 0)}
 
       <tr class="pl-section"><td colspan="3"><strong>COST OF REVENUE (Agent Commissions Paid)</strong></td></tr>
-      ${cor.length ? cor.map(c => plRow(c.category || c.agent, c.total, '', 16)).join('') : '<tr><td colspan="3" style="padding-left:16px;color:#9ca3af">No agent commission payouts recorded</td></tr>'}
+      ${cor.length ? cor.map(c => plRow(c.category || c.agent, -(c.amount||c.total||0), '', 16)).join('') : '<tr><td colspan="3" style="padding-left:16px;color:#9ca3af">No agent commission payouts recorded</td></tr>'}
       ${plRow('Gross Profit', grossProfit, 'pl-total', 0)}
 
       <tr class="pl-section"><td colspan="3"><strong>OPERATING EXPENSES</strong></td></tr>
-      ${expenses.length ? expenses.map(e => plRow(e.category, e.total, '', 16)).join('') : '<tr><td colspan="3" style="padding-left:16px;color:#9ca3af">No expenses recorded — upload transactions</td></tr>'}
-      ${plRow('Total Expenses', totals.totalExpenses||0, 'pl-total', 0)}
+      ${expenses.length ? expenses.map(e => plRow(e.category, -(e.amount||e.total||0), '', 16)).join('') : '<tr><td colspan="3" style="padding-left:16px;color:#9ca3af">No expenses recorded — upload transactions</td></tr>'}
+      ${plRow('Total Expenses', -(totals.totalExpenses||0), 'pl-total', 0)}
 
       <tr class="pl-final ${netIncome >= 0 ? 'pl-profit' : 'pl-loss'}">
         <td><strong>NET INCOME</strong></td>
@@ -14459,10 +14496,17 @@ function _acctTransactionsHTML(isAdmin) {
 
     // Build chart data
     const catTotals = {};
-    filtered.filter(t => t.amount < 0 && !(t.category||'').toUpperCase().includes('INCOME')).forEach(t => {
-        const c = t.category || 'OTHER';
-        catTotals[c] = (catTotals[c] || 0) + Math.abs(t.amount);
-    });
+    if (typeFilter === 'income') {
+        filtered.filter(t => t.amount > 0).forEach(t => {
+            const c = t.category || 'OTHER';
+            catTotals[c] = (catTotals[c] || 0) + t.amount;
+        });
+    } else {
+        filtered.filter(t => t.amount < 0 && !(t.category||'').toUpperCase().includes('INCOME')).forEach(t => {
+            const c = t.category || 'OTHER';
+            catTotals[c] = (catTotals[c] || 0) + Math.abs(t.amount);
+        });
+    }
     const catSorted = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
     const CHART_COLORS = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#3b82f6','#f59e0b','#10b981','#ef4444','#8b5cf6'];
     const totalExpense = Math.abs(totalOut) || 1;
@@ -15080,11 +15124,12 @@ async function acctImportCSV(input) {
 
     if (!transactions.length) { showNotification('No valid transactions found in CSV', 'error'); return; }
 
+    const _csvOwner = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || 'grant').toLowerCase();
     try {
         const res = await fetch('/api/finance/transactions/bulk', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ transactions })
+            body: JSON.stringify({ transactions, owner: _csvOwner })
         });
         if (res.ok) {
             const data = await res.json();
@@ -15140,10 +15185,11 @@ function acctAddTransaction() {
     if (isNaN(amount)) { showNotification('Invalid amount', 'error'); return; }
     const category = prompt('Category (e.g. INSURANCE_INCOME, OFFICE_SUPPLIES, OTHER):') || 'OTHER';
 
+    const _txOwner = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || 'grant').toLowerCase();
     fetch('/api/finance/transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, description: desc, amount, category })
+        body: JSON.stringify({ date, description: desc, amount, category, owner: _txOwner })
     }).then(r => { if (r.ok) { showNotification('Transaction added', 'success'); loadAccountingView(); } else showNotification('Failed to add', 'error'); })
     .catch(e => showNotification('Error: ' + e.message, 'error'));
 }
@@ -15569,6 +15615,14 @@ function loadReportsView() {
                     <p>Dialer call stats, connection rates, and agent activity</p>
                 </div>
 
+                <div class="report-card" onclick="runReport('lead-list')">
+                    <div class="report-icon">
+                        <i class="fas fa-list-alt"></i>
+                    </div>
+                    <h3>Lead List</h3>
+                    <p>Full lead roster with status, assignment, and pipeline stage</p>
+                </div>
+
                 <div class="report-card" onclick="runReport('production')">
                     <div class="report-icon">
                         <i class="fas fa-chart-line"></i>
@@ -15576,7 +15630,7 @@ function loadReportsView() {
                     <h3>Production Report</h3>
                     <p>New business and renewal production metrics</p>
                 </div>
-                
+
                 <div class="report-card" onclick="runReport('loss-ratio')">
                     <div class="report-icon">
                         <i class="fas fa-chart-pie"></i>
@@ -15584,7 +15638,7 @@ function loadReportsView() {
                     <h3>Loss Ratio Analysis</h3>
                     <p>Claims vs premium analysis by line</p>
                 </div>
-                
+
                 <div class="report-card" onclick="runReport('renewal')">
                     <div class="report-icon">
                         <i class="fas fa-sync"></i>
@@ -15592,7 +15646,7 @@ function loadReportsView() {
                     <h3>Renewal Forecast</h3>
                     <p>Upcoming renewals and retention metrics</p>
                 </div>
-                
+
                 <div class="report-card" onclick="runReport('marketing')">
                     <div class="report-icon">
                         <i class="fas fa-bullhorn"></i>
@@ -15600,21 +15654,13 @@ function loadReportsView() {
                     <h3>Marketing ROI</h3>
                     <p>Campaign performance and lead conversion</p>
                 </div>
-                
+
                 <div class="report-card" onclick="runReport('carrier')">
                     <div class="report-icon">
                         <i class="fas fa-building"></i>
                     </div>
                     <h3>Carrier Performance</h3>
                     <p>Quote-to-bind ratios by carrier</p>
-                </div>
-
-                <div class="report-card" onclick="runReport('lead-list')">
-                    <div class="report-icon">
-                        <i class="fas fa-list-alt"></i>
-                    </div>
-                    <h3>Lead List</h3>
-                    <p>Full lead roster with status, assignment, and pipeline stage</p>
                 </div>
             </div>
 
@@ -17040,11 +17086,17 @@ function selectQuoteToAttach(type, leadName, quoteIndex) {
 }
 
 // Function to calculate real carrier statistics from policies
-function calculateCarrierStats(carrierName) {
+function calculateCarrierStats(carrierName, agentNames) {
     const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const agentSet = agentNames ? new Set(agentNames.map(a => a.toLowerCase())) : null;
     const carrierPolicies = policies.filter(policy => {
         const policyCarrier = (policy.carrier || policy.insurance_company || '').toLowerCase();
-        return policyCarrier.includes(carrierName.toLowerCase());
+        if (!policyCarrier.includes(carrierName.toLowerCase())) return false;
+        if (agentSet) {
+            const agent = (policy.agent || policy.producer || '').toLowerCase();
+            return [...agentSet].some(a => agent.includes(a));
+        }
+        return true;
     });
 
     // Calculate total premium
@@ -17068,22 +17120,37 @@ function loadCarriersView() {
     const dashboardContent = document.querySelector('.dashboard-content');
     if (!dashboardContent) return;
 
+    // Detect current user — Maureen always defaults to United and cannot change it
+    const _sessionUser = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _currentUsername = (_sessionUser.username || '').toLowerCase();
+    const _isMaureen = _currentUsername === 'maureen';
+    if (_isMaureen) window._carrierAgencyFilter = 'United';
+
     // Force update carriers to new list (removing State Farm and Liberty Mutual)
     let carriers = [
-        { id: 1, name: 'Progressive', brandBg: 'linear-gradient(135deg,#0066cc,#004999)', brandText: '#ffffff', portalUrl: 'https://www.progressive.com/agent', type: 'direct' },
-        { id: 2, name: 'Geico', brandBg: 'linear-gradient(135deg,#003087,#00519b)', brandText: '#ffffff', portalUrl: 'https://www.geico.com/agent', type: 'direct' },
-        { id: 3, name: 'Northland', brandBg: 'linear-gradient(135deg,#1b3a6e,#2d5fa6)', brandText: '#ffffff', portalUrl: 'https://www.northlandinsurance.com', type: 'rps' },
-        { id: 4, name: 'Canal', brandBg: 'linear-gradient(135deg,#c8102e,#a00c24)', brandText: '#ffffff', portalUrl: 'https://www.canalinsurance.com', type: 'rps' },
-        { id: 5, name: 'Crum & Forster', brandBg: 'linear-gradient(135deg,#004b8d,#0066cc)', brandText: '#ffffff', portalUrl: 'https://www.cumbinsurance.com', type: 'rps' },
-        { id: 6, name: 'Nico', brandBg: 'linear-gradient(135deg,#2e4057,#3d5a80)', brandText: '#ffffff', portalUrl: 'https://www.nicoinsurance.com', type: 'rps' },
-        { id: 7, name: 'Occidental', brandBg: 'linear-gradient(135deg,#1a3c5e,#2e6da4)', brandText: '#ffffff', portalUrl: 'https://www.coverwhealinsurance.com', type: 'rps' },
-        { id: 8, name: 'Berkley Prime', brandBg: 'linear-gradient(135deg,#0d2c54,#1a4a7a)', brandText: '#ffffff', portalUrl: 'https://www.hathwayinsurance.com', type: 'rps' }
+        { id: 1, name: 'Progressive', brandBg: 'linear-gradient(135deg,#0066cc,#004999)', brandText: '#ffffff', portalUrl: 'https://www.progressive.com/agent', type: 'direct', agency: 'Vanguard' },
+        { id: 2, name: 'Geico', brandBg: 'linear-gradient(135deg,#003087,#00519b)', brandText: '#ffffff', portalUrl: 'https://www.geico.com/agent', type: 'direct', agency: 'Vanguard' },
+        { id: 3, name: 'Northland', brandBg: 'linear-gradient(135deg,#1b3a6e,#2d5fa6)', brandText: '#ffffff', portalUrl: 'https://www.northlandinsurance.com', type: 'rps', agency: 'Vanguard' },
+        { id: 4, name: 'Canal', brandBg: 'linear-gradient(135deg,#c8102e,#a00c24)', brandText: '#ffffff', portalUrl: 'https://www.canalinsurance.com', type: 'rps', agency: 'Vanguard' },
+        { id: 5, name: 'Crum & Forster', brandBg: 'linear-gradient(135deg,#004b8d,#0066cc)', brandText: '#ffffff', portalUrl: 'https://www.cumbinsurance.com', type: 'rps', agency: 'Vanguard' },
+        { id: 6, name: 'Nico', brandBg: 'linear-gradient(135deg,#2e4057,#3d5a80)', brandText: '#ffffff', portalUrl: 'https://www.nicoinsurance.com', type: 'rps', agency: 'Vanguard' },
+        { id: 7, name: 'Occidental', brandBg: 'linear-gradient(135deg,#1a3c5e,#2e6da4)', brandText: '#ffffff', portalUrl: 'https://www.coverwhealinsurance.com', type: 'rps', agency: 'Vanguard' },
+        { id: 8, name: 'Berkley Prime', brandBg: 'linear-gradient(135deg,#0d2c54,#1a4a7a)', brandText: '#ffffff', portalUrl: 'https://www.hathwayinsurance.com', type: 'rps', agency: 'Vanguard' }
     ];
     localStorage.setItem('carriers', JSON.stringify(carriers));
 
-    // Calculate real statistics for each carrier
+    // Agency → agent mapping
+    const AGENCY_AGENTS = {
+        'Vanguard': ['Grant', 'Hunter', 'Carson'],
+        'United':   ['Maureen'],
+        'ALL':      null
+    };
+    const agencyFilter = window._carrierAgencyFilter || 'ALL';
+    const agentFilter = AGENCY_AGENTS[agencyFilter] || null;
+
+    // Calculate real statistics for each carrier, filtered by agency agents
     carriers = carriers.map(carrier => {
-        const stats = calculateCarrierStats(carrier.name);
+        const stats = calculateCarrierStats(carrier.name, agentFilter);
         return {
             ...carrier,
             policies: stats.policies,
@@ -17091,9 +17158,12 @@ function loadCarriersView() {
         };
     });
 
+    // For United, show all carriers (same markets, filtered stats); for Vanguard, only Vanguard carriers
+    const filteredCarriers = agencyFilter === 'United' ? carriers : agencyFilter === 'Vanguard' ? carriers.filter(c => c.agency === 'Vanguard') : carriers;
+
     // Separate carriers by type
-    const directCarriers = carriers.filter(c => c.type === 'direct');
-    const rpsCarriers = carriers.filter(c => c.type === 'rps');
+    const directCarriers = filteredCarriers.filter(c => c.type === 'direct');
+    const rpsCarriers = filteredCarriers.filter(c => c.type === 'rps');
 
     // Parse premium strings like "$148K" or "$1.2M" into raw numbers
     const parsePremium = (str) => {
@@ -17115,6 +17185,11 @@ function loadCarriersView() {
             <header class="content-header">
                 <h1>Carrier Management</h1>
                 <div class="header-actions">
+                    ${_isMaureen ? '' : `<select onchange="window._carrierAgencyFilter=this.value;loadCarriersView()" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.875rem;margin-right:8px;">
+                        <option value="ALL" ${agencyFilter==='ALL'?'selected':''}>All Agencies</option>
+                        <option value="Vanguard" ${agencyFilter==='Vanguard'?'selected':''}>Vanguard</option>
+                        <option value="United" ${agencyFilter==='United'?'selected':''}>United</option>
+                    </select>`}
                     <button class="btn-secondary" onclick="showRPSInfoSheet()" style="margin-right: 10px;">
                         <i class="fas fa-info-circle"></i> Info Sheet
                     </button>
@@ -17733,30 +17808,32 @@ function loadSettingsView() {
                     <button class="btn-primary">Save Preferences</button>
                 </div>
 
-                <div class="settings-section" style="grid-column: 1 / -1;">
-                    <h3>Agency File Upload</h3>
-                    <p style="color:#6b7280;font-size:0.875rem;margin-bottom:1rem;">Upload documents, AL3 files, spreadsheets, or any reference files to the server.</p>
-                    <div id="agency-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;margin-bottom:1rem;">
-                        <div style="font-size:2rem;margin-bottom:0.5rem;">📁</div>
-                        <div style="font-weight:600;color:#374151;margin-bottom:0.25rem;">Drag &amp; drop files here</div>
-                        <div style="font-size:0.8rem;color:#9ca3af;margin-bottom:1rem;">PDF, Word, Excel, CSV, JSON, Images, Text — up to 50MB</div>
-                        <input type="file" id="agency-file-input" multiple style="display:none;">
-                        <button class="btn-secondary" onclick="document.getElementById('agency-file-input').click()">Browse Files</button>
+                <div class="settings-section">
+                    <h3>File Uploads</h3>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+                        <label class="btn-secondary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;width:fit-content;">
+                            <i class="fas fa-cloud-download-alt"></i> Upload IVANS File
+                            <input type="file" accept=".al3,.dat,.txt,.xml,.zip" style="display:none;" onchange="handleIvansFileDrop(this.files[0])">
+                        </label>
+                        <label class="btn-secondary" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;width:fit-content;">
+                            <i class="fas fa-upload"></i> Upload Agency File
+                            <input type="file" id="agency-file-input" multiple style="display:none;">
+                        </label>
                     </div>
-                    <div id="agency-upload-status" style="display:none;margin-bottom:1rem;padding:0.75rem;border-radius:6px;font-size:0.875rem;"></div>
-                    <div id="agency-file-list" style="margin-top:1rem;"></div>
+                    <div id="agency-upload-status" style="display:none;margin-top:8px;padding:6px 10px;border-radius:6px;font-size:12px;"></div>
+                    <div id="agency-drop-zone" style="display:none;"></div>
+                    <div id="agency-file-list" style="margin-top:10px;"></div>
                 </div>
             </div>
         </div>
     `;
 
-    // Agency File Upload logic
+    // Agency File Upload logic (compact)
     (function initAgencyUpload() {
-        const dropZone = document.getElementById('agency-drop-zone');
         const fileInput = document.getElementById('agency-file-input');
         const statusDiv = document.getElementById('agency-upload-status');
         const fileList = document.getElementById('agency-file-list');
-        if (!dropZone) return;
+        if (!fileInput) return;
 
         function showStatus(msg, isError) {
             statusDiv.style.display = 'block';
@@ -17777,32 +17854,30 @@ function loadSettingsView() {
                 const res = await fetch('/api/agency-files');
                 const data = await res.json();
                 if (!data.success || !data.files.length) {
-                    fileList.innerHTML = '<p style="color:#9ca3af;font-size:0.85rem;">No files uploaded yet.</p>';
+                    fileList.innerHTML = '<p style="color:#9ca3af;font-size:12px;padding:8px 0;">No files uploaded yet.</p>';
                     return;
                 }
                 fileList.innerHTML = `
-                    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
-                        <thead><tr style="border-bottom:1px solid #e5e7eb;">
-                            <th style="text-align:left;padding:0.5rem;color:#6b7280;">Name</th>
-                            <th style="text-align:left;padding:0.5rem;color:#6b7280;">Type</th>
-                            <th style="text-align:left;padding:0.5rem;color:#6b7280;">Size</th>
-                            <th style="text-align:left;padding:0.5rem;color:#6b7280;">Uploaded</th>
-                            <th style="padding:0.5rem;"></th>
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+                            <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600;">Name</th>
+                            <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600;">Size</th>
+                            <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600;">Uploaded</th>
+                            <th style="padding:6px 8px;"></th>
                         </tr></thead>
                         <tbody>${data.files.map(f => `
                             <tr style="border-bottom:1px solid #f3f4f6;">
-                                <td style="padding:0.5rem;font-weight:500;">${f.name}</td>
-                                <td style="padding:0.5rem;color:#6b7280;">${f.type}</td>
-                                <td style="padding:0.5rem;color:#6b7280;">${formatSize(f.size)}</td>
-                                <td style="padding:0.5rem;color:#6b7280;">${new Date(f.uploadDate).toLocaleDateString()}</td>
-                                <td style="padding:0.5rem;text-align:right;">
-                                    <button onclick="deleteAgencyFile('${f.id}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:0.8rem;">Delete</button>
+                                <td style="padding:5px 8px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${f.name}">${f.name}</td>
+                                <td style="padding:5px 8px;color:#6b7280;">${formatSize(f.size)}</td>
+                                <td style="padding:5px 8px;color:#6b7280;">${new Date(f.uploadDate||f.upload_date).toLocaleDateString()}</td>
+                                <td style="padding:5px 8px;text-align:right;">
+                                    <button onclick="deleteAgencyFile('${f.id}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;">Delete</button>
                                 </td>
                             </tr>`).join('')}
                         </tbody>
                     </table>`;
             } catch (e) {
-                fileList.innerHTML = '<p style="color:#dc2626;font-size:0.85rem;">Failed to load files.</p>';
+                fileList.innerHTML = '<p style="color:#dc2626;font-size:12px;">Failed to load files.</p>';
             }
         }
 
@@ -17810,13 +17885,15 @@ function loadSettingsView() {
             const formData = new FormData();
             formData.append('file', file);
             formData.append('uploadedBy', 'Agency');
-            showStatus('Uploading ' + file.name + '...', false);
+            showStatus('Uploading ' + file.name + '…', false);
             try {
                 const res = await fetch('/api/agency-files', { method: 'POST', body: formData });
                 const data = await res.json();
                 if (data.success) {
-                    showStatus(file.name + ' uploaded successfully.', false);
+                    showStatus(file.name + ' uploaded.', false);
                     loadFileList();
+                    // Refresh IVANS panel too in case it was an IVANS file
+                    setTimeout(() => { const el = document.getElementById('ivans-settings-file-list'); if (el) initIvansSettingsPanel(); }, 300);
                 } else {
                     showStatus('Upload failed: ' + (data.error || 'Unknown error'), true);
                 }
@@ -17825,27 +17902,8 @@ function loadSettingsView() {
             }
         }
 
-        async function uploadFiles(files) {
-            for (const file of files) await uploadFile(file);
-        }
-
-        dropZone.addEventListener('dragover', e => {
-            e.preventDefault();
-            dropZone.style.borderColor = '#3b82f6';
-            dropZone.style.background = '#eff6ff';
-        });
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.style.borderColor = '#d1d5db';
-            dropZone.style.background = '';
-        });
-        dropZone.addEventListener('drop', e => {
-            e.preventDefault();
-            dropZone.style.borderColor = '#d1d5db';
-            dropZone.style.background = '';
-            if (e.dataTransfer.files.length) uploadFiles(Array.from(e.dataTransfer.files));
-        });
         fileInput.addEventListener('change', () => {
-            if (fileInput.files.length) uploadFiles(Array.from(fileInput.files));
+            if (fileInput.files.length) Array.from(fileInput.files).forEach(f => uploadFile(f));
             fileInput.value = '';
         });
 
@@ -17867,6 +17925,83 @@ function loadSettingsView() {
 
         loadFileList();
     })();
+
+    // ── IVANS settings panel ──────────────────────────────────────────────────
+    async function initIvansSettingsPanel() {
+        const container = document.getElementById('ivans-settings-file-list');
+        const historyEl = document.getElementById('ivans-import-history');
+        if (!container) return;
+
+        const ivansExts = ['.al3','.dat','.txt','.xml','.zip','.834'];
+        const isIvansFile = name => ivansExts.some(ext => name.toLowerCase().endsWith(ext));
+        const fmtSize = b => b<1024 ? b+' B' : b<1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB';
+
+        // Render import history from localStorage
+        if (historyEl) {
+            const hist = JSON.parse(localStorage.getItem('ivans_import_history') || '[]');
+            if (!hist.length) {
+                historyEl.innerHTML = '<div style="color:#9ca3af;font-size:12px;padding:10px;">No imports yet.</div>';
+            } else {
+                historyEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:11px;">
+                    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                        <th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600;">File</th>
+                        <th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600;">Date</th>
+                        <th style="padding:6px 8px;text-align:center;color:#1e40af;font-weight:600;">Upd</th>
+                        <th style="padding:6px 8px;text-align:center;color:#15803d;font-weight:600;">New</th>
+                    </tr></thead>
+                    <tbody>${hist.slice().reverse().map(h => `
+                        <tr style="border-bottom:1px solid #f3f4f6;">
+                            <td style="padding:5px 8px;font-weight:500;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${h.filename}">${h.filename}</td>
+                            <td style="padding:5px 8px;color:#6b7280;">${new Date(h.timestamp).toLocaleDateString()} ${new Date(h.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+                            <td style="padding:5px 8px;text-align:center;font-weight:700;color:#1e40af;">${h.updated}</td>
+                            <td style="padding:5px 8px;text-align:center;font-weight:700;color:#15803d;">${h.created}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>`;
+            }
+        }
+
+        // Render server files
+        try {
+            const res = await fetch('/api/agency-files');
+            const data = await res.json();
+            const files = (data.files||[]).filter(f => isIvansFile(f.name));
+            if (!files.length) {
+                container.innerHTML = `<div style="color:#9ca3af;font-size:12px;padding:10px;">No IVANS files found. Upload a .dat, .al3, or .zip file.</div>`;
+                return;
+            }
+            container.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                    <th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600;">File</th>
+                    <th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600;">Size</th>
+                    <th style="padding:6px 8px;text-align:left;color:#64748b;font-weight:600;">Date</th>
+                    <th style="padding:6px 8px;"></th>
+                </tr></thead>
+                <tbody>${files.map(f => {
+                    const ext = f.name.split('.').pop().toUpperCase();
+                    const badgeBg = ext==='ZIP' ? '#fef3c7' : '#dbeafe';
+                    const badgeColor = ext==='ZIP' ? '#92400e' : '#1e40af';
+                    return `<tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:5px 8px;font-weight:500;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${f.name}">
+                            ${f.name}
+                            <span style="background:${badgeBg};color:${badgeColor};font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:4px;">${ext}</span>
+                        </td>
+                        <td style="padding:5px 8px;color:#6b7280;">${fmtSize(f.size)}</td>
+                        <td style="padding:5px 8px;color:#6b7280;">${new Date(f.uploadDate||f.upload_date).toLocaleDateString()}</td>
+                        <td style="padding:5px 8px;text-align:right;">
+                            <button onclick="ivansImportFromServer('${f.id}','${f.name.replace(/'/g,"\\'")}',this)"
+                                    style="background:#0284c7;border:none;color:#fff;padding:3px 10px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
+                                <i class="fas fa-bolt"></i> Import
+                            </button>
+                        </td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
+        } catch(e) {
+            container.innerHTML = `<div style="color:#dc2626;font-size:12px;padding:10px;">Failed to load: ${e.message}</div>`;
+        }
+    }
+    // initIvansSettingsPanel removed (panel replaced with simple upload button)
 
     // Update average performance display after the HTML is loaded
     console.log('🔄 DEBUG: Setting timeout to update average performance display');
@@ -18585,7 +18720,9 @@ function collectPolicyData() {
             case 'coverage':
                 tab.querySelectorAll('input, select, textarea').forEach(field => {
                     if (field.id && field.value) {
-                        const fieldName = field.previousElementSibling?.textContent?.replace(' *', '') || field.id;
+                        // Use the form-group's <label> for the key (not previousElementSibling which may be a hidden input)
+                        const label = field.closest('.form-group')?.querySelector('label')?.textContent?.replace(' *', '').trim();
+                        const fieldName = label || field.id;
                         data.coverage[fieldName] = field.value;
                     }
                 });
@@ -19468,6 +19605,970 @@ function deleteClient(id) {
     }
 }
 
+// ── IVANS Download Import ─────────────────────────────────────────────────────
+
+function showIvansUpload() {
+    document.querySelectorAll('#ivans-upload-overlay').forEach(e => e.remove());
+    const overlay = document.createElement('div');
+    overlay.id = 'ivans-upload-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.8);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px;box-sizing:border-box;';
+    overlay.innerHTML = `
+        <div onclick="event.stopPropagation()" style="background:#fff;border-radius:16px;width:100%;max-width:960px;max-height:92vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.35);display:flex;flex-direction:column;">
+            <div style="background:linear-gradient(135deg,#0c4a6e,#0284c7);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:42px;height:42px;background:rgba(255,255,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;flex-shrink:0;"><i class="fas fa-cloud-download-alt"></i></div>
+                    <div>
+                        <div style="font-size:16px;font-weight:700;color:#fff;">IVANS Download Import</div>
+                        <div style="font-size:12px;color:rgba(255,255,255,0.7);">Upload ACORD AL3 or XML files to update clients &amp; policies</div>
+                    </div>
+                </div>
+                <button onclick="document.getElementById('ivans-upload-overlay').remove()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:20px;cursor:pointer;flex-shrink:0;">&times;</button>
+            </div>
+            <div style="padding:24px;">
+                <div id="ivans-parse-status"></div>
+                <div id="ivans-review-area"></div>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+function handleIvansFileDrop(file) {
+    if (!file) return;
+    // If the modal isn't open yet (e.g. called from Settings page), open it first
+    if (!document.getElementById('ivans-parse-status')) {
+        showIvansUpload();
+        setTimeout(() => handleIvansFileDrop(file), 50);
+        return;
+    }
+    const statusEl = document.getElementById('ivans-parse-status');
+    document.getElementById('ivans-review-area').innerHTML = '';
+    statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;color:#2563eb;font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Parsing <strong>${file.name}</strong>…</div>`;
+
+    const isZip = /\.zip$/i.test(file.name) || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+
+    function _process(content, fname) {
+        try {
+            const policies = parseIvansFile(content, fname);
+            policies.forEach(p => p._srcFile = fname);
+            if (!policies.length) {
+                const rawLines = content.split(/\r\n|\r|\n/).filter(l => l.trim());
+                const preview = rawLines.slice(0,20).map((l,i) => `[${String(i+1).padStart(2)}] seg="${l.substring(0,6)}" | ${l.substring(0,160)}`).join('\n');
+                statusEl.innerHTML = `<div style="color:#dc2626;font-size:13px;padding:10px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fca5a5;"><i class="fas fa-exclamation-triangle"></i> No policies found (${rawLines.length} lines). First 20:<br><pre style="margin:8px 0 0;font-size:10px;white-space:pre-wrap;word-break:break-all;color:#374151;background:#f1f5f9;padding:8px;border-radius:4px;">${preview.replace(/</g,'&lt;')}</pre></div>`;
+            } else {
+                statusEl.innerHTML = `<div style="color:#15803d;font-size:13px;font-weight:600;padding:8px 14px;background:#f0fdf4;border-radius:8px;border:1px solid #86efac;"><i class="fas fa-check-circle"></i> Found <strong>${policies.length}</strong> polic${policies.length===1?'y':'ies'} in ${fname}</div>`;
+                showIvansReview(policies);
+            }
+        } catch(err) {
+            statusEl.innerHTML = `<div style="color:#dc2626;font-size:13px;padding:10px 14px;background:#fef2f2;border-radius:8px;"><i class="fas fa-exclamation-triangle"></i> Parse error: ${err.message}</div>`;
+        }
+    }
+
+    if (isZip) {
+        // Send ZIP to server for extraction
+        const fd = new FormData();
+        fd.append('file', file);
+        fetch('/api/ivans/unzip', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) throw new Error(data.error || 'Unzip failed');
+                const content = data.content;
+                const lineCount = content.split(/\r\n|\r|\n/).filter(l => l.trim()).length;
+
+                if (lineCount <= 1) {
+                    // IVANS fixed-width format (no line separators, 196-byte records)
+                    if (content.startsWith('1') && /2TRG\d{3} \d /.test(content.substring(0, 500))) {
+                        _process(content, data.filename || file.name);
+                        return;
+                    }
+                    // Unknown format — show text preview
+                    statusEl.innerHTML = `<div style="color:#dc2626;font-size:13px;padding:10px;background:#fef2f2;border-radius:8px;">Unrecognised format. File: ${data.totalBytes} bytes.<br><pre style="font-size:10px;margin-top:6px;">${content.substring(0,400).replace(/</g,'&lt;')}</pre></div>`;
+                    return;
+                }
+                _process(content, data.filename || file.name);
+            })
+            .catch(err => {
+                statusEl.innerHTML = `<div style="color:#dc2626;font-size:13px;padding:10px 14px;background:#fef2f2;border-radius:8px;"><i class="fas fa-exclamation-triangle"></i> ${err.message}</div>`;
+            });
+    } else {
+        const reader = new FileReader();
+        reader.onload = e => _process(e.target.result, file.name);
+        reader.onerror = () => { statusEl.innerHTML = `<div style="color:#dc2626;font-size:13px;">Failed to read file.</div>`; };
+        reader.readAsText(file);
+    }
+}
+
+function parseIvansFile(content, filename) {
+    const t = content.trim();
+
+    // MIME multipart wrapper (IVANS sometimes delivers XML+PDF in a MIME envelope)
+    if (/^MIME-Version:/i.test(t)) {
+        const boundaryMatch = t.match(/boundary="?([^";\r\n]+)"?/i);
+        if (boundaryMatch) {
+            const boundary = '--' + boundaryMatch[1].trim();
+            const parts = t.split(new RegExp(boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+            for (const part of parts) {
+                if (/Content-Type:\s*text\/xml/i.test(part) || /Content-Type:\s*application\/xml/i.test(part)) {
+                    // Extract body: everything after the first blank line
+                    const bodyMatch = part.match(/\r?\n\r?\n([\s\S]*)/);
+                    if (bodyMatch) {
+                        const xmlContent = bodyMatch[1].trim();
+                        if (xmlContent.startsWith('<')) return parseAcordXML(xmlContent);
+                    }
+                }
+            }
+        }
+        throw new Error('MIME multipart file detected but no XML policy data found inside. Check that this is an IVANS AL3 or ACORD XML download, not a single-policy PDF notice.');
+    }
+
+    if (t.startsWith('<') || (filename||'').toLowerCase().endsWith('.xml')) return parseAcordXML(t);
+    // IVANS fixed-width download format (no line separators, TRG-based groups)
+    if (t.startsWith('1') && /2TRG\d{3} \d /.test(t.substring(0, 500))) return parseIvansFixed(t);
+    return parseAcordAL3(t);
+}
+
+function parseIvansFixed(content) {
+    const policies = [];
+
+    // AL3 records are variable-length: each record has its byte-length at positions 4-6
+    const records = [];
+    let i = 0;
+    while (i < content.length - 7) {
+        const rtype = content.substring(i, i + 4);
+        if (!/^[0-9A-Z]{4}$/.test(rtype)) { i++; continue; }
+        const rlen = parseInt(content.substring(i + 4, i + 7));
+        if (isNaN(rlen) || rlen < 10 || rlen > 2000) { i++; continue; }
+        records.push([rtype, content.substring(i, i + rlen)]);
+        i += rlen;
+    }
+    if (!records.length) return [];
+
+    // Group records by 2TRG — each TRG block = one policy transaction
+    const groups = [];
+    let cur = [];
+    for (const rec of records) {
+        if (rec[0] === '2TRG' && cur.length) { groups.push(cur); cur = []; }
+        cur.push(rec);
+    }
+    if (cur.length) groups.push(cur);
+
+    const clean = s => (s || '').replace(/[\x00?]/g, ' ').replace(/\s+/g, ' ').trim();
+    const fmtYYMMDD = s => {
+        const d = (s || '').replace(/\D/g, '');
+        if (d.length !== 6) return '';
+        const yy = parseInt(d.substring(0, 2));
+        const yr = yy >= 50 ? 1900 + yy : 2000 + yy;
+        return `${d.substring(2, 4)}/${d.substring(4, 6)}/${yr}`;
+    };
+    const DISCOUNT_CODES = new Set(['HODIS','MCAR','AQD','EFTD','LFREE','PPLSD','MULTI','SNGL']);
+
+    for (const grp of groups) {
+        const by = {};
+        for (const [t, r] of grp) { if (!by[t]) by[t] = []; by[t].push(r); }
+        if (!by['2TRG']) continue;
+
+        const trg = by['2TRG'][0];
+        const lobCode    = trg.substring(24, 29).trim();
+        const carrier    = trg.substring(47, 72).trim();
+
+        // ── 5BPI: policy number, dates, premium ─────────────────────────────
+        let policyNumber = '', effectiveDate = '', expirationDate = '', premium = '';
+        if (by['5BPI']) {
+            const b = by['5BPI'][0];
+            policyNumber    = clean(b.substring(30, 50));
+            effectiveDate   = fmtYYMMDD(b.substring(80, 86));
+            expirationDate  = fmtYYMMDD(b.substring(86, 92));
+            const pm = b.substring(111).match(/(\d{10,12})[+\-]/);
+            if (pm) { const c = parseInt(pm[1]); if (c > 0 && c < 9999999999) premium = (c / 100).toFixed(2); }
+        }
+
+        // ── 5BIS: insured name & entity type ────────────────────────────────
+        let insuredName = '', firstName = '', lastName = '', middleName = '',
+            suffix = '', entityType = 'P', companyName = '';
+        if (by['5BIS']) {
+            const b = by['5BIS'][0];
+            entityType = b[30] || 'P';
+            if (entityType === 'C' || entityType === 'B') {
+                companyName  = clean(b.substring(31, 90));
+                insuredName  = companyName;
+            } else {
+                firstName    = clean(b.substring(39, 55));
+                middleName   = clean(b.substring(55, 66));
+                lastName     = clean(b.substring(66, 86));
+                suffix       = clean(b.substring(86, 90));
+                insuredName  = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ');
+            }
+        }
+
+        // ── 9BIS: address / phone ────────────────────────────────────────────
+        let address = '', city = '', state = '', zip = '', phone = '';
+        if (by['9BIS']) {
+            const b = by['9BIS'][0];
+            address = clean(b.substring(30, 90));
+            city    = clean(b.substring(90, 109));
+            state   = b.substring(109, 111).trim();
+            zip     = b.substring(111, 120).replace(/\D/g, '').substring(0, 5);
+            phone   = b.substring(120, 130).replace(/\D/g, '');
+        }
+
+        // ── 5VEH: vehicles (personal auto) ──────────────────────────────────
+        const vehicles = [];
+        for (const b of (by['5VEH'] || [])) {
+            const year  = clean(b.substring(38, 42));
+            const make  = clean(b.substring(42, 62));
+            const model = clean(b.substring(62, 82));
+            const vin   = b.substring(87, 104).replace(/[?\x00\s]/g, '');
+            const vs    = b.substring(112, 114).trim();
+            if (year || make || vin) vehicles.push({ year, make, model, vin, state: vs });
+        }
+        // ── 5CAR: commercial auto trucks ────────────────────────────────────
+        for (const b of (by['5CAR'] || [])) {
+            const year  = clean(b.substring(38, 42));
+            const make  = clean(b.substring(42, 62));
+            const model = clean(b.substring(62, 82));
+            const vin   = b.substring(87, 104).replace(/[?\x00\s]/g, '');
+            if (year || make || vin) vehicles.push({ year, make, model, vin });
+        }
+
+        // ── 6CVA: coverages (per vehicle, personal auto) ─────────────────────
+        const coverages = {};
+        for (const b of (by['6CVA'] || [])) {
+            const code = b.substring(30, 35).trim();
+            if (DISCOUNT_CODES.has(code)) continue;
+            const desc = clean(b.substring(148, 208));
+            if (!desc) continue;
+            const pm = b.substring(66, 79).match(/(\d{10,12})[+\-]/);
+            const covPrem = pm ? parseInt(pm[1]) / 100 : 0;
+            const lims = (b.substring(79, 130).match(/\d{8}/g) || [])
+                          .map(x => parseInt(x)).filter(x => x > 0 && x < 9999999);
+            let val = '';
+            if (lims.length >= 2)    val = `$${lims[0].toLocaleString()}/$${lims[1].toLocaleString()}`;
+            else if (lims.length === 1) val = `$${lims[0].toLocaleString()}`;
+            if (covPrem > 0) val += (val ? ' ' : '') + `($${Math.round(covPrem)}/yr)`;
+            if (val && !coverages[desc]) coverages[desc] = val;
+        }
+        // ── 5CVG: coverages (commercial auto) ───────────────────────────────
+        const CVG_LABELS = {
+            CSL:  'Liability Limits',       // = Combined Single Limit
+            UMCSL:'Uninsured Motorist CSL',
+            COMP: 'Comprehensive Deductible',
+            COLL: 'Collision Deductible',
+            MTRTK:'Motor Truck Cargo',
+            MTC:  'Motor Truck Cargo',      // alternate cargo code
+            MTGL: 'General Liability',      // GL occurrence/aggregate
+            MEDPM:'Medical Payments',
+            GLCBI:'General Liability BI',
+            GLCPD:'General Liability PD',
+            PRDCO:'Products/Completed Ops',
+            PIADV:'Personal Injury/Advertising',
+            FIRDM:'Fire Damage Liability',
+            MDEXP:'Medical Expense',
+            UMAUTO:'Uninsured Motorist',
+            UMPD: 'UM Property Damage',
+        };
+        const CVG_SKIP = new Set(['EFTD','POLFE','HODIS','MCAR','AQD','LFREE','PPLSD','MULTI','SNGL']);
+        for (const b of (by['5CVG'] || [])) {
+            const code = b.substring(30, 35).trim();
+            if (CVG_SKIP.has(code)) continue;
+            const desc = CVG_LABELS[code] || code;
+            if (!desc || coverages[desc]) continue;
+            const body = b.substring(35);
+            const pm = body.match(/(\d{8,12})\+/);
+            const covPrem = pm ? parseInt(pm[1]) / 100 : 0;
+            const limNums = (body.match(/0\d{9}/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x < 1000000000);
+            let val = '';
+            if (limNums.length >= 2) val = `$${limNums[0].toLocaleString()}/$${limNums[1].toLocaleString()}`;
+            else if (limNums.length === 1) val = `$${limNums[0].toLocaleString()}`;
+            if (covPrem > 0) val += (val ? ' ' : '') + `($${Math.round(covPrem)}/yr)`;
+            if (val) coverages[desc] = val;
+        }
+
+        // ── 5DRV: drivers (personal auto) ───────────────────────────────────
+        const drivers = [];
+        for (const b of (by['5DRV'] || [])) {
+            const de = b[38] || 'P';
+            let dn = '';
+            if (de === 'C' || de === 'B') {
+                dn = clean(b.substring(39, 90));
+            } else {
+                const df = clean(b.substring(47, 63));
+                const dm = clean(b.substring(63, 74));
+                const dl = clean(b.substring(74, 94));
+                dn = [df, dm, dl].filter(Boolean).join(' ');
+            }
+            const lic      = b.substring(107, 131).replace(/[?\x00\s]/g, '');
+            const licState = b.substring(132, 134).trim();
+            const dob      = fmtYYMMDD(b.substring(140, 146));
+            if (dn) drivers.push({ name: dn, licenseNumber: lic, licenseState: licState, dateOfBirth: dob });
+        }
+        // ── 6SDV: drivers (commercial auto) ─────────────────────────────────
+        for (const b of (by['6SDV'] || [])) {
+            const dn       = clean(b.substring(39, 98));
+            const dob      = fmtYYMMDD(b.substring(98, 104));
+            const lic      = b.substring(105, 129).replace(/[?\x00\s]/g, '');
+            const licState = b.substring(129, 131).trim();
+            if (dn) drivers.push({ name: dn, licenseNumber: lic, licenseState: licState, dateOfBirth: dob });
+        }
+
+        if (insuredName || policyNumber) {
+            policies.push({
+                policyNumber, insuredName,
+                firstName, lastName, middleName, suffix, entityType, companyName,
+                phone, email: '',
+                address, city, state, zip,
+                effectiveDate, expirationDate, premium,
+                lob: _ivansLobLabel(lobCode), carrier,
+                vehicles, drivers, coverages,
+            });
+        }
+    }
+
+    return policies.filter(p => p.insuredName || p.policyNumber);
+}
+
+function _ivansLobLabel(code) {
+    return ({ PAUTO:'Personal Auto', CAUTO:'Commercial Auto', SYNBN:'Commercial Auto',
+              PRTBN:'Personal Auto', HOME:'Homeowners', HO:'Homeowners',
+              COMMP:'Commercial Property', GL:'General Liability',
+              WC:"Workers' Comp", UMBRL:'Umbrella', BOAT:'Boat' })[code] || code || '';
+}
+function _ivansLobToType(lob) {
+    return ({
+        'Personal Auto':       'personal-auto',
+        'Commercial Auto':     'commercial-auto',
+        'Commercial':          'commercial-auto',
+        'Homeowners':          'homeowners',
+        'Commercial Property': 'commercial-property',
+        "General Liability":   'general-liability',
+        "Workers' Comp":       'workers-comp',
+        'Umbrella':            'umbrella',
+        'Boat':                'boat',
+    })[lob] || (lob && lob.toLowerCase().includes('commercial') ? 'commercial-auto' : 'personal-auto');
+}
+
+function parseAcordXML(content) {
+    const doc = new DOMParser().parseFromString(content, 'application/xml');
+    const getText = (parent, ...selectors) => {
+        for (const sel of selectors) {
+            try { const el = parent.querySelector(sel); if (el && el.textContent.trim()) return el.textContent.trim(); } catch(e) {}
+        }
+        return '';
+    };
+    const policies = [];
+    const policyNodes = Array.from(doc.querySelectorAll('PersPolicy,CommlPolicy,Policy'));
+    if (!policyNodes.length) {
+        // Try flat structure
+        const pNums = Array.from(doc.querySelectorAll('PolicyNumber,PolNumber'));
+        pNums.forEach(pn => {
+            const root = pn.parentElement || doc;
+            policies.push({
+                policyNumber: pn.textContent.trim(),
+                insuredName: getText(root, 'CommercialName','FullName','GivenName'),
+                carrier: getText(root, 'InsurerName','CompanyName'),
+                effectiveDate: getText(root, 'EffectiveDt'),
+                expirationDate: getText(root, 'ExpirationDt'),
+                premium: getText(root, 'Amt','TotalPremiumAmt','WrittenPremiumAmt'),
+                lob: getText(root, 'LOBCd','LineOfBusiness'),
+                phone: getText(root, 'PhoneNumber'),
+                email: getText(root, 'EmailAddr'),
+            });
+        });
+        return policies.filter(p => p.policyNumber);
+    }
+    policyNodes.forEach(pn => {
+        const ctx = pn.closest('PersAutoPolicyAddRs,CommlAutoPolicyAddRs,PolicyAddRs,InsuranceSvcRs') || doc.documentElement;
+        const insNode = ctx.querySelector('InsuredOrPrincipal,Insured');
+        policies.push({
+            policyNumber: getText(pn, 'PolicyNumber','PolNumber'),
+            insuredName: insNode ? getText(insNode,'CommercialName','FullName','GivenName') : '',
+            carrier: getText(ctx,'InsurerName','CompanyName'),
+            effectiveDate: getText(pn,'EffectiveDt'),
+            expirationDate: getText(pn,'ExpirationDt'),
+            premium: getText(pn,'Amt','TotalPremiumAmt','CurrentTermAmt Amt','WrittenPremiumAmt'),
+            lob: getText(pn,'LOBCd','LineOfBusiness'),
+            phone: insNode ? getText(insNode,'PhoneNumber') : '',
+            email: insNode ? getText(insNode,'EmailAddr') : '',
+        });
+    });
+    return policies.filter(p => p.policyNumber || p.insuredName);
+}
+
+function parseAcordAL3(content) {
+    const lines = content.split(/\r\n|\r|\n/);
+    const policies = [];
+    let cur = null;
+
+    const segType = l => l.substring(0,6).trim().toUpperCase();
+    // AL3 can be pipe-delimited or fixed-width — try pipe first, fall back to positional
+    const field = (line, pipeIdx, start, len) => {
+        const parts = line.split('|');
+        if (parts.length > pipeIdx) return (parts[pipeIdx]||'').trim();
+        return line.length > start ? line.substring(start, start+len).trim() : '';
+    };
+    const fmtDate = raw => {
+        const d = (raw||'').replace(/[^\d]/g,'');
+        if (d.length === 8) {
+            if (parseInt(d.substring(0,4)) > 1900) return `${d.substring(4,6)}/${d.substring(6,8)}/${d.substring(0,4)}`;
+            return `${d.substring(0,2)}/${d.substring(2,4)}/${d.substring(4,8)}`;
+        }
+        return raw||'';
+    };
+
+    for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        if (!line) continue;
+        const seg = segType(line);
+        switch(seg) {
+            case 'POLHDR': case 'PHPOL': case 'BPOL': {
+                if (cur) policies.push(cur);
+                cur = {
+                    policyNumber: field(line,1,6,18).replace(/\s+/g,''),
+                    insuredName:'', phone:'', email:'',
+                    effectiveDate: fmtDate(field(line,2,24,8)),
+                    expirationDate: fmtDate(field(line,3,32,8)),
+                    premium:'',
+                    lob: field(line,4,40,6),
+                    carrier:'',
+                };
+                break;
+            }
+            case 'INSNME': case 'NAMADD': case 'INSNAM': case 'NAME': {
+                if (!cur) cur = {policyNumber:'',insuredName:'',phone:'',email:'',effectiveDate:'',expirationDate:'',premium:'',lob:'',carrier:''};
+                const nm = field(line,1,6,60);
+                if (nm && !cur.insuredName) cur.insuredName = nm;
+                break;
+            }
+            case 'PREMUM': case 'PREIFO': case 'PRMPOL': case 'PREM': {
+                if (cur) { const v = field(line,1,6,14); if (/[\d.]/.test(v)) cur.premium = v.replace(/[^\d.]/g,''); }
+                break;
+            }
+            case 'TELENO': case 'CONTCT': case 'PHONE': {
+                if (cur && !cur.phone) { const ph = field(line,1,6,14).replace(/[^\d]/g,''); if (ph.length >= 7) cur.phone = ph; }
+                break;
+            }
+            case 'EMAIL': case 'EADDR': {
+                if (cur && !cur.email) { const em = field(line,1,6,80); if (em.includes('@')) cur.email = em; }
+                break;
+            }
+            case 'CMPNAM': case 'INSCO': case 'CARNAM': {
+                if (cur && !cur.carrier) { const cn = field(line,1,6,40); if (cn) cur.carrier = cn; }
+                break;
+            }
+        }
+        // Also try to catch policy numbers if no POLHDR found yet
+        if (!cur && /^\d{6,12}\s/.test(line.trim())) {
+            const m = line.trim().match(/^(\d{6,12})/);
+            if (m) cur = {policyNumber:m[1],insuredName:'',phone:'',email:'',effectiveDate:'',expirationDate:'',premium:'',lob:'',carrier:''};
+        }
+    }
+    if (cur) policies.push(cur);
+    return policies.filter(p => p.policyNumber || p.insuredName);
+}
+
+function showIvansReview(parsedPolicies) {
+    const reviewEl = document.getElementById('ivans-review-area');
+    if (!reviewEl) return;
+
+    const existing = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+
+    const annotated = parsedPolicies.map(p => {
+        const pNum = (p.policyNumber||'').replace(/\s+/g,'').toLowerCase();
+        const match = pNum ? existing.find(ep => {
+            const epNum = (ep.policyNumber || ep.financial?.['Policy Number'] || '').replace(/\s+/g,'').toLowerCase();
+            return epNum && epNum === pNum;
+        }) : null;
+        return { ...p, _match: match||null, _id: match ? match.id : null };
+    });
+
+    // Tag source filename for history tracking
+    annotated.forEach(p => { p._srcFile = (parsedPolicies[0]||{})._srcFile || 'upload'; });
+    window._ivansReviewData = annotated;
+    const upd = annotated.filter(p => p._match).length;
+    const newc = annotated.filter(p => !p._match).length;
+
+    const agentOpts = ['Grant','Hunter','Carson','Maureen'];
+    const agentOptHtml = `<option value="">Unassigned</option>` + agentOpts.map(a => `<option>${a}</option>`).join('');
+
+    reviewEl.innerHTML = `
+    <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-top:16px;">
+        <div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;gap:12px;align-items:center;">
+                <span style="font-size:13px;font-weight:700;color:#374151;">Review &amp; Confirm</span>
+                ${upd ? `<span style="background:#dbeafe;color:#1e40af;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;"><i class="fas fa-sync-alt" style="font-size:9px;"></i> ${upd} Update${upd!==1?'s':''}</span>` : ''}
+                ${newc ? `<span style="background:#dcfce7;color:#15803d;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;"><i class="fas fa-plus" style="font-size:9px;"></i> ${newc} New</span>` : ''}
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <label style="font-size:11px;font-weight:600;color:#64748b;white-space:nowrap;">Default Producer:</label>
+                <select id="ivans-default-producer" onchange="ivansApplyDefaultProducer(this.value)"
+                        style="font-size:11px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#374151;cursor:pointer;">
+                    <option value="">— Select —</option>
+                    ${agentOpts.map(a=>`<option>${a}</option>`).join('')}
+                </select>
+                <span style="width:1px;height:16px;background:#e2e8f0;"></span>
+                <button onclick="ivansSelectAll(true)" style="font-size:11px;padding:4px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;color:#374151;">All</button>
+                <button onclick="ivansSelectAll(false)" style="font-size:11px;padding:4px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;color:#374151;">None</button>
+            </div>
+        </div>
+        <div style="overflow-x:auto;max-height:340px;overflow-y:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead style="position:sticky;top:0;z-index:1;">
+                    <tr style="background:#f1f5f9;">
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;width:32px;"></th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Policy #</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Insured Name</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Carrier</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Effective</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Expires</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Premium</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Action</th>
+                        <th style="padding:8px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:2px solid #e2e8f0;">Producer</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${annotated.map((p,i) => {
+                        const isUpd = !!p._match;
+                        const badge = isUpd
+                            ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;">UPDATE</span>`
+                            : `<span style="background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;">NEW</span>`;
+                        const prem = p.premium ? '$' + parseFloat(p.premium||0).toLocaleString() + '/yr' : '—';
+                        const rowBg = isUpd ? '' : 'background:#f0fdf4;';
+                        // Pre-fill producer from existing policy if available
+                        const existAgent = p._match ? (p._match.agent || p._match.assignedTo || p._match.producer || '') : '';
+                        const producerSel = `<select id="ivans-producer-${i}" class="ivans-producer-sel"
+                            style="font-size:11px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#374151;cursor:pointer;min-width:90px;">
+                            <option value=""${!existAgent?'selected':''}>Unassigned</option>
+                            ${agentOpts.map(a=>`<option${existAgent===a?' selected':''}>${a}</option>`).join('')}
+                        </select>`;
+                        return `<tr style="${rowBg}border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:8px 10px;"><input type="checkbox" class="ivans-row-cb" data-idx="${i}" checked style="width:14px;height:14px;accent-color:#0284c7;cursor:pointer;"></td>
+                            <td style="padding:8px 10px;font-weight:700;color:#1e40af;font-family:monospace;font-size:11px;">${p.policyNumber||'—'}</td>
+                            <td style="padding:8px 10px;color:#111827;font-weight:500;">${p.insuredName||'—'}</td>
+                            <td style="padding:8px 10px;color:#374151;">${p.carrier||'—'}</td>
+                            <td style="padding:8px 10px;color:#374151;">${p.effectiveDate||'—'}</td>
+                            <td style="padding:8px 10px;color:#374151;">${p.expirationDate||'—'}</td>
+                            <td style="padding:8px 10px;font-weight:600;color:#059669;">${prem}</td>
+                            <td style="padding:8px 10px;">${badge}</td>
+                            <td style="padding:8px 10px;">${producerSel}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div style="padding:14px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:12px;color:#64748b;">Unchecked rows will be skipped</span>
+            <div style="display:flex;gap:10px;">
+                <button onclick="document.getElementById('ivans-upload-overlay').remove()" style="padding:8px 16px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:13px;color:#374151;">Cancel</button>
+                <button id="ivans-confirm-btn" onclick="confirmIvansImport()" style="padding:8px 20px;background:#0284c7;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;color:#fff;"><i class="fas fa-check"></i> Confirm &amp; Import</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function ivansSelectAll(val) {
+    document.querySelectorAll('.ivans-row-cb').forEach(cb => cb.checked = val);
+}
+
+function ivansApplyDefaultProducer(producer) {
+    if (!producer) return;
+    document.querySelectorAll('.ivans-producer-sel').forEach(sel => {
+        if (!sel.value) sel.value = producer; // only fill unassigned rows
+    });
+}
+
+async function confirmIvansImport() {
+    const data = window._ivansReviewData;
+    if (!data) return;
+
+    const checked = Array.from(document.querySelectorAll('.ivans-row-cb:checked')).map(cb => parseInt(cb.dataset.idx));
+    const selected = checked.map(i => ({
+        ...data[i],
+        _producer: document.getElementById(`ivans-producer-${i}`)?.value || ''
+    }));
+    if (!selected.length) { if (window.showNotification) showNotification('No policies selected', 'warning'); return; }
+
+    const btn = document.getElementById('ivans-confirm-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing…'; }
+
+    let updated = 0, created = 0;
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+
+    for (const p of selected) {
+        if (p._match && p._id) {
+            // UPDATE existing policy
+            const idx = policies.findIndex(ep => ep.id === p._id);
+            if (idx >= 0) {
+                if (p.effectiveDate)  policies[idx].effectiveDate  = p.effectiveDate;
+                if (p.expirationDate) policies[idx].expirationDate = p.expirationDate;
+                if (p.carrier)        policies[idx].carrier        = p.carrier;
+                if (p.lob) {
+                    policies[idx].lob = p.lob;
+                    const pt = _ivansLobToType(p.lob);
+                    if (pt) policies[idx].policyType = pt;
+                }
+                if (p.insuredName) {
+                    if (!policies[idx].clientName) policies[idx].clientName = p.insuredName;
+                    if (!policies[idx].client) policies[idx].client = p.insuredName;
+                }
+                if (p._producer) {
+                    policies[idx].agent      = p._producer;
+                    policies[idx].assignedTo = p._producer;
+                    policies[idx].producer   = p._producer;
+                }
+                if (p.premium) {
+                    const n = parseFloat(p.premium);
+                    if (!isNaN(n)) {
+                        policies[idx].premium = `$${n.toLocaleString()}/yr`;
+                        if (!policies[idx].financial) policies[idx].financial = {};
+                        policies[idx].financial['Annual Premium'] = n;
+                    }
+                }
+                // Named insured
+                const insObj = policies[idx].insured || {};
+                if (p.entityType === 'C' || p.entityType === 'B') {
+                    if (p.companyName) insObj['Business Name'] = p.companyName;
+                    insObj['Entity Type'] = 'Commercial';
+                } else {
+                    if (p.firstName)   insObj['First Name']   = p.firstName;
+                    if (p.middleName)  insObj['Middle Name']  = p.middleName;
+                    if (p.lastName)    insObj['Last Name']    = p.lastName;
+                    if (p.suffix)      insObj['Suffix']       = p.suffix;
+                    if (p.insuredName) insObj['Full Name']    = p.insuredName;
+                }
+                policies[idx].insured = insObj;
+                // Contact
+                const conObj = policies[idx].contact || {};
+                const isCommEnt = (p.entityType === 'C' || p.entityType === 'B');
+                if (isCommEnt) {
+                    // Commercial: owner = the individual behind the business (first principal driver)
+                    const principal = p.drivers?.[0]?.name || '';
+                    if (principal) conObj['Owner Name'] = principal;
+                    // Keep business name separate (already in insured object)
+                    conObj['Business Name'] = p.companyName || p.insuredName || '';
+                } else {
+                    if (p.insuredName) conObj['Owner Name'] = p.insuredName;
+                }
+                const ownerDob = (p.drivers && p.drivers[0]?.dateOfBirth) ? p.drivers[0].dateOfBirth : '';
+                if (ownerDob) conObj['Date of Birth'] = ownerDob;
+                if (p.address) conObj['Address']  = p.address;
+                if (p.city)    conObj['City']     = p.city;
+                if (p.state)   conObj['State']    = p.state;
+                if (p.zip)     conObj['Zip Code'] = p.zip;
+                if (p.phone)   conObj['Phone']    = p.phone;
+                policies[idx].contact = conObj;
+                // Coverage, vehicles, drivers
+                if (p.coverages && Object.keys(p.coverages).length)
+                    policies[idx].coverage = Object.assign({}, policies[idx].coverage || {}, p.coverages);
+                if (p.vehicles && p.vehicles.length) policies[idx].vehicles = p.vehicles;
+                if (p.drivers  && p.drivers.length)  policies[idx].drivers  = p.drivers;
+                policies[idx].ivansUpdated = new Date().toISOString();
+                updated++;
+                // Upsert client record FIRST so clientId is set before server sync
+                await _ivansUpsertClient(policies[idx]);
+                // Sync to server (now includes clientId)
+                try {
+                    const r = await fetch(`/api/policies/${p._id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(policies[idx]) });
+                    if (!r.ok) console.warn(`IVANS: PUT /api/policies/${p._id} failed (${r.status}) — falling back to POST upsert`);
+                    if (!r.ok) {
+                        await fetch('/api/policies', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(policies[idx]) });
+                    }
+                } catch(e) { console.warn('IVANS: server sync error (update):', e); }
+            }
+        } else {
+            // CREATE new policy
+            const newId = `POL-${Date.now()}-${Math.random().toString(36).substr(2,8)}`;
+            const n = p.premium ? parseFloat(p.premium) : 0;
+            const polType = _ivansLobToType(p.lob);
+            // Build insured object
+            const insObj = {};
+            if (p.entityType === 'C' || p.entityType === 'B') {
+                if (p.companyName) insObj['Business Name'] = p.companyName;
+                insObj['Entity Type'] = 'Commercial';
+            } else {
+                if (p.firstName)   insObj['First Name']  = p.firstName;
+                if (p.middleName)  insObj['Middle Name'] = p.middleName;
+                if (p.lastName)    insObj['Last Name']   = p.lastName;
+                if (p.suffix)      insObj['Suffix']      = p.suffix;
+                if (p.insuredName) insObj['Full Name']   = p.insuredName;
+            }
+            // Build contact object
+            const conObj = {};
+            const isCommEntNew = (p.entityType === 'C' || p.entityType === 'B');
+            if (isCommEntNew) {
+                const principal = p.drivers?.[0]?.name || '';
+                if (principal) conObj['Owner Name'] = principal;
+                conObj['Business Name'] = p.companyName || p.insuredName || '';
+            } else {
+                if (p.insuredName) conObj['Owner Name'] = p.insuredName;
+            }
+            const ownerDobNew = (p.drivers && p.drivers[0]?.dateOfBirth) ? p.drivers[0].dateOfBirth : '';
+            if (ownerDobNew) conObj['Date of Birth'] = ownerDobNew;
+            if (p.address) conObj['Address']  = p.address;
+            if (p.city)    conObj['City']     = p.city;
+            if (p.state)   conObj['State']    = p.state;
+            if (p.zip)     conObj['Zip Code'] = p.zip;
+            if (p.phone)   conObj['Phone']    = p.phone;
+            const newPol = {
+                id:             newId,
+                policyNumber:   (p.policyNumber||'').replace(/\s+/g,''),
+                policyType:     polType,
+                insuredName:    p.insuredName||'',
+                clientName:     p.insuredName||'',
+                client:         p.insuredName||'',
+                carrier:        p.carrier||'',
+                effectiveDate:  p.effectiveDate||'',
+                expirationDate: p.expirationDate||'',
+                premium:        n ? `$${n.toLocaleString()}/yr` : '',
+                financial:      { 'Annual Premium': n||0 },
+                lob:            p.lob||'',
+                policyStatus:   'active',
+                source:         'ivans',
+                createdAt:      Date.now(),
+                ivansUpdated:   new Date().toISOString(),
+                insured:        insObj,
+                contact:        conObj,
+                coverage:       p.coverages || {},
+                vehicles:       p.vehicles  || [],
+                drivers:        p.drivers   || [],
+                agent:          p._producer || '',
+                assignedTo:     p._producer || '',
+                producer:       p._producer || '',
+            };
+            policies.push(newPol);
+            created++;
+            try {
+                const r = await fetch('/api/policies', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newPol) });
+                if (!r.ok) console.warn(`IVANS: POST /api/policies failed (${r.status})`);
+            } catch(e) { console.warn('IVANS: server sync error (create):', e); }
+            // Upsert client record and link policy
+            await _ivansUpsertClient(newPol);
+        }
+    }
+
+    localStorage.setItem('insurance_policies', JSON.stringify(policies));
+
+    // Run client upsert on ALL existing policies so clients stay in sync even for
+    // policies not included in this AL3 batch (incremental IVANS downloads).
+    const allPoliciesForClients = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    for (const pol of allPoliciesForClients) {
+        await _ivansUpsertClient(pol);
+    }
+    localStorage.setItem('insurance_policies', JSON.stringify(allPoliciesForClients));
+
+    // Dedup clients with same identity key — keep older, re-link policies to it, delete newer duplicate
+    {
+        const dedupClients  = JSON.parse(localStorage.getItem('insurance_clients')  || '[]');
+        const dedupPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const keyToId = {}; // identity key → client id to keep
+        const mergeMap = {}; // removedId → keepId
+        for (const c of dedupClients) {
+            const cn = c.name || c.businessName || '';
+            const cd = c.dateOfBirth || c['Date of Birth'] || '';
+            const ck = _clientIdentityKey(cn, cd);
+            if (!ck) continue;
+            if (keyToId[ck]) {
+                mergeMap[c.id] = keyToId[ck]; // remove c, keep the earlier one
+            } else {
+                keyToId[ck] = c.id;
+            }
+        }
+        const removeIds = new Set(Object.keys(mergeMap));
+        if (removeIds.size > 0) {
+            let policyChanged = false;
+            for (const pol of dedupPolicies) {
+                if (pol.clientId && removeIds.has(String(pol.clientId))) {
+                    pol.clientId = mergeMap[String(pol.clientId)];
+                    policyChanged = true;
+                }
+            }
+            const cleanedClients = dedupClients.filter(c => !removeIds.has(String(c.id)));
+            localStorage.setItem('insurance_clients',  JSON.stringify(cleanedClients));
+            if (policyChanged) localStorage.setItem('insurance_policies', JSON.stringify(dedupPolicies));
+            for (const rid of removeIds) {
+                fetch(`/api/clients/${rid}`, { method: 'DELETE' }).catch(() => {});
+            }
+        }
+    }
+
+    // Save import history entry
+    const hist = JSON.parse(localStorage.getItem('ivans_import_history') || '[]');
+    const srcFilename = (window._ivansReviewData && window._ivansReviewData[0] && window._ivansReviewData[0]._srcFile) || 'unknown';
+    hist.push({ timestamp: new Date().toISOString(), filename: srcFilename, updated, created });
+    if (hist.length > 100) hist.splice(0, hist.length - 100); // keep last 100
+    localStorage.setItem('ivans_import_history', JSON.stringify(hist));
+
+    document.getElementById('ivans-upload-overlay').remove();
+
+    const msg = [updated && `${updated} polic${updated!==1?'ies':'y'} updated`, created && `${created} polic${created!==1?'ies':'y'} created`].filter(Boolean).join(', ');
+    if (window.showNotification) showNotification(`IVANS import complete — ${msg}`, 'success');
+
+    // Refresh IVANS history panel if on settings page
+    if (typeof initIvansSettingsPanel === 'function' && document.getElementById('ivans-import-history')) initIvansSettingsPanel();
+
+    // Refresh policies view (navigate to it if not already there, or reload if visible)
+    if (document.querySelector('.policies-view') && typeof loadPoliciesView === 'function') {
+        loadPoliciesView();
+    } else if (document.querySelector('.clients-view') && typeof loadClientsView === 'function') {
+        loadClientsView();
+    }
+}
+
+// Normalize owner identity key: name+DOB for individuals, name alone for commercial
+function _clientIdentityKey(ownerName, dob) {
+    const n = (ownerName || '').toLowerCase()
+        .replace(/\band\b/g, '')          // "AND" == "&" (JCW AND SONS == JCW & SONS)
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ').trim();
+    if (!n) return null;
+    return dob ? `${n}|${dob}` : n;
+}
+
+async function _ivansUpsertClient(policy) {
+    const isCommercialEnt = policy.insured?.['Entity Type'] === 'Commercial' ||
+                            !!policy.contact?.['Business Name'] ||
+                            (policy.policyType || '').toLowerCase().includes('commercial');
+
+    const rawOwnerName = policy.contact?.['Owner Name'] || '';
+    // If ownerName looks like a business entity (old imports stored biz name as owner), treat as empty
+    const BIZ_SUFFIX = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|ltd|limited|lp|l\.p|trucking|transport|transportation|logistics|hauling|construction|farms|enterprises|services|solutions|towing)\b/i;
+    const ownerName  = BIZ_SUFFIX.test(rawOwnerName) ? '' : rawOwnerName;
+    const bizName    = policy.contact?.['Business Name'] || (isCommercialEnt ? (policy.insuredName || policy.clientName || '') : '');
+    const dob        = policy.contact?.['Date of Birth'] || '';
+
+    // Client identity is ALWAYS based on the owner person + DOB.
+    // For commercial: use owner name if available, fall back to business name (no DOB).
+    const identName  = ownerName || (isCommercialEnt ? bizName : (policy.insuredName || policy.clientName || ''));
+    const identDob   = ownerName ? dob : '';   // only use DOB when we have a real person name
+    if (!identName) return;
+
+    const identKey = _clientIdentityKey(identName, identDob);
+    if (!identKey) return;
+
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+
+    // First: if policy already has a clientId, reuse that client ONLY if its identity matches
+    // (prevents old business-named clientId from blocking creation of the real person client)
+    let client = null;
+    if (policy.clientId) {
+        const existing = clients.find(c => String(c.id) === String(policy.clientId));
+        if (existing) {
+            const existingDob = existing.dateOfBirth || existing['Date of Birth'] || '';
+            const existingKey = _clientIdentityKey(existing.name || existing.businessName || '', existingDob);
+            // Only reuse if identity matches — otherwise fall through to search/create correct client
+            if (existingKey && existingKey === identKey) client = existing;
+        }
+    }
+
+    // Fallback: find existing client by identity key (owner name + DOB)
+    if (!client) {
+        client = clients.find(c => {
+            const cn = c.name || c.businessName || '';
+            const cdob = c.dateOfBirth || c['Date of Birth'] || '';
+            return _clientIdentityKey(cn, cdob) === identKey;
+        });
+    }
+    // Fall back to business name match when person identity is unknown (no valid ownerName)
+    if (!client && isCommercialEnt && bizName && !ownerName) {
+        const bizKey = _clientIdentityKey(bizName, '');
+        client = clients.find(c => {
+            const cbiz = c.businessName || (c.type === 'Commercial Lines' ? c.name : '');
+            return bizKey && _clientIdentityKey(cbiz, '') === bizKey;
+        });
+    }
+
+    if (client) {
+        // Update missing fields
+        let changed = false;
+        if (!client.phone && policy.contact?.['Phone'])    { client.phone = policy.contact['Phone']; changed = true; }
+        if (!client.email && policy.contact?.['Email'])    { client.email = policy.contact['Email']; changed = true; }
+        if (!client.address && policy.contact?.['Address']){ client.address = policy.contact['Address']; changed = true; }
+        if (!client.dateOfBirth && dob)                    { client.dateOfBirth = dob; changed = true; }
+        if (isCommercialEnt && bizName && !client.businessName) { client.businessName = bizName; changed = true; }
+        const pol_agent = policy.agent || policy.assignedTo || '';
+        if (pol_agent && !client.assignedTo) { client.assignedTo = pol_agent; client.agent = pol_agent; changed = true; }
+        if (changed) {
+            client.ivansUpdated = new Date().toISOString();
+            localStorage.setItem('insurance_clients', JSON.stringify(clients));
+            fetch('/api/clients', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(client) }).catch(()=>{});
+        }
+    } else {
+        // Create new client
+        client = {
+            id:           String(Date.now()) + Math.random().toString(36).substr(2, 5),
+            // Client name = the PERSON (owner). Business name stored separately.
+            name:         identName,
+            businessName: isCommercialEnt ? bizName : '',
+            phone:        policy.contact?.['Phone'] || '',
+            email:        policy.contact?.['Email'] || '',
+            address:      policy.contact?.['Address'] || '',
+            city:         policy.contact?.['City'] || '',
+            state:        policy.contact?.['State'] || '',
+            zip:          policy.contact?.['Zip Code'] || '',
+            dateOfBirth:  dob,
+            type:         isCommercialEnt ? 'Commercial Lines' : 'Personal Lines',
+            assignedTo:   policy.agent || policy.assignedTo || '',
+            agent:        policy.agent || policy.assignedTo || '',
+            source:       'ivans',
+            ivansUpdated: new Date().toISOString(),
+            createdAt:    Date.now(),
+        };
+        clients.push(client);
+        localStorage.setItem('insurance_clients', JSON.stringify(clients));
+        try {
+            const r = await fetch('/api/clients', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(client) });
+            if (r.ok) { const saved = await r.json(); if (saved.id) client.id = saved.id; }
+        } catch(e) { console.warn('IVANS: client create server sync error:', e); }
+        // Re-save with server-assigned id if changed
+        localStorage.setItem('insurance_clients', JSON.stringify(clients));
+    }
+
+    // Link policy to this client
+    if (policy.clientId !== client.id) {
+        policy.clientId   = client.id;
+        policy.clientName = client.name;
+        // Persist the policy update locally (caller already saved to localStorage)
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const idx = policies.findIndex(p => p.id === policy.id);
+        if (idx >= 0) {
+            policies[idx].clientId   = client.id;
+            policies[idx].clientName = client.name;
+            localStorage.setItem('insurance_policies', JSON.stringify(policies));
+        }
+    }
+}
+
+async function ivansImportFromServer(fileId, filename, btn) {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading…'; }
+    try {
+        const res = await fetch(`/api/agency-files/${fileId}/content`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Failed to read file');
+
+        const policies = parseIvansFile(data.content, data.filename || filename);
+        policies.forEach(p => p._srcFile = filename);
+
+        if (!policies.length) {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Import'; }
+            if (window.showNotification) showNotification('No policies found in ' + filename, 'warning');
+            return;
+        }
+
+        // Open the IVANS review modal
+        showIvansUpload();
+        // Small delay to let modal render, then inject the results
+        setTimeout(() => {
+            const statusEl = document.getElementById('ivans-parse-status');
+            if (statusEl) statusEl.innerHTML = `<div style="color:#15803d;font-size:13px;font-weight:600;padding:8px 14px;background:#f0fdf4;border-radius:8px;border:1px solid #86efac;"><i class="fas fa-check-circle"></i> Found <strong>${policies.length}</strong> polic${policies.length===1?'y':'ies'} in ${filename}</div>`;
+            showIvansReview(policies);
+        }, 150);
+
+    } catch(e) {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Import'; }
+        if (window.showNotification) showNotification('Import error: ' + e.message, 'error');
+    }
+}
+
+// ── End IVANS Download Import ─────────────────────────────────────────────────
+
 function importClients() {
     console.log('Importing clients');
     // Would open import wizard
@@ -19875,17 +20976,40 @@ function generateViewTabContent(tabId, policy) {
             
         case 'contact':
             const contactData = policy.contact || {};
+            const isCommContact = policy.insured?.['Entity Type'] === 'Commercial' || !!contactData['Business Name'];
+            const ownerName = contactData['Owner Name'] || '';
+            const businessNameC = contactData['Business Name'] || (isCommContact ? (policy.insuredName || policy.clientName || '') : '');
+            const ownerDob  = contactData['Date of Birth'] || '';
+            const contactFields = Object.entries(contactData).filter(([k]) => !['Owner Name','Date of Birth','Business Name'].includes(k));
             return `
+                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 20px;">
+                    <h3 style="margin-top: 0; margin-bottom: 24px; color: #111827; font-size: 22px; font-weight: 600;">Named Insured / Owner</h3>
+                    <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
+                        ${isCommContact && businessNameC ? `
+                        <div class="view-item">
+                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Business Name</label>
+                            <p style="font-size: 17px; font-weight: 600; margin: 0; color: #111827;">${businessNameC}</p>
+                        </div>` : ''}
+                        <div class="view-item">
+                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${isCommContact ? 'Owner / Principal' : 'Owner Name'}</label>
+                            <p style="font-size: 17px; font-weight: 600; margin: 0; color: #111827;">${ownerName || (isCommContact ? 'N/A' : (policy.insuredName || policy.clientName || 'N/A'))}</p>
+                        </div>
+                        <div class="view-item">
+                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Date of Birth</label>
+                            <p style="font-size: 17px; margin: 0; color: #374151;">${ownerDob || 'N/A'}</p>
+                        </div>
+                    </div>
+                </div>
                 <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
                     <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Contact Information</h3>
                     <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
-                        ${Object.entries(contactData).map(([key, value]) => `
+                        ${contactFields.map(([key, value]) => `
                             <div class="view-item">
                                 <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${key}</label>
                                 <p style="font-size: 17px; margin: 0; color: #374151;">${value || 'N/A'}</p>
                             </div>
                         `).join('')}
-                        ${Object.keys(contactData).length === 0 ? '<p style="color: #6b7280;">No contact information available</p>' : ''}
+                        ${contactFields.length === 0 ? '<p style="color: #6b7280;">No contact information available</p>' : ''}
                     </div>
                 </div>
             `;
@@ -19988,18 +21112,53 @@ function generateViewTabContent(tabId, policy) {
         case 'coverage':
             const coverageData = policy.coverage || {};
             const additionalCoveragesList = coverageData.additionalCoverages || [];
-            const coverageDataWithoutAdditional = Object.entries(coverageData).filter(([key]) => key !== 'additionalCoverages');
+            // Normalize raw IVANS codes and internal field IDs to display labels
+            const COVERAGE_DISPLAY_LABELS = {
+                'MTGL': 'General Liability', 'MEDPM': 'Medical Payments',
+                'MTC': 'Motor Truck Cargo', 'MTRTK': 'Motor Truck Cargo',
+                'CSL': 'Liability Limits', 'Combined Single Limit': 'Liability Limits',
+                'COMP': 'Comprehensive Deductible', 'Comprehensive': 'Comprehensive Deductible',
+                'COLL': 'Collision Deductible', 'Collision': 'Collision Deductible',
+                'UMCSL': 'Uninsured Motorist CSL', 'UNCSL': 'Uninsured Motorist CSL', 'UMAUTO': 'Uninsured Motorist',
+                'GLCBI': 'General Liability BI', 'GLCPD': 'General Liability PD',
+                'FIRDM': 'Fire Damage Liability', 'MDEXP': 'Medical Expense',
+                'UMPD': 'UM Property Damage',
+                'coverage-liability-limits': 'Liability Limits',
+                'coverage-general-aggregate': 'General Liability',
+                'coverage-comp-deduct': 'Comprehensive Deductible',
+                'coverage-coll-deduct': 'Collision Deductible',
+                'coverage-cargo-limit': 'Cargo Limit',
+                'coverage-cargo-deduct': 'Cargo Deductible',
+                'coverage-medical': 'Medical Payments',
+                'coverage-um-uim': 'Uninsured/Underinsured Motorist',
+                'coverage-trailer-interchange': 'Trailer Interchange',
+                'coverage-non-trucking': 'Non-Trucking Liability',
+                'coverage-reefer': 'Reefer Breakdown',
+            };
+            // Deduplicate: group by display label, prefer entry with real data over empty/N/A
+            const _deduped = new Map();
+            Object.entries(coverageData).forEach(([key, value]) => {
+                if (key === 'additionalCoverages') return;
+                const displayLabel = COVERAGE_DISPLAY_LABELS[key] || key;
+                const existing = _deduped.get(displayLabel);
+                // Prefer non-empty value; if existing already has real data keep it
+                if (!existing || (!existing.value && value)) {
+                    _deduped.set(displayLabel, { value });
+                }
+            });
+            // Filter out entries with no real value
+            const coverageEntries = [..._deduped.entries()].filter(([, entry]) => entry.value && String(entry.value).trim() !== '');
             return `
                 <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
                     <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Coverage Details</h3>
                     <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
-                        ${coverageDataWithoutAdditional.map(([key, value]) => `
+                        ${coverageEntries.map(([label, entry]) => `
                             <div class="view-item">
-                                <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${key}</label>
-                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${value || 'N/A'}</p>
+                                <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${label}</label>
+                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${entry.value}</p>
                             </div>
                         `).join('')}
-                        ${coverageDataWithoutAdditional.length === 0 ? '<p style="color: #6b7280;">No coverage information available</p>' : ''}
+                        ${coverageEntries.length === 0 ? '<p style="color: #6b7280;">No coverage information available</p>' : ''}
                     </div>
                     ${additionalCoveragesList.length > 0 ? `
                         <div style="margin-top: 30px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
@@ -20130,20 +21289,24 @@ function generateViewTabContent(tabId, policy) {
 }
 
 function switchViewTab(tabId) {
-    // Remove active class from all tabs and contents
+    // Remove active class and hide all tabs and contents
     document.querySelectorAll('#policyViewModal .tab-btn').forEach(btn => {
         btn.classList.remove('active');
     });
     document.querySelectorAll('#policyViewModal .tab-content').forEach(content => {
         content.classList.remove('active');
+        content.style.display = 'none';
     });
-    
-    // Add active class to selected tab and content
+
+    // Activate selected tab button and show selected content
     const selectedTab = document.querySelector(`#policyViewModal .tab-btn[data-tab="${tabId}"]`);
     const selectedContent = document.getElementById(`${tabId}-view-content`);
-    
+
     if (selectedTab) selectedTab.classList.add('active');
-    if (selectedContent) selectedContent.classList.add('active');
+    if (selectedContent) {
+        selectedContent.classList.add('active');
+        selectedContent.style.display = 'block';
+    }
 }
 
 function getPolicyTypeBadgeColor(policyType) {
@@ -21523,44 +22686,96 @@ function vdToggleListGroupStats(toggleEl) {
     }
 }
 
+// Shared helper: build profile overlay HTML with % stats + delta badges
+function _vdBuildProfileOverlay(opts) {
+    // opts: { id, icon, iconBg, title, subtitle, totalCalls, metrics }
+    // metrics: [{ label, rawVal, pct, avgPct, isGood, isNeutral }]
+    // For "Calls" metric: rawVal shown as count; others show as % of totalCalls
+    const legendHTML = `<div style="display:flex;gap:16px;align-items:center;margin-bottom:20px;padding:10px 14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+        <span style="font-size:12px;font-weight:600;color:#374151;">Legend:</span>
+        <span style="display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;"><span style="width:10px;height:10px;border-radius:50%;background:#bbf7d0;display:inline-block;"></span> Favourable</span>
+        <span style="display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;"><span style="width:10px;height:10px;border-radius:50%;background:#fecaca;display:inline-block;"></span> Unfavourable</span>
+        <span style="display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;"><span style="width:10px;height:10px;border-radius:50%;background:#e2e8f0;display:inline-block;"></span> Neutral</span>
+    </div>`;
+    const cardsHTML = opts.metrics.map(m => {
+        const delta = m.pct - m.avgPct;
+        const absDelta = Math.abs(delta).toFixed(1);
+        const sign = delta >= 0 ? '+' : '−';
+        let badgeBg, badgeColor, valColor;
+        if (m.isNeutral) {
+            badgeBg = '#e2e8f0'; badgeColor = '#64748b'; valColor = '#475569';
+        } else if (m.isGood) {
+            // Good metrics: higher = better (Calls, Sale)
+            if (delta > 0) { badgeBg = '#bbf7d0'; badgeColor = '#15803d'; valColor = '#15803d'; }
+            else if (delta < 0) { badgeBg = '#fecaca'; badgeColor = '#dc2626'; valColor = '#dc2626'; }
+            else { badgeBg = '#e2e8f0'; badgeColor = '#64748b'; valColor = '#475569'; }
+        } else {
+            // Bad metrics: lower = better (NI, NP, DROP, DNC)
+            if (delta < 0) { badgeBg = '#bbf7d0'; badgeColor = '#15803d'; valColor = '#15803d'; }
+            else if (delta > 0) { badgeBg = '#fecaca'; badgeColor = '#dc2626'; valColor = '#dc2626'; }
+            else { badgeBg = '#e2e8f0'; badgeColor = '#64748b'; valColor = '#475569'; }
+        }
+        const displayVal = m.isCount ? m.rawVal.toLocaleString() : m.pct.toFixed(1) + '%';
+        const displayAvg = m.isCount ? Math.round(m.avgPct).toLocaleString() : m.avgPct.toFixed(1) + '%';
+        const deltaLabel = m.isCount
+            ? `${sign}${Math.abs(Math.round(delta)).toLocaleString()}`
+            : `${sign}${absDelta}%`;
+        return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 16px;text-align:center;min-width:150px;flex:1;">
+            <div style="font-size:26px;font-weight:700;color:${valColor};line-height:1;">${displayVal}</div>
+            <div style="font-size:12px;font-weight:600;color:#374151;margin:6px 0 4px;">${m.label}</div>
+            <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">avg ${displayAvg}</div>
+            <span style="display:inline-block;padding:2px 8px;border-radius:20px;background:${badgeBg};color:${badgeColor};font-size:11px;font-weight:600;">${deltaLabel}</span>
+        </div>`;
+    }).join('');
+    return `<div style="background:#fff;border-radius:16px;width:90vw;max-width:860px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.35);" onclick="event.stopPropagation()">
+        <div style="background:${opts.iconBg||'linear-gradient(135deg,#1e3a5f,#0284c7)'};padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:center;gap:14px;">
+                <div style="width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;flex-shrink:0;"><i class="${opts.icon}"></i></div>
+                <div><div style="font-size:17px;font-weight:700;color:#fff;">${opts.title}</div><div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:2px;">${opts.subtitle}</div></div>
+            </div>
+            <button onclick="document.getElementById('${opts.id}').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;flex-shrink:0;">&times;</button>
+        </div>
+        <div style="padding:24px;">
+            ${legendHTML}
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">${cardsHTML}</div>
+        </div>
+    </div>`;
+}
+
 function vdViewCsAgentProfile(userId) {
     if (!window._llrData) return;
     const { agentDisp, agentSummary } = window._llrData;
     const myDisp = agentDisp[String(userId)] || {};
     const mySummary = (agentSummary||{})[String(userId)] || {};
     const agentName = _llrAgentName(userId);
-    // Use agentSummary.calls for real total calls; fall back to sum of tracked dispositions
     const myCalls = mySummary.calls || ((myDisp.A||0)+(myDisp.SALE||0)+(myDisp.NI||0)+(myDisp.NP||0)+(myDisp.DROP||0)+(myDisp.DNC||0));
+    const tc = myCalls || 1;
     const allAgentIds = Object.keys(agentDisp||{});
     const na = allAgentIds.length || 1;
-    const avgCalls = allAgentIds.reduce((s,uid) => {
-        const sum = (agentSummary||{})[uid] || {};
-        const d = agentDisp[uid] || {};
-        return s + (sum.calls || (d.A||0)+(d.SALE||0)+(d.NI||0)+(d.NP||0)+(d.DROP||0)+(d.DNC||0));
-    }, 0) / na;
-    const avg = k => allAgentIds.reduce((s,uid)=>s+((agentDisp[uid]||{})[k]||0),0)/na;
-    const avgs = {A:avg('A'),SALE:avg('SALE'),NI:avg('NI'),NP:avg('NP'),DROP:avg('DROP'),DNC:avg('DNC')};
-    const metrics=[
-        {label:'Calls',       my:myCalls,        avg:avgCalls},
-        {label:'Ans. Machine',my:myDisp.A||0,    avg:avgs.A},
-        {label:'Sale',        my:myDisp.SALE||0, avg:avgs.SALE},
-        {label:'Not Int.',    my:myDisp.NI||0,   avg:avgs.NI},
-        {label:'No Pitch',    my:myDisp.NP||0,   avg:avgs.NP},
-        {label:'DROP',        my:myDisp.DROP||0, avg:avgs.DROP},
-        {label:'DNC',         my:myDisp.DNC||0,  avg:avgs.DNC},
-    ];
-    document.querySelectorAll('#vd-cs-agent-profile-overlay').forEach(e=>e.remove());
-    const overlay=document.createElement('div');
-    overlay.id='vd-cs-agent-profile-overlay';
-    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
-    const cardsHTML=metrics.map(m=>{
-        let color='#6b7280',bg='#f9fafb',badge='';
-        if(m.my>m.avg){color='#16a34a';bg='#f0fdf4';badge='<span style="font-size:10px;color:#16a34a;display:block;margin-top:3px;">&#x25b2; above avg</span>';}
-        else if(m.my<m.avg){color='#dc2626';bg='#fef2f2';badge='<span style="font-size:10px;color:#dc2626;display:block;margin-top:3px;">&#x25bc; below avg</span>';}
-        else{badge='<span style="font-size:10px;color:#6b7280;display:block;margin-top:3px;">= avg</span>';}
-        return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;min-width:120px;"><div style="font-size:22px;font-weight:700;color:${color};">${Math.round(m.my)}</div><div style="font-size:11px;color:#6b7280;margin:4px 0 2px;">${m.label}</div><div style="font-size:10px;color:#9ca3af;">avg: ${m.avg.toFixed(1)}</div>${badge}</div>`;
-    }).join('');
-    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;width:90vw;max-width:900px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()"><div style="background:linear-gradient(135deg,#1e3a5f,#0284c7);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;"><div><h2 style="margin:0;color:#fff;font-size:18px;"><i class="fas fa-user" style="margin-right:10px;"></i>${agentName} <span style="font-size:13px;opacity:.7;">(${userId})</span></h2><p style="margin:4px 0 0;color:#bae6fd;font-size:12px;">Agent vs. Average Performance</p></div><button onclick="document.getElementById('vd-cs-agent-profile-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;">&times;</button></div><div style="padding:24px;"><div style="display:flex;gap:12px;flex-wrap:wrap;">${cardsHTML}</div></div></div>`;
+    const getAgentCalls = uid => { const s=(agentSummary||{})[uid]||{}; const d=agentDisp[uid]||{}; return s.calls||((d.A||0)+(d.SALE||0)+(d.NI||0)+(d.NP||0)+(d.DROP||0)+(d.DNC||0)); };
+    const avgCalls = allAgentIds.reduce((s,uid)=>s+getAgentCalls(uid),0)/na;
+    const avgPct = k => { const at=allAgentIds.reduce((s,uid)=>s+getAgentCalls(uid),0); return at>0 ? allAgentIds.reduce((s,uid)=>s+((agentDisp[uid]||{})[k]||0),0)/at*100 : 0; };
+    const overlayId = 'vd-cs-agent-profile-overlay';
+    document.querySelectorAll('#'+overlayId).forEach(e=>e.remove());
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
+    overlay.innerHTML = _vdBuildProfileOverlay({
+        id: overlayId,
+        icon: 'fas fa-user',
+        iconBg: 'linear-gradient(135deg,#1e3a5f,#0284c7)',
+        title: agentName,
+        subtitle: `Agent Profile · compared to ${na} agent${na!==1?'s':''}`,
+        metrics: [
+            { label:'Calls',        rawVal:myCalls,           pct:myCalls,        avgPct:avgCalls,       isCount:true,  isGood:true,    isNeutral:false },
+            { label:'Ans. Machine', rawVal:myDisp.A||0,       pct:(myDisp.A||0)/tc*100,   avgPct:avgPct('A'),   isCount:false, isGood:false,   isNeutral:true  },
+            { label:'Sale',         rawVal:myDisp.SALE||0,    pct:(myDisp.SALE||0)/tc*100, avgPct:avgPct('SALE'),isCount:false, isGood:true,    isNeutral:false },
+            { label:'Not Int.',     rawVal:myDisp.NI||0,      pct:(myDisp.NI||0)/tc*100,   avgPct:avgPct('NI'),  isCount:false, isGood:false,   isNeutral:false },
+            { label:'No Pitch',     rawVal:myDisp.NP||0,      pct:(myDisp.NP||0)/tc*100,   avgPct:avgPct('NP'),  isCount:false, isGood:false,   isNeutral:false },
+            { label:'DROP',         rawVal:myDisp.DROP||0,    pct:(myDisp.DROP||0)/tc*100,  avgPct:avgPct('DROP'),isCount:false, isGood:false,   isNeutral:false },
+            { label:'DNC',          rawVal:myDisp.DNC||0,     pct:(myDisp.DNC||0)/tc*100,   avgPct:avgPct('DNC'), isCount:false, isGood:false,   isNeutral:false },
+        ]
+    });
     document.body.appendChild(overlay);
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
 }
@@ -21575,7 +22790,6 @@ function vdViewCsStateProfile(stateName) {
         const opt = listSelect ? Array.from(listSelect.options).find(o=>o.value===String(lid)) : null;
         return opt ? opt.text : (lc[lid]?lc[lid].name:`List ${lid}`);
     };
-    // Build state map using listCounts for real call totals
     const stateMap = {};
     Object.keys(lc).forEach(lid => {
         const calls = lc[lid].calls || 0;
@@ -21588,32 +22802,33 @@ function vdViewCsStateProfile(stateName) {
         ['A','SALE','NI','NP','DROP','DNC'].forEach(k=>stateMap[sn][k]+=(disp[k]||0));
     });
     const myD = stateMap[stateName] || {calls:0,A:0,SALE:0,NI:0,NP:0,DROP:0,DNC:0};
+    const tc = myD.calls || 1;
     const stateList = Object.values(stateMap);
     const ns = stateList.length || 1;
     const avgCalls = stateList.reduce((s,d)=>s+(d.calls||0),0)/ns;
-    const avg = k => stateList.reduce((s,d)=>s+(d[k]||0),0)/ns;
-    const avgs = {A:avg('A'),SALE:avg('SALE'),NI:avg('NI'),NP:avg('NP'),DROP:avg('DROP'),DNC:avg('DNC')};
-    const metrics=[
-        {label:'Calls',       my:myD.calls, avg:avgCalls},
-        {label:'Ans. Machine',my:myD.A,     avg:avgs.A},
-        {label:'Sale',        my:myD.SALE,  avg:avgs.SALE},
-        {label:'Not Int.',    my:myD.NI,    avg:avgs.NI},
-        {label:'No Pitch',    my:myD.NP,    avg:avgs.NP},
-        {label:'DROP',        my:myD.DROP,  avg:avgs.DROP},
-        {label:'DNC',         my:myD.DNC,   avg:avgs.DNC},
-    ];
-    document.querySelectorAll('#vd-cs-state-profile-overlay').forEach(e=>e.remove());
-    const overlay=document.createElement('div');
-    overlay.id='vd-cs-state-profile-overlay';
-    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
-    const cardsHTML=metrics.map(m=>{
-        let color='#6b7280',bg='#f9fafb',badge='';
-        if(m.my>m.avg){color='#16a34a';bg='#f0fdf4';badge='<span style="font-size:10px;color:#16a34a;display:block;margin-top:3px;">&#x25b2; above avg</span>';}
-        else if(m.my<m.avg){color='#dc2626';bg='#fef2f2';badge='<span style="font-size:10px;color:#dc2626;display:block;margin-top:3px;">&#x25bc; below avg</span>';}
-        else{badge='<span style="font-size:10px;color:#6b7280;display:block;margin-top:3px;">= avg</span>';}
-        return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;min-width:120px;"><div style="font-size:22px;font-weight:700;color:${color};">${Math.round(m.my)}</div><div style="font-size:11px;color:#6b7280;margin:4px 0 2px;">${m.label}</div><div style="font-size:10px;color:#9ca3af;">avg: ${m.avg.toFixed(1)}</div>${badge}</div>`;
-    }).join('');
-    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;width:90vw;max-width:800px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()"><div style="background:linear-gradient(135deg,#134e4a,#0f766e);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;"><div><h2 style="margin:0;color:#fff;font-size:18px;"><i class="fas fa-map-marker-alt" style="margin-right:10px;"></i>${stateName}</h2><p style="margin:4px 0 0;color:#99f6e4;font-size:12px;">State vs. Average Performance</p></div><button onclick="document.getElementById('vd-cs-state-profile-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;">&times;</button></div><div style="padding:24px;"><div style="display:flex;gap:12px;flex-wrap:wrap;">${cardsHTML}</div></div></div>`;
+    const totalCallsAll = stateList.reduce((s,d)=>s+(d.calls||0),0);
+    const avgPct = k => totalCallsAll > 0 ? stateList.reduce((s,d)=>s+(d[k]||0),0)/totalCallsAll*100 : 0;
+    const overlayId = 'vd-cs-state-profile-overlay';
+    document.querySelectorAll('#'+overlayId).forEach(e=>e.remove());
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
+    overlay.innerHTML = _vdBuildProfileOverlay({
+        id: overlayId,
+        icon: 'fas fa-map-marker-alt',
+        iconBg: 'linear-gradient(135deg,#134e4a,#0f766e)',
+        title: stateName,
+        subtitle: `State Group · compared to ${ns} state${ns!==1?'s':''}`,
+        metrics: [
+            { label:'Calls',        rawVal:myD.calls,  pct:myD.calls,         avgPct:avgCalls,       isCount:true,  isGood:true,    isNeutral:false },
+            { label:'Ans. Machine', rawVal:myD.A,      pct:myD.A/tc*100,      avgPct:avgPct('A'),    isCount:false, isGood:false,   isNeutral:true  },
+            { label:'Sale',         rawVal:myD.SALE,   pct:myD.SALE/tc*100,   avgPct:avgPct('SALE'), isCount:false, isGood:true,    isNeutral:false },
+            { label:'Not Int.',     rawVal:myD.NI,     pct:myD.NI/tc*100,     avgPct:avgPct('NI'),   isCount:false, isGood:false,   isNeutral:false },
+            { label:'No Pitch',     rawVal:myD.NP,     pct:myD.NP/tc*100,     avgPct:avgPct('NP'),   isCount:false, isGood:false,   isNeutral:false },
+            { label:'DROP',         rawVal:myD.DROP,   pct:myD.DROP/tc*100,   avgPct:avgPct('DROP'), isCount:false, isGood:false,   isNeutral:false },
+            { label:'DNC',          rawVal:myD.DNC,    pct:myD.DNC/tc*100,    avgPct:avgPct('DNC'),  isCount:false, isGood:false,   isNeutral:false },
+        ]
+    });
     document.body.appendChild(overlay);
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
 }
@@ -21625,36 +22840,36 @@ function vdViewCsListProfile(listId) {
     const lid = String(listId);
     const myDisp = (listDisp||{})[lid] || {};
     const myCalls = (lc[lid]||{}).calls || ((myDisp.A||0)+(myDisp.SALE||0)+(myDisp.NI||0)+(myDisp.NP||0)+(myDisp.DROP||0)+(myDisp.DNC||0));
+    const tc = myCalls || 1;
     const listSelect = document.getElementById('llr-lists');
     const opt = listSelect ? Array.from(listSelect.options).find(o=>o.value===lid) : null;
     const listName = opt ? opt.text : ((lc[lid]||{}).name || `List ${listId}`);
-    // Use listCounts for avg calls across all lists
     const allListIds = Object.keys(lc).filter(l=>(lc[l].calls||0)>0);
     const nl = allListIds.length || 1;
     const avgCalls = allListIds.reduce((s,l)=>s+(lc[l].calls||0),0)/nl;
-    const avg = k => allListIds.reduce((s,l)=>s+((listDisp||{})[l]?((listDisp||{})[l][k]||0):0),0)/nl;
-    const avgs = {A:avg('A'),SALE:avg('SALE'),NI:avg('NI'),NP:avg('NP'),DROP:avg('DROP'),DNC:avg('DNC')};
-    const metrics=[
-        {label:'Calls',       my:myCalls,        avg:avgCalls},
-        {label:'Ans. Machine',my:myDisp.A||0,    avg:avgs.A},
-        {label:'Sale',        my:myDisp.SALE||0, avg:avgs.SALE},
-        {label:'Not Int.',    my:myDisp.NI||0,   avg:avgs.NI},
-        {label:'No Pitch',    my:myDisp.NP||0,   avg:avgs.NP},
-        {label:'DROP',        my:myDisp.DROP||0, avg:avgs.DROP},
-        {label:'DNC',         my:myDisp.DNC||0,  avg:avgs.DNC},
-    ];
-    document.querySelectorAll('#vd-cs-list-profile-overlay').forEach(e=>e.remove());
-    const overlay=document.createElement('div');
-    overlay.id='vd-cs-list-profile-overlay';
-    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
-    const cardsHTML=metrics.map(m=>{
-        let color='#6b7280',bg='#f9fafb',badge='';
-        if(m.my>m.avg){color='#16a34a';bg='#f0fdf4';badge='<span style="font-size:10px;color:#16a34a;display:block;margin-top:3px;">&#x25b2; above avg</span>';}
-        else if(m.my<m.avg){color='#dc2626';bg='#fef2f2';badge='<span style="font-size:10px;color:#dc2626;display:block;margin-top:3px;">&#x25bc; below avg</span>';}
-        else{badge='<span style="font-size:10px;color:#6b7280;display:block;margin-top:3px;">= avg</span>';}
-        return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center;min-width:120px;"><div style="font-size:22px;font-weight:700;color:${color};">${Math.round(m.my)}</div><div style="font-size:11px;color:#6b7280;margin:4px 0 2px;">${m.label}</div><div style="font-size:10px;color:#9ca3af;">avg: ${m.avg.toFixed(1)}</div>${badge}</div>`;
-    }).join('');
-    overlay.innerHTML=`<div style="background:#fff;border-radius:16px;width:90vw;max-width:800px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3);" onclick="event.stopPropagation()"><div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;"><div><h2 style="margin:0;color:#fff;font-size:18px;"><i class="fas fa-list" style="margin-right:10px;"></i>${listName}</h2><p style="margin:4px 0 0;color:#bae6fd;font-size:12px;">List vs. Average Performance</p></div><button onclick="document.getElementById('vd-cs-list-profile-overlay').remove();" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer;">&times;</button></div><div style="padding:24px;"><div style="display:flex;gap:12px;flex-wrap:wrap;">${cardsHTML}</div></div></div>`;
+    const totalCallsAll = allListIds.reduce((s,l)=>s+(lc[l].calls||0),0);
+    const avgPct = k => totalCallsAll > 0 ? allListIds.reduce((s,l)=>s+((listDisp||{})[l]?((listDisp||{})[l][k]||0):0),0)/totalCallsAll*100 : 0;
+    const overlayId = 'vd-cs-list-profile-overlay';
+    document.querySelectorAll('#'+overlayId).forEach(e=>e.remove());
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:100000;padding:12px;box-sizing:border-box;';
+    overlay.innerHTML = _vdBuildProfileOverlay({
+        id: overlayId,
+        icon: 'fas fa-list',
+        iconBg: 'linear-gradient(135deg,#1e3a5f,#2563eb)',
+        title: listName,
+        subtitle: `List Profile · compared to ${nl} list${nl!==1?'s':''}`,
+        metrics: [
+            { label:'Calls',        rawVal:myCalls,         pct:myCalls,               avgPct:avgCalls,       isCount:true,  isGood:true,    isNeutral:false },
+            { label:'Ans. Machine', rawVal:myDisp.A||0,     pct:(myDisp.A||0)/tc*100,  avgPct:avgPct('A'),    isCount:false, isGood:false,   isNeutral:true  },
+            { label:'Sale',         rawVal:myDisp.SALE||0,  pct:(myDisp.SALE||0)/tc*100, avgPct:avgPct('SALE'),isCount:false, isGood:true,    isNeutral:false },
+            { label:'Not Int.',     rawVal:myDisp.NI||0,    pct:(myDisp.NI||0)/tc*100,  avgPct:avgPct('NI'),  isCount:false, isGood:false,   isNeutral:false },
+            { label:'No Pitch',     rawVal:myDisp.NP||0,    pct:(myDisp.NP||0)/tc*100,  avgPct:avgPct('NP'),  isCount:false, isGood:false,   isNeutral:false },
+            { label:'DROP',         rawVal:myDisp.DROP||0,  pct:(myDisp.DROP||0)/tc*100, avgPct:avgPct('DROP'),isCount:false, isGood:false,   isNeutral:false },
+            { label:'DNC',          rawVal:myDisp.DNC||0,   pct:(myDisp.DNC||0)/tc*100,  avgPct:avgPct('DNC'), isCount:false, isGood:false,   isNeutral:false },
+        ]
+    });
     document.body.appendChild(overlay);
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
 }
@@ -35690,7 +36905,9 @@ window.loadSimpleTodos = function loadSimpleTodos(skipFallback = false) {
 
     // Get todos based on current view
     const currentView = window.dashboardTodoView || 'personal';
-    const storageKey = currentView === 'personal' ? 'syncedPersonalTodos' : 'syncedAgencyTodos';
+    const _todoSessionUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+    // Maureen is United agency — always use her personal pool, never Vanguard agency pool
+    const storageKey = (currentView === 'personal' || _todoSessionUser === 'maureen') ? 'syncedPersonalTodos' : 'syncedAgencyTodos';
     const allTodos = JSON.parse(localStorage.getItem(storageKey) || '[]');
 
     // If we don't have server data but we should, try to load it (only if not skipping fallback)
@@ -35713,6 +36930,9 @@ window.loadSimpleTodos = function loadSimpleTodos(skipFallback = false) {
     // Get current user for filtering
     const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
     const currentUser = sessionData.username || '';
+    // Maureen is in United agency — always scope to her own data regardless of view
+    const isMaureen = currentUser.toLowerCase() === 'maureen';
+    const effectiveView = isMaureen ? 'personal' : currentView;
 
     // Add calendar events as todo items
     const calendarEvents = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
@@ -35724,7 +36944,7 @@ window.loadSimpleTodos = function loadSimpleTodos(skipFallback = false) {
 
     const serverCalendarTodos = serverEvents
         .filter(event => {
-            if (currentView === 'personal') {
+            if (effectiveView === 'personal') {
                 return !event.created_by || event.created_by === currentUser;
             }
             return true; // Show all for agency view
@@ -35741,7 +36961,7 @@ window.loadSimpleTodos = function loadSimpleTodos(skipFallback = false) {
 
     const calendarTodos = calendarEvents
         .filter(event => {
-            if (currentView === 'personal') {
+            if (effectiveView === 'personal') {
                 return !event.assignedAgent || event.assignedAgent === currentUser;
             }
             return true; // Show all for agency view
@@ -35764,7 +36984,7 @@ window.loadSimpleTodos = function loadSimpleTodos(skipFallback = false) {
     console.log('🔍 DASHBOARD: calendarState.serverCallbacks exists:', !!window.calendarState?.serverCallbacks);
     const callbackTodos = serverCallbacks
         .filter(callback => {
-            if (currentView === 'personal') {
+            if (effectiveView === 'personal') {
                 return !callback.assigned_agent || callback.assigned_agent === currentUser;
             }
             return true; // Show all for agency view

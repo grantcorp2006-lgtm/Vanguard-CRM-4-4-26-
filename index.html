@@ -43,9 +43,15 @@
     <script src="js/fix-localStorage-quota.js?v=1"></script>
     <script src="js/disable-heavy-scripts.js?v=1"></script>
     <script>
-        // Check authentication first
+        // Redirect #mobile hash to the client portal app
+        if (window.location.hash === '#mobile') {
+            window.location.href = '/mobile.html';
+        }
+
+        // Check authentication first — redirect to the portal the user last used
         if (!sessionStorage.getItem('vanguard_user')) {
-            window.location.href = '/login.html';
+            const portal = localStorage.getItem('vanguard_login_portal');
+            window.location.href = (portal === 'united') ? '/login-united.html' : '/login.html';
         }
 
         // Set up PDF.js worker
@@ -758,10 +764,20 @@
                                     brandText.textContent = 'United Software';
                                     console.log('🏢 Updated company name to United Software for Maureen');
                                 }
+                                const logo = document.querySelector('.nav-brand .logo');
+                                if (logo) {
+                                    logo.src = 'https://raw.githubusercontent.com/Corptech02/LLCinfo/main/United_Insurance.webp';
+                                    logo.alt = 'United Insurance';
+                                }
                             } else {
                                 const brandText = document.querySelector('.brand-text h1');
                                 if (brandText) {
                                     brandText.textContent = 'Vanguard Software';
+                                }
+                                const logo = document.querySelector('.nav-brand .logo');
+                                if (logo) {
+                                    logo.src = 'images/V-Logo.png';
+                                    logo.alt = 'Vanguard Insurance Group';
                                 }
                             }
 
@@ -1046,6 +1062,12 @@
                                 <span>Leads</span>
                             </a>
                         </li>
+                        <li id="archived-leads-nav-item" style="display: none;">
+                            <a href="#archived-leads" data-tooltip="Archived Leads">
+                                <i class="fas fa-archive"></i>
+                                <span>Archived Leads</span>
+                            </a>
+                        </li>
                         <li>
                             <a href="#clients" data-tooltip="Clients">
                                 <i class="fas fa-users"></i>
@@ -1089,7 +1111,7 @@
                         </li>
                     </ul>
                 </div>
-                <div class="menu-section">
+                <div class="menu-section" id="admin-menu-section">
                     <h3>Administration</h3>
                     <ul>
                         <li>
@@ -1657,7 +1679,7 @@
     <script src="js/vanguard-softphone.js?v=9"></script>
     <script src="js/sip-integration-bridge.js?v=1"></script>
     <script src="js/force-policies-refresh.js?v=1"></script>
-    <script src="js/app.js?v=STATE_LABELS_V5"></script>
+    <script src="js/app.js?v=20260404f"></script>
 
     <!-- Vicidial Stage Sync - Bidirectional synchronization -->
     <script src="js/vicidial-stage-sync.js?v=1"></script>
@@ -1826,7 +1848,7 @@
     <script src="asterisk-sip-config.js?v=1"></script>
 
     <!-- Archived Leads Functionality -->
-    <script src="js/archived-leads-functionality.js?v=3"></script>
+    <script src="js/archived-leads-functionality.js?v=STANDALONE_V1"></script>
 
     <!-- NUCLEAR HIGHLIGHTING FIX - Bulletproof highlighting that cannot be removed -->
     <!-- <script src="js/nuclear-highlighting-fix.js?v=6"></script> DISABLED - Intercepting viewLead -->
@@ -3716,5 +3738,7 @@
     <!-- REMOVED: Scripts moved earlier to ensure loading -->
     <!-- Plaid Link SDK -->
     <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+
+
 </body>
 </html>

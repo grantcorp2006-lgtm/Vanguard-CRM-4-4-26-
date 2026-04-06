@@ -12,11 +12,110 @@
             margin: 0;
             padding: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+                linear-gradient(135deg, rgba(37, 99, 235, 0.7) 0%, rgba(30, 64, 175, 0.7) 100%),
+                url('images/office1.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
             height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            gap: 24px;
+        }
+
+        .updates-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 600px;
+            padding: 40px;
+            animation: slideIn 0.4s ease-out 0.1s both;
+        }
+
+        .updates-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 2px solid #2563eb;
+        }
+
+        .updates-header .updates-icon {
+            width: 34px;
+            height: 34px;
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .updates-header h2 {
+            color: #1f2937;
+            font-size: 17px;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .update-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .update-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .update-badge {
+            width: 22px;
+            height: 22px;
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 10px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .update-text {
+            color: #374151;
+            font-size: 14px;
+            line-height: 1.4;
+            font-weight: 500;
+        }
+
+        .update-new-tag {
+            display: inline-block;
+            background: #dcfce7;
+            color: #16a34a;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            vertical-align: middle;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        @media (max-width: 768px) {
+            .updates-container {
+                display: none;
+            }
         }
 
         .login-container {
@@ -24,7 +123,7 @@
             border-radius: 12px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             width: 100%;
-            max-width: 400px;
+            max-width: 600px;
             padding: 40px;
             animation: slideIn 0.4s ease-out;
         }
@@ -48,14 +147,20 @@
         .logo {
             width: 80px;
             height: 80px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: white;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             margin: 0 auto 20px;
-            color: white;
-            font-size: 36px;
+            padding: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
         }
 
         .login-header h1 {
@@ -95,8 +200,8 @@
 
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
 
         .form-group input.error {
@@ -124,7 +229,7 @@
         .login-button {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
             color: white;
             border: none;
             border-radius: 8px;
@@ -137,7 +242,7 @@
 
         .login-button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
         }
 
         .login-button:active {
@@ -210,7 +315,7 @@
     <div class="login-container">
         <div class="login-header">
             <div class="logo">
-                <i class="fas fa-shield-alt"></i>
+                <img src="images/V-Logo.png" alt="Vanguard Logo" />
             </div>
             <h1>Vanguard Insurance Group</h1>
             <p>Agency Management System</p>
@@ -257,7 +362,30 @@
         </form>
 
         <div class="login-footer">
-            <p>&copy; 2025 Vanguard Insurance Group. All rights reserved.</p>
+            <p>&copy; 2024 Vanguard Insurance Group LLC. All rights reserved.</p>
+        </div>
+    </div>
+
+    <div class="updates-container">
+        <div class="updates-header">
+            <div class="updates-icon"><i class="fas fa-bolt"></i></div>
+            <h2>New Updates</h2>
+        </div>
+        <div class="update-item">
+            <div class="update-badge"><i class="fas fa-phone-alt"></i></div>
+            <span class="update-text">Call Swapper: New States (IL, NJ, GA, FL) <span class="update-new-tag">New</span></span>
+        </div>
+        <div class="update-item">
+            <div class="update-badge"><i class="fas fa-clock"></i></div>
+            <span class="update-text">Fixed Avg Call Time &amp; Scheduled Callback Reports <span class="update-new-tag">New</span></span>
+        </div>
+        <div class="update-item">
+            <div class="update-badge"><i class="fas fa-map-marker-alt"></i></div>
+            <span class="update-text">Lead Gen Tab: Improved State Lead Organization <span class="update-new-tag">New</span></span>
+        </div>
+        <div class="update-item">
+            <div class="update-badge"><i class="fas fa-chart-bar"></i></div>
+            <span class="update-text">Fixed Goals Bug <span class="update-new-tag">New</span></span>
         </div>
     </div>
 
@@ -267,8 +395,11 @@
             window.location.href = '/';
         }
 
-        // Valid users (username and password are the same)
-        const validUsers = ['Maureen', 'Grant', 'Hunter', 'Carson'];
+        // Remember this login portal so expired sessions redirect back here
+        localStorage.setItem('vanguard_login_portal', 'vanguard');
+
+        // Maureen must use the United Insurance Group login portal
+        const validUsers = ['Grant', 'Hunter', 'Carson'];
 
         function togglePasswordVisibility() {
             const passwordInput = document.getElementById('password');
@@ -308,9 +439,21 @@
             // Simulate network delay
             await new Promise(resolve => setTimeout(resolve, 800));
 
-            // Check credentials (username and password must be the same, case-insensitive)
+            // Check credentials
             const matchingUser = validUsers.find(user => user.toLowerCase() === username.toLowerCase());
-            if (matchingUser && password.toLowerCase() === username.toLowerCase()) {
+            let isValidPassword = false;
+
+            if (matchingUser) {
+                if (username.toLowerCase() === 'grant') {
+                    // Special password for Grant
+                    isValidPassword = password === '25Nickc124!';
+                } else {
+                    // For other users, username and password must be the same (case-insensitive)
+                    isValidPassword = password.toLowerCase() === username.toLowerCase();
+                }
+            }
+
+            if (matchingUser && isValidPassword) {
                 // Store user session
                 sessionStorage.setItem('vanguard_user', JSON.stringify({
                     username: username,

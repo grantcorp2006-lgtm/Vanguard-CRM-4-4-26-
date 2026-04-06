@@ -3,6 +3,7 @@ class CommunicationsReminders {
     constructor() {
         this.reminders = [];
         this.giftsSent = JSON.parse(localStorage.getItem('giftsSent') || '{}');
+        this.recentClients = []; // Store recent clients from API
     }
 
     // Initialize communications reminders
@@ -10,24 +11,36 @@ class CommunicationsReminders {
         this.updateRemindersDisplay();
         this.updateStats();
 
+        // Load recent clients from API
+        this.loadRecentClients();
+
         // Refresh every 30 seconds
         setInterval(() => {
             this.updateRemindersDisplay();
             this.updateStats();
+            // Reload recent clients every refresh
+            this.loadRecentClients();
         }, 30000);
     }
 
-    // Get all reminders (new policies and birthdays)
+    // Get all reminders (new policies, new clients, and birthdays)
     getReminders() {
         const reminders = [];
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
+        // Detect current user for agent-based filtering
+        const _remSessionUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+        const _isMaureen = _remSessionUser === 'maureen';
+
         // Get new policies from the last 7 days
         const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
         const sevenDaysAgo = new Date(today.getTime() - (7 * 24 * 60 * 60 * 1000));
 
-        policies.forEach(policy => {
+        policies.filter(policy => {
+            if (_isMaureen) return (policy.agent || '').toLowerCase().includes('maureen');
+            return true;
+        }).forEach(policy => {
             const createdDate = new Date(policy.createdAt || policy.date);
             if (createdDate >= sevenDaysAgo && createdDate <= new Date()) {
                 // Use same client name hierarchy as other components (Named Insured first, then fallbacks)
@@ -50,12 +63,26 @@ class CommunicationsReminders {
             }
         });
 
+        // Get new clients from the last 7 days (from database via API)
+        // Note: This will be loaded asynchronously, so we'll update the display when data arrives
+        this.loadRecentClients().then(recentClients => {
+            // Update the display when client data arrives
+            if (recentClients && recentClients.length > 0) {
+                setTimeout(() => {
+                    this.refreshDisplay();
+                }, 100);
+            }
+        });
+
         // Get upcoming birthdays (within configurable days)
         const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
         const viewDays = window.currentBirthdayViewDays || 30;
         const viewDaysFromNow = new Date(today.getTime() + (viewDays * 24 * 60 * 60 * 1000));
 
-        clients.forEach(client => {
+        clients.filter(client => {
+            if (_isMaureen) return (client.agent || '').toLowerCase().includes('maureen');
+            return true;
+        }).forEach(client => {
             if (client.dateOfBirth) {
                 const birthDate = new Date(client.dateOfBirth);
                 const thisYearBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
@@ -68,10 +95,14 @@ class CommunicationsReminders {
 
                 if (upcomingBirthday >= today && upcomingBirthday <= viewDaysFromNow) {
                     const daysUntil = Math.ceil((upcomingBirthday - today) / (1000 * 60 * 60 * 24));
+
+                    // Use fullName for birthday reminders (personal name), fallback to business name
+                    const displayName = client.fullName || client.name || 'Unknown Client';
+
                     reminders.push({
                         id: `birthday_${client.id}_${upcomingBirthday.getFullYear()}`,
                         type: 'birthday',
-                        clientName: client.name || 'Unknown Client',
+                        clientName: displayName,
                         email: client.email,
                         phone: client.phone,
                         date: upcomingBirthday,
@@ -86,7 +117,10 @@ class CommunicationsReminders {
         // Also get birthdays from insurance policies' named insured data
         const insurancePolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
 
-        insurancePolicies.forEach(policy => {
+        insurancePolicies.filter(policy => {
+            if (_isMaureen) return (policy.agent || '').toLowerCase().includes('maureen');
+            return true;
+        }).forEach(policy => {
             // Check if policy has Date of Birth/Inception in insured data
             if (policy.insured && policy.insured['Date of Birth/Inception']) {
                 const dateOfBirth = policy.insured['Date of Birth/Inception'];
@@ -146,22 +180,71 @@ class CommunicationsReminders {
             }
         });
 
-        // Sort by priority (new policies by recency, birthdays by proximity)
+        // Add recent clients to reminders (if loaded)
+        if (this.recentClients && this.recentClients.length > 0) {
+            reminders.push(...this.recentClients);
+        }
+
+        // Sort by priority (new policies/clients by recency, birthdays by proximity)
         reminders.sort((a, b) => {
-            if (a.type === 'new_policy' && b.type === 'new_policy') {
-                return a.date - b.date; // Most recent first
+            if ((a.type === 'new_policy' || a.type === 'new_client') && (b.type === 'new_policy' || b.type === 'new_client')) {
+                return b.date - a.date; // Most recent first
             }
             if (a.type === 'birthday' && b.type === 'birthday') {
                 return a.daysUntil - b.daysUntil; // Soonest first
             }
-            // Prioritize birthdays happening today/tomorrow over new policies
+            // Prioritize birthdays happening today/tomorrow over new policies/clients
             if (a.type === 'birthday' && a.daysUntil <= 1) return -1;
             if (b.type === 'birthday' && b.daysUntil <= 1) return 1;
-            // Otherwise prioritize new policies
-            return a.type === 'new_policy' ? -1 : 1;
+            // Otherwise prioritize new policies/clients
+            return (a.type === 'new_policy' || a.type === 'new_client') ? -1 : 1;
         });
 
         return reminders;
+    }
+
+    // Load recent clients from API
+    async loadRecentClients() {
+        try {
+            console.log('📅 Loading recent clients from API...');
+            const _rcSessionUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+            const _rcIsMaureen = _rcSessionUser === 'maureen';
+            const recentUrl = _rcIsMaureen ? '/api/clients/recent?days=7&agent=maureen' : '/api/clients/recent?days=7';
+            const response = await fetch(recentUrl);
+
+            if (response.ok) {
+                const recentClients = await response.json();
+                console.log(`✅ Loaded ${recentClients.length} recent clients`);
+
+                // Store recent clients and convert them to reminder format
+                this.recentClients = recentClients.map(client => ({
+                    id: `client_${client.id}`,
+                    type: 'new_client',
+                    clientName: client.clientName,
+                    clientType: client.clientType,
+                    date: new Date(client.createdAt),
+                    daysAgo: client.daysAgo,
+                    phone: client.phone,
+                    email: client.email,
+                    state: client.state,
+                    giftSent: this.giftsSent[`client_${client.id}`] || false
+                }));
+
+                return this.recentClients;
+            } else {
+                console.warn('⚠️ Failed to load recent clients:', response.status);
+                return [];
+            }
+        } catch (error) {
+            console.error('❌ Error loading recent clients:', error);
+            return [];
+        }
+    }
+
+    // Refresh the display (used after async data loads)
+    refreshDisplay() {
+        this.updateRemindersDisplay();
+        this.updateStats();
     }
 
     // Update reminders display
@@ -212,15 +295,56 @@ class CommunicationsReminders {
                                 }
                             </td>
                             <td>
-                                ${!reminder.giftSent ? `
-                                    <button class="btn-small btn-primary" onclick="window.communicationsReminders.markGiftSent('${reminder.id}', '${reminder.clientName}')">
-                                        <i class="fas fa-gift"></i> Mark Sent
-                                    </button>
-                                ` : `
-                                    <button class="btn-small btn-secondary" onclick="window.communicationsReminders.undoGiftSent('${reminder.id}')">
+                                ${!reminder.giftSent ?
+                                    `<button class="btn-small btn-primary" onclick="window.communicationsReminders.markGiftSent('${reminder.id}', '${reminder.clientName}')">
+                                        <i class="fas fa-gift"></i> Mark Gift Sent
+                                    </button>` :
+                                    `<button class="btn-small btn-secondary" onclick="window.communicationsReminders.undoGiftSent('${reminder.id}')">
                                         <i class="fas fa-undo"></i> Undo
-                                    </button>
-                                `}
+                                    </button>`
+                                }
+                            </td>
+                        </tr>
+                    `;
+                } else if (reminder.type === 'new_client') {
+                    reminderHTML = `
+                        <tr class="${reminder.giftSent ? 'gift-sent' : ''}">
+                            <td>
+                                <span class="reminder-type-badge new-client">
+                                    <i class="fas fa-user-plus"></i> New Client
+                                </span>
+                            </td>
+                            <td>
+                                <strong>${reminder.clientName}</strong>
+                                <br>
+                                <small class="text-muted">${reminder.clientType}${reminder.state ? ` • ${reminder.state}` : ''}</small>
+                            </td>
+                            <td>
+                                <span class="client-badge">
+                                    ${reminder.phone ? `<i class="fas fa-phone"></i> ${reminder.phone}` : ''}
+                                    ${reminder.email ? `<br><i class="fas fa-envelope"></i> ${reminder.email}` : ''}
+                                </span>
+                            </td>
+                            <td>
+                                ${reminder.daysAgo === 0 ? 'Today' :
+                                  reminder.daysAgo === 1 ? 'Yesterday' :
+                                  `${reminder.daysAgo} days ago`}
+                            </td>
+                            <td>
+                                ${reminder.giftSent ?
+                                    '<span class="status-badge completed"><i class="fas fa-check"></i> Gift Sent</span>' :
+                                    '<span class="status-badge pending">Pending</span>'
+                                }
+                            </td>
+                            <td>
+                                ${!reminder.giftSent ?
+                                    `<button class="btn-small btn-primary" onclick="window.communicationsReminders.markGiftSent('${reminder.id}', '${reminder.clientName}')">
+                                        <i class="fas fa-gift"></i> Mark Gift Sent
+                                    </button>` :
+                                    `<button class="btn-small btn-secondary" onclick="window.communicationsReminders.undoGiftSent('${reminder.id}')">
+                                        <i class="fas fa-undo"></i> Undo
+                                    </button>`
+                                }
                             </td>
                         </tr>
                     `;
@@ -304,7 +428,9 @@ class CommunicationsReminders {
             localStorage.setItem('giftsSent', JSON.stringify(this.giftsSent));
 
             // Add to activity log
-            this.addActivityLog(`Gift sent to ${clientName}`, reminderId.includes('birthday') ? 'birthday' : 'new_policy');
+            this.addActivityLog(`Gift sent to ${clientName}`,
+                reminderId.includes('birthday') ? 'birthday' :
+                reminderId.includes('client') ? 'new_client' : 'new_policy');
 
             // Update display
             this.updateRemindersDisplay();

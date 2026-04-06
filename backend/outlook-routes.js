@@ -598,21 +598,6 @@ function syncCOIEmailsFromIMAP() {
 }
 
 /**
- * GET /api/outlook/coi-requests/status
- * Lightweight endpoint — returns count + latest date only. Used for fast polling.
- */
-router.get('/coi-requests/status', (req, res) => {
-    db.get(
-        `SELECT COUNT(*) as count, MAX(date) as latestDate FROM coi_emails WHERE dismissed = 0`,
-        [],
-        (err, row) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ count: row ? row.count : 0, latestDate: row ? row.latestDate : null });
-        }
-    );
-});
-
-/**
  * GET /api/outlook/coi-requests
  * Returns saved COI emails from DB instantly (no IMAP wait).
  */

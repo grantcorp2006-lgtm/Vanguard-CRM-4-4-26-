@@ -430,6 +430,8 @@ function initializeDatabase() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+    // Per-user data isolation: add owner column if not present (existing rows default to 'grant')
+    db.run(`ALTER TABLE financial_transactions ADD COLUMN owner TEXT DEFAULT 'grant'`, () => {});
 
     // Invoices sent to carriers / clients
     db.run(`CREATE TABLE IF NOT EXISTS invoices (
@@ -911,8 +913,9 @@ app.get('/api/policies', (req, res) => {
                             console.log(`🔍 STATUS: No status found in data for policy ${normalizedNumber}`);
                         }
 
-                        // Filter inactive policies unless explicitly requested
-                        const isActive = (policy.status || policy.policyStatus || 'Active') === 'Active';
+                        // Filter inactive policies unless explicitly requested (case-insensitive)
+                        const _statusVal = (policy.status || policy.policyStatus || 'active').toLowerCase();
+                        const isActive = _statusVal === 'active' || _statusVal === 'in-force' || _statusVal === 'current';
 
                         if (!isActive && !includeInactive) {
                             console.log(`🔍 SERVER: Skipping inactive policy ${normalizedNumber} (includeInactive: ${includeInactive})`);
@@ -1195,18 +1198,32 @@ app.put('/api/policies/:id', (req, res) => {
         // Need to update the policy within the nested structure
         const originalData = JSON.parse(targetRow.data);
 
-        // Update the specific policy in the nested structure
+        // Update the specific policy in the nested structure (handles single- and double-nested)
         if (originalData.policies && Array.isArray(originalData.policies)) {
-            for (const item of originalData.policies) {
+            let updated = false;
+            for (let i = 0; i < originalData.policies.length; i++) {
+                const item = originalData.policies[i];
                 if (item.policies && Array.isArray(item.policies)) {
-                    // Find and update the specific policy
+                    // Double-nested: data.policies[i].policies[j]
                     const policyIndex = item.policies.findIndex(p => p.id === policyId);
                     if (policyIndex !== -1) {
                         item.policies[policyIndex] = mergedPolicy;
+                        updated = true;
                         break;
                     }
+                } else if (item.id === policyId) {
+                    // Single-nested: data.policies[i] is the policy directly
+                    originalData.policies[i] = mergedPolicy;
+                    updated = true;
+                    break;
                 }
             }
+            if (!updated) {
+                console.warn(`⚠️ Policy ${policyId} found in search but not located in nested structure for update`);
+            }
+        } else {
+            // Direct policy object at root
+            Object.assign(originalData, mergedPolicy);
         }
 
         const dataToStore = JSON.stringify(originalData);
@@ -2593,7 +2610,7 @@ app.get('/api/vicidial/performance-report', async (req, res) => {
 });
 
 // Helper: extract disposition counts from a ViciDial TEXT report
-// Helper: parse CALL STATUS STATS pipe table; returns { rows, totalRow }
+// Helper: parse CALL STATUS STATS pipe table; returns { rows, totals }
 function parseCSSTable(text) {
     const lines = text.split('\n');
     const start = lines.findIndex(l => l.includes('CALL STATUS STATS'));
@@ -2604,20 +2621,53 @@ function parseCSSTable(text) {
         const t = l.trim();
         if (t.startsWith('----------')) break;
         if (!t.startsWith('|') || t.startsWith('+-')) continue;
-        if (l.includes('STATUS') && l.includes('STATUS_NAME')) continue;
         const cols = l.split('|').map(s => s.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
         if (cols.length < 3 || !cols[0]) continue;
-        const count = parseInt((cols[3]||cols[2]||'').replace(/[^\d]/g,''),10)||0;
-        if (cols[0] === 'TOTAL' || cols[0] === 'TOTALS') {
-            totals.calls     = count;
-            totals.callTime  = cols[4] || cols[3] || '';
-            totals.agentTime = cols[5] || cols[4] || '';
+        // Strip trailing whitespace and colon (TOTAL row: "TOTAL                :")
+        const c0 = cols[0].replace(/[\s:]+$/, '').trim();
+        if (c0 === 'STATUS' || c0 === 'DESCRIPTION') continue; // header row
+        if (c0.toUpperCase() === 'TOTAL' || c0.toUpperCase() === 'TOTALS') {
+            // TOTAL row has no PCT% col: cols[1]=calls, cols[2]=total_time, cols[3]=avg_time
+            totals.calls    = parseInt((cols[1]||'').replace(/[^\d]/g,''), 10) || 0;
+            totals.callTime = cols[2] || '';
+            totals.avgTime  = cols[3] || '';
         } else {
+            // Data row: cols[0]=STATUS, cols[1]=DESC, cols[2]=PCT%, cols[3]=CALLS, cols[4]=CALL_TIME, cols[5]=AVG_TIME, cols[6]=CALLS_HR
+            const count = parseInt((cols[3]||cols[2]||'').replace(/[^\d]/g,''), 10) || 0;
             rows.push({ status: cols[0], description: cols[1]||'', calls: count,
                 callTime: cols[4]||cols[3]||'', agentTime: cols[5]||cols[4]||'', callsHr: cols[6]||cols[5]||'' });
         }
     }
     return { rows, totals };
+}
+
+// Helper: parse AGENT TIME STATS pipe table; returns { [uid]: {calls,time,avg}, __total__: {calls,time,avg} }
+function parseViciAgentTimeStats(text) {
+    const result = {};
+    const lines = text.split('\n');
+    const start = lines.findIndex(l => l.includes('AGENT TIME STATS'));
+    if (start < 0) return result;
+    for (let i = start + 1; i < Math.min(start + 100, lines.length); i++) {
+        const l = lines[i];
+        const t = l.trim();
+        if (t.startsWith('----------')) break;
+        if (!t.startsWith('|') || t.startsWith('+-')) continue;
+        const cols = l.split('|').map(s => s.trim()).filter((_, j, a) => j > 0 && j < a.length - 1);
+        if (cols.length < 4) continue;
+        const c0 = cols[0];
+        if (!c0 || c0 === 'USER') continue; // header row
+        const c0key = c0.replace(/[\s:]+$/, '').trim().toUpperCase();
+        if (c0key === 'TOTAL' || c0key === 'TOTALS') {
+            // TOTAL row: cols[1]=FULL_NAME or CALLS, try both layouts
+            const calls = parseInt((cols[2]||cols[1]||'').replace(/[^\d]/g,''), 10) || 0;
+            result['__total__'] = { calls, time: cols[3]||cols[2]||'', avg: cols[4]||cols[3]||'' };
+        } else {
+            // Agent row: cols[0]=USER, cols[1]=FULL_NAME, cols[2]=CALLS, cols[3]=TALK_TIME, cols[4]=AVG_TIME
+            const calls = parseInt((cols[2]||'').replace(/[^\d]/g,''), 10) || 0;
+            result[c0] = { calls, time: cols[3]||'', avg: cols[4]||'' };
+        }
+    }
+    return result;
 }
 
 // Helper: format seconds as H:MM:SS
@@ -2633,42 +2683,42 @@ function toSec(t) {
     return (p[0]||0)*3600 + (p[1]||0)*60 + (p[2]||0);
 }
 
-// Parse main campaign summary — derived from CALL STATUS STATS pipe table
+// Parse main campaign summary — derived from CALL STATUS STATS + AGENT TIME STATS
 function parseViciMainSummary(text) {
     const { rows, totals } = parseCSSTable(text);
     const totalCalls = totals.calls || rows.reduce((s,r)=>s+r.calls,0);
-    const totalTime  = totals.callTime || '';
-    const naRow      = rows.find(r => r.status==='NA' || r.status==='NOANSWER');
-    const aRow       = rows.find(r => r.status==='A');
+    const naRow  = rows.find(r => r.status==='NA' || r.status==='NOANSWER');
+    const aRow   = rows.find(r => r.status==='A');
     const noAnswer   = naRow ? naRow.calls : 0;
     const machineAns = aRow  ? aRow.calls  : 0;
-    const drops      = rows.filter(r=>r.status==='DROP'||r.status==='PDROP').reduce((s,r)=>s+r.calls,0);
+    const drops  = rows.filter(r=>r.status==='DROP'||r.status==='PDROP').reduce((s,r)=>s+r.calls,0);
     const humanAnswers = totalCalls - noAnswer - machineAns;
-    const dropPct    = totalCalls > 0 ? ((drops/totalCalls)*100).toFixed(1)+'%' : '0%';
-    // Compute avgCallLen from totalTime / totalCalls
-    let avgCallLen = totals.agentTime && /\d+:\d+/.test(totals.agentTime) ? totals.agentTime : '';
+    const dropPct = totalCalls > 0 ? ((drops/totalCalls)*100).toFixed(1)+'%' : '0%';
+    // Use AGENT TIME STATS TOTAL row for H:MM:SS time data
+    const agentTimeStats = parseViciAgentTimeStats(text);
+    const agTot = agentTimeStats['__total__'];
+    let totalTime  = (agTot && agTot.time) || totals.callTime || '';
+    let avgCallLen = (agTot && agTot.avg)  || '';
     if (!avgCallLen && totalTime && totalCalls > 0) {
         avgCallLen = fmtSec(toSec(totalTime) / totalCalls);
-    }
-    if (!avgCallLen || avgCallLen === '0:00:00') {
-        // Last resort: text regex for AVERAGE TALK SECONDS
-        const m = text.match(/AVERAGE\s+TALK\s+SECONDS[:\s]+([\d.]+)/i);
-        if (m) avgCallLen = fmtSec(parseFloat(m[1]));
     }
     return { totalCalls, humanAnswers, drops, dropPct, noAnswer, avgCallLen, totalTime };
 }
 
-// Parse per-agent summary — derived from their individual campaign CALL STATUS STATS TOTAL row
+// Parse per-agent summary — from AGENT TIME STATS section (H:MM:SS format)
 function parseViciAgentSummary(text) {
+    const agentTimeStats = parseViciAgentTimeStats(text);
+    // For per-agent reports there's exactly one agent entry
+    const entries = Object.entries(agentTimeStats).filter(([k]) => k !== '__total__');
+    if (entries.length >= 1) {
+        const [, s] = entries[0];
+        return { calls: s.calls, time: s.time, avg: s.avg };
+    }
+    // Fall back to CALL STATUS STATS if AGENT TIME STATS section missing
     const { rows, totals } = parseCSSTable(text);
     const calls = totals.calls || rows.reduce((s,r)=>s+r.calls,0);
     const time  = totals.callTime || '';
-    let avg = totals.agentTime && /\d+:\d+/.test(totals.agentTime) ? totals.agentTime : '';
-    if (!avg && time && calls > 0) avg = fmtSec(toSec(time) / calls);
-    if (!avg) {
-        const m = text.match(/AVERAGE\s+TALK\s+SECONDS[:\s]+([\d.]+)/i);
-        if (m) avg = fmtSec(parseFloat(m[1]));
-    }
+    const avg   = totals.avgTime  || (time && calls > 0 ? fmtSec(toSec(time) / calls) : '');
     return { calls, time, avg };
 }
 
@@ -8774,6 +8824,31 @@ app.get('/api/agency-files', (req, res) => {
     );
 });
 
+// Return raw text content of an agency file (unzips ZIP files automatically)
+app.get('/api/agency-files/:fileId/content', (req, res) => {
+    db.get(
+        'SELECT file_path, original_name FROM documents WHERE id = ? AND client_id = ?',
+        [req.params.fileId, 'AGENCY_GENERAL'],
+        (err, doc) => {
+            if (err || !doc) return res.status(404).json({ success: false, error: 'File not found' });
+            const isZip = doc.original_name.toLowerCase().endsWith('.zip');
+            if (isZip) {
+                const { exec } = require('child_process');
+                exec(`unzip -p "${doc.file_path}"`, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+                    if (error) return res.status(500).json({ success: false, error: 'Unzip failed: ' + stderr });
+                    const innerName = doc.original_name.replace(/\.zip$/i, '');
+                    res.json({ success: true, content: stdout, filename: innerName });
+                });
+            } else {
+                fs.readFile(doc.file_path, 'utf8', (readErr, content) => {
+                    if (readErr) return res.status(500).json({ success: false, error: readErr.message });
+                    res.json({ success: true, content, filename: doc.original_name });
+                });
+            }
+        }
+    );
+});
+
 app.delete('/api/agency-files/:fileId', (req, res) => {
     const fileId = req.params.fileId;
     db.get('SELECT file_path FROM documents WHERE id = ? AND client_id = ?', [fileId, 'AGENCY_GENERAL'], (err, doc) => {
@@ -8785,6 +8860,47 @@ app.delete('/api/agency-files/:fileId', (req, res) => {
             res.json({ success: true, message: 'File deleted' });
         });
     });
+});
+
+// IVANS ZIP upload — receive a ZIP, unzip it, return the inner text content
+const ivansUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+app.post('/api/ivans/unzip', ivansUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const tmpZip = `/tmp/ivans_${id}.zip`;
+    const tmpOut = `/tmp/ivans_${id}.out`;
+    const { exec } = require('child_process');
+    try {
+        fs.writeFileSync(tmpZip, req.file.buffer);
+        exec(`unzip -l "${tmpZip}"`, (listErr, listing) => {
+            const innerMatch = listing && listing.match(/\s(\S+\.(dat|al3|txt|xml))/i);
+            const innerName = innerMatch ? innerMatch[1] : req.file.originalname.replace(/\.zip$/i, '');
+            const extractCmd = innerMatch
+                ? `unzip -p "${tmpZip}" "${innerMatch[1]}" > "${tmpOut}"`
+                : `unzip -p "${tmpZip}" > "${tmpOut}"`;
+            exec(extractCmd, (err) => {
+                fs.unlink(tmpZip, () => {});
+                if (err && !fs.existsSync(tmpOut)) {
+                    return res.status(500).json({ success: false, error: 'Unzip failed' });
+                }
+                try {
+                    // Read as latin1 to preserve all byte values without encoding corruption
+                    const buf = fs.readFileSync(tmpOut);
+                    fs.unlink(tmpOut, () => {});
+                    const content = buf.toString('latin1');
+                    // Diagnostic: hex of first 300 bytes to identify record separators
+                    const hexPreview = Array.from(buf.slice(0, 300)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+                    res.json({ success: true, content, filename: innerName, hexPreview, totalBytes: buf.length });
+                } catch (readErr) {
+                    fs.unlink(tmpOut, () => {});
+                    res.status(500).json({ success: false, error: readErr.message });
+                }
+            });
+        });
+    } catch (e) {
+        try { fs.unlinkSync(tmpZip); } catch (_) {}
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 // Agent Dev Stats API endpoints
@@ -10597,6 +10713,11 @@ app.get('/api/accounting/summary', async (req, res) => {
         const now = new Date();
         const yearStart = `${now.getFullYear()}-01-01`;
         const defaultRate = parseFloat(process.env.DEFAULT_COMMISSION_RATE || '0.15');
+        const owner = (req.query.owner || 'grant').toLowerCase();
+
+        // Agent filter: Maureen sees only her own policies
+        const OWNER_AGENTS = { 'maureen': ['maureen'] };
+        const agentFilter = OWNER_AGENTS[owner] ? OWNER_AGENTS[owner].map(a => a.toLowerCase()) : null;
 
         // --- Load all policies ---
         const policies = await new Promise((resolve, reject) => {
@@ -10630,6 +10751,11 @@ app.get('/api/accounting/summary', async (req, res) => {
                 const pList = Array.isArray(data.policies) ? data.policies : [data];
                 for (const p of pList) {
                     if (!p.premium && !p.annualPremium) continue;
+                    // Filter by agent if owner requires it
+                    if (agentFilter) {
+                        const pAgent = (p.agent || '').toLowerCase();
+                        if (!agentFilter.some(a => pAgent.includes(a))) continue;
+                    }
                     const rawPremium = (p.premium || p.annualPremium || '0').toString().replace(/[^0-9.]/g, '');
                     const premium = parseFloat(rawPremium) || 0;
                     if (premium <= 0) continue;
@@ -10787,13 +10913,14 @@ function parseAmount(v) { return parseFloat((v || '0').toString().replace(/[$,\s
 // ---- Transactions (General Ledger) ----
 
 app.get('/api/finance/transactions', (req, res) => {
-    const { start, end, category, source } = req.query;
+    const { start, end, category, source, owner } = req.query;
     let sql = 'SELECT * FROM financial_transactions WHERE 1=1';
     const params = [];
     if (start) { sql += ' AND date >= ?'; params.push(start); }
     if (end)   { sql += ' AND date <= ?'; params.push(end); }
     if (category) { sql += ' AND category = ?'; params.push(category); }
     if (source)   { sql += ' AND source = ?'; params.push(source); }
+    if (owner)    { sql += ' AND (owner = ? OR (owner IS NULL AND ? = \'grant\'))'; params.push(owner, owner); }
     sql += ' ORDER BY date DESC, created_at DESC';
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -10802,13 +10929,13 @@ app.get('/api/finance/transactions', (req, res) => {
 });
 
 app.post('/api/finance/transactions', (req, res) => {
-    const { date, description, amount, category, subcategory, vendor, client, notes, source } = req.body;
+    const { date, description, amount, category, subcategory, vendor, client, notes, source, owner } = req.body;
     if (!date || !description || amount === undefined) return res.status(400).json({ error: 'date, description, amount required' });
     const id = `TXN-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
     db.run(
-        `INSERT INTO financial_transactions (id,date,description,amount,category,subcategory,vendor,client,notes,source)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        [id, date, description, parseAmount(amount.toString()), category||'Uncategorized', subcategory||'', vendor||'', client||'', notes||'', source||'manual'],
+        `INSERT INTO financial_transactions (id,date,description,amount,category,subcategory,vendor,client,notes,source,owner)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, date, description, parseAmount(amount.toString()), category||'Uncategorized', subcategory||'', vendor||'', client||'', notes||'', source||'manual', owner||'grant'],
         function(err) { if (err) return res.status(500).json({ error: err.message }); res.json({ id, success: true }); }
     );
 });
@@ -10835,17 +10962,18 @@ app.delete('/api/finance/transactions/:id', (req, res) => {
 
 // Bulk import from CSV (persistent)
 app.post('/api/finance/transactions/bulk', (req, res) => {
-    const { transactions, source } = req.body;
+    const { transactions, source, owner } = req.body;
     if (!Array.isArray(transactions) || !transactions.length) return res.status(400).json({ error: 'transactions array required' });
+    const txOwner = owner || 'grant';
     let imported = 0, skipped = 0;
     const stmt = db.prepare(
-        `INSERT OR IGNORE INTO financial_transactions (id,date,description,amount,category,subcategory,vendor,client,source)
-         VALUES (?,?,?,?,?,?,?,?,?)`
+        `INSERT OR IGNORE INTO financial_transactions (id,date,description,amount,category,subcategory,vendor,client,source,owner)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`
     );
     for (const t of transactions) {
-        const id = `TXN-${t.date}-${Math.abs(t.amount).toFixed(2)}-${(t.name||'').slice(0,20).replace(/\s/g,'')}`.replace(/[^a-zA-Z0-9\-_.]/g,'');
+        const id = `TXN-${txOwner}-${t.date}-${Math.abs(t.amount).toFixed(2)}-${(t.name||t.description||'').slice(0,20).replace(/\s/g,'')}`.replace(/[^a-zA-Z0-9\-_.]/g,'');
         stmt.run([id, t.date, t.name||t.description||'Unknown', t.amount,
-                  t.category||'Uncategorized', t.subcategory||'', t.merchant_name||t.name||'', '', source||'csv'],
+                  t.category||'Uncategorized', t.subcategory||'', t.merchant_name||t.name||'', '', source||'csv', txOwner],
                  function(err) { if (!err && this.changes > 0) imported++; else skipped++; });
     }
     stmt.finalize(() => res.json({ success: true, imported, skipped, total: transactions.length }));
@@ -10857,10 +10985,11 @@ app.get('/api/finance/pl', async (req, res) => {
         const year = parseInt(req.query.year) || new Date().getFullYear();
         const startDate = `${year}-01-01`, endDate = `${year}-12-31`;
         const defaultRate = parseFloat(process.env.DEFAULT_COMMISSION_RATE || '0.15');
+        const owner = req.query.owner || 'grant';
 
-        // Transactions for the year
+        // Transactions for the year (scoped by owner)
         const txns = await new Promise((resolve, reject) => {
-            db.all('SELECT * FROM financial_transactions WHERE date>=? AND date<=?', [startDate, endDate], (err,rows) => err ? reject(err) : resolve(rows||[]));
+            db.all('SELECT * FROM financial_transactions WHERE date>=? AND date<=? AND (owner=? OR (owner IS NULL AND ?=\'grant\'))', [startDate, endDate, owner, owner], (err,rows) => err ? reject(err) : resolve(rows||[]));
         });
 
         // Commission income (marked paid)
@@ -10922,7 +11051,8 @@ app.get('/api/finance/pl', async (req, res) => {
         }
         for (const m of monthly) m.net = m.income - m.expenses;
 
-        // Commission pipeline (from policies, not yet paid)
+        // Commission pipeline (from policies, not yet paid) — agent-scoped
+        const PIPELINE_AGENT_FILTER = owner === 'maureen' ? ['maureen'] : null;
         let pipelineArr = [];
         const paidPolicyIds = new Set(paidComm.map(p => p.policy_id));
         for (const row of allPolicies) {
@@ -10931,6 +11061,10 @@ app.get('/api/finance/pl', async (req, res) => {
                 const pList = Array.isArray(data.policies) ? data.policies : [data];
                 for (const p of pList) {
                     if (!p.premium && !p.annualPremium) continue;
+                    if (PIPELINE_AGENT_FILTER) {
+                        const pAgent = (p.agent || '').toLowerCase();
+                        if (!PIPELINE_AGENT_FILTER.some(a => pAgent.includes(a))) continue;
+                    }
                     const premium = parseFloat((p.premium||p.annualPremium||'0').toString().replace(/[^0-9.]/g,'')) || 0;
                     if (premium <= 0) continue;
                     const pId = p.id || row.id;
@@ -10955,8 +11089,9 @@ app.get('/api/finance/pl', async (req, res) => {
 // ---- Cash Flow ----
 app.get('/api/finance/cashflow', (req, res) => {
     const year = parseInt(req.query.year) || new Date().getFullYear();
+    const owner = req.query.owner || 'grant';
     const startDate = `${year}-01-01`, endDate = `${year}-12-31`;
-    db.all('SELECT date, amount FROM financial_transactions WHERE date>=? AND date<=? ORDER BY date', [startDate, endDate], (err, rows) => {
+    db.all('SELECT date, amount FROM financial_transactions WHERE date>=? AND date<=? AND (owner=? OR (owner IS NULL AND ?=\'grant\')) ORDER BY date', [startDate, endDate, owner, owner], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         const monthly = Array.from({length:12}, (_,i) => ({
             month: i+1, label: new Date(year,i,1).toLocaleString('en-US',{month:'short'}),
@@ -11074,9 +11209,10 @@ app.get('/api/finance/tax-summary', async (req, res) => {
     try {
         const year = parseInt(req.query.year) || new Date().getFullYear();
         const start = `${year}-01-01`, end = `${year}-12-31`;
+        const owner = req.query.owner || 'grant';
 
-        // Net income
-        const txns = await new Promise((resolve,reject) => db.all('SELECT amount, category FROM financial_transactions WHERE date>=? AND date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
+        // Net income (scoped by owner)
+        const txns = await new Promise((resolve,reject) => db.all('SELECT amount, category FROM financial_transactions WHERE date>=? AND date<=? AND (owner=? OR (owner IS NULL AND ?=\'grant\'))', [start,end,owner,owner], (err,rows) => err?reject(err):resolve(rows||[])));
         const paidComm = await new Promise((resolve,reject) => db.all('SELECT commission_amount FROM commission_payments WHERE payment_date>=? AND payment_date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
         const contractors = await new Promise((resolve,reject) => db.all('SELECT amount FROM contractor_payments WHERE payment_date>=? AND payment_date<=?', [start,end], (err,rows) => err?reject(err):resolve(rows||[])));
 
