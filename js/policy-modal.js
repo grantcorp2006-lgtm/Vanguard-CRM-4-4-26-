@@ -797,6 +797,7 @@ function generateTabContent(tabId, policyType) {
                                     <option value="">Select Limit</option>
                                     <option value="0">No Coverage</option>
                                     <option value="1000">$1,000</option>
+                                    <option value="2000">$2,000</option>
                                     <option value="2500">$2,500</option>
                                     <option value="5000">$5,000</option>
                                     <option value="10000">$10,000</option>
