@@ -15623,6 +15623,14 @@ function loadReportsView() {
                     <p>Full lead roster with status, assignment, and pipeline stage</p>
                 </div>
 
+                <div class="report-card" onclick="runReport('quarterly')">
+                    <div class="report-icon">
+                        <i class="fas fa-calendar-check"></i>
+                    </div>
+                    <h3>Quarterly Report</h3>
+                    <p>Sales, financial &amp; activity metrics by quarter</p>
+                </div>
+
                 <div class="report-card" onclick="runReport('production')">
                     <div class="report-icon">
                         <i class="fas fa-chart-line"></i>
@@ -21786,6 +21794,10 @@ function runReport(type) {
         case 'lead-list':
             generateLeadListReport();
             break;
+        case 'quarterly':
+            showNotification('Generating Quarterly Report...', 'info');
+            generateQuarterlyReport();
+            break;
         default:
             showNotification(`Generating ${type} report...`, 'info');
             setTimeout(() => {
@@ -21793,6 +21805,693 @@ function runReport(type) {
             }, 2000);
     }
 }
+
+// ─── QUARTERLY REPORT ────────────────────────────────────────────────────────
+function generateQuarterlyReport() {
+    document.querySelectorAll('.qrpt-overlay').forEach(e => e.remove());
+    const now = new Date();
+    const curQ = Math.floor(now.getMonth() / 3) + 1;
+    const curY = now.getFullYear();
+    let defQ = curQ - 1; let defY = curY;
+    if (defQ < 1) { defQ = 4; defY = curY - 1; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'qrpt-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.75);display:flex;align-items:center;justify-content:center;z-index:999999;padding:12px;box-sizing:border-box;';
+
+    overlay.innerHTML = `
+    <div style="background:#f8fafc;border-radius:20px;width:100%;max-width:1400px;height:94vh;display:flex;flex-direction:column;box-shadow:0 30px 100px rgba(0,0,0,0.45);overflow:hidden" onclick="event.stopPropagation()">
+      <div style="background:linear-gradient(135deg,#4338ca 0%,#7c3aed 100%);padding:18px 28px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="background:rgba(255,255,255,0.18);border-radius:12px;padding:10px 12px"><i class="fas fa-calendar-check" style="color:#fff;font-size:22px"></i></div>
+          <div>
+            <h2 style="margin:0;color:#fff;font-size:21px;font-weight:700;letter-spacing:-.3px">Quarterly Business Report</h2>
+            <p style="margin:2px 0 0;color:rgba(255,255,255,0.65);font-size:12px">Sales, Financial &amp; Activity Metrics</p>
+          </div>
+        </div>
+        <button onclick="this.closest('.qrpt-overlay').remove()" style="background:rgba(255,255,255,0.15);border:none;width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:22px;color:#fff;display:flex;align-items:center;justify-content:center">&times;</button>
+      </div>
+      <div style="background:#fff;border-bottom:2px solid #e2e8f0;padding:14px 28px;display:flex;gap:16px;align-items:flex-end;flex-shrink:0;flex-wrap:wrap">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:6px">Quarter</label>
+          <div style="display:flex;gap:6px">
+            ${[1,2,3,4].map(q => `<button onclick="setQRptQuarter(${q})" id="qrpt-qbtn-${q}" style="padding:7px 14px;background:${q===defQ?'#ede9fe':'#f1f5f9'};border:1.5px solid ${q===defQ?'#7c3aed':'#e2e8f0'};border-radius:7px;cursor:pointer;font-size:13px;font-weight:700;color:${q===defQ?'#4c1d95':'#475569'}">Q${q}</button>`).join('')}
+          </div>
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:6px">Year</label>
+          <select id="qrpt-year" onchange="runQuarterlyReport()" style="padding:7px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;color:#111827;outline:none">
+            ${[curY-2, curY-1, curY, curY+1].map(y => `<option value="${y}" ${y===defY?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <input type="hidden" id="qrpt-q" value="${defQ}">
+        <div style="margin-left:auto;align-self:flex-end">
+          <button onclick="runQuarterlyReport()" style="padding:10px 28px;background:linear-gradient(135deg,#4338ca,#7c3aed);color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(124,58,237,0.4)">
+            <i class="fas fa-play" style="font-size:13px"></i> Run Report
+          </button>
+        </div>
+      </div>
+      <div id="qrpt-results" style="flex:1;overflow-y:auto;padding:24px;">
+        <div style="text-align:center;color:#94a3b8;padding:60px 0">
+          <i class="fas fa-calendar-check" style="font-size:48px;margin-bottom:12px;display:block;color:#ede9fe"></i>
+          <p style="font-size:15px;font-weight:500;margin:0">Click <strong>Run Report</strong> to load quarterly data</p>
+        </div>
+      </div>
+      <div style="background:#fff;border-top:1px solid #e2e8f0;padding:10px 28px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+        <span id="qrpt-footer" style="font-size:12px;color:#64748b">Ready</span>
+        <button onclick="exportQRptCSV()" style="padding:7px 16px;background:#f1f5f9;border:1.5px solid #e2e8f0;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;color:#374151;display:flex;align-items:center;gap:6px"><i class="fas fa-download"></i> Export CSV</button>
+      </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    setTimeout(() => runQuarterlyReport(), 200);
+}
+
+function setQRptQuarter(q) {
+    const hidden = document.getElementById('qrpt-q');
+    if (hidden) hidden.value = q;
+    for (let i = 1; i <= 4; i++) {
+        const btn = document.getElementById('qrpt-qbtn-' + i);
+        if (!btn) continue;
+        const active = i === q;
+        btn.style.background = active ? '#ede9fe' : '#f1f5f9';
+        btn.style.borderColor = active ? '#7c3aed' : '#e2e8f0';
+        btn.style.color = active ? '#4c1d95' : '#475569';
+    }
+    runQuarterlyReport();
+}
+
+async function runQuarterlyReport() {
+    const qEl = document.getElementById('qrpt-q');
+    const yEl = document.getElementById('qrpt-year');
+    const resultsEl = document.getElementById('qrpt-results');
+    const footerEl = document.getElementById('qrpt-footer');
+    if (!resultsEl || !qEl || !yEl) return;
+
+    const q = parseInt(qEl.value);
+    const year = parseInt(yEl.value);
+    const qMonth0 = (q - 1) * 3;
+    const startDate = new Date(year, qMonth0, 1).toISOString().slice(0, 10);
+    const endDate = new Date(year, qMonth0 + 3, 0).toISOString().slice(0, 10);
+    const qLabel = 'Q' + q + ' ' + year;
+    const qMonths = [qMonth0, qMonth0 + 1, qMonth0 + 2];
+
+    resultsEl.innerHTML = '<div style="text-align:center;padding:60px 0;color:#7c3aed"><i class="fas fa-spinner fa-spin" style="font-size:32px"></i><p style="margin-top:12px;font-weight:500">Loading ' + qLabel + ' data...</p></div>';
+    if (footerEl) footerEl.textContent = 'Loading ' + qLabel + '...';
+
+    const fmt = n => '$' + (isNaN(n) ? '0' : Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}));
+    const fmtN = n => isNaN(n) ? '0' : Number(n).toLocaleString('en-US');
+    const pct = (a, b) => b > 0 ? ((a / b) * 100).toFixed(1) + '%' : '0%';
+
+    try {
+        const [plData, txnData, cashData, summaryData, policiesRaw, leadsRaw, vdData] = await Promise.all([
+            fetch('/api/finance/pl?year=' + year).then(r => r.json()).catch(() => ({})),
+            fetch('/api/finance/transactions?start=' + startDate + '&end=' + endDate).then(r => r.json()).catch(() => []),
+            fetch('/api/finance/cashflow?year=' + year).then(r => r.json()).catch(() => ({})),
+            fetch('/api/accounting/summary').then(r => r.json()).catch(() => ({})),
+            fetch('/api/policies?includeInactive=true').then(r => r.json()).catch(() => []),
+            fetch('/api/leads').then(r => r.json()).catch(() => []),
+            fetch('/api/vicidial/performance-report?query_date=' + startDate + '&end_date=' + endDate + '&shift=--&users=--ALL--').then(r => r.json()).catch(() => ({}))
+        ]);
+
+        const qStart = new Date(startDate + 'T00:00:00').getTime();
+        const qEnd   = new Date(endDate   + 'T23:59:59').getTime();
+
+        // ── Vanguard-only filter (exclude Maureen / United) ──────────────────
+        const isVanguard = val => !/maureen/i.test(val || '');
+
+        // ── POLICIES in quarter ──────────────────────────────────────────────
+        // Renewals: Q1-effective-date policies that are NOT new business (hard-coded by management)
+        const RENEWAL_POLICY_NUMBERS = new Set([
+            '9300107451', // A-VINO LTD — Grant renewal
+            '9300123436', // MIDWEST APEX TRANSPORT LLC — Grant renewal
+            '868356853',  // Du Road Trucking LLC — Grant renewal
+        ]);
+        const allPolicies = (Array.isArray(policiesRaw) ? policiesRaw : [])
+            .filter(p => isVanguard(p.agent) && isVanguard(p.assignedTo) && isVanguard(p.agentName));
+        const qPolicies = allPolicies.filter(p => {
+            if (RENEWAL_POLICY_NUMBERS.has(String(p.policyNumber || p.policy_number || ''))) return false;
+            const dateStr = p.effectiveDate || p.createdDate || p.created_at || '';
+            if (dateStr) { const ts = new Date(dateStr).getTime(); return ts >= qStart && ts <= qEnd; }
+            const m = String(p.id || '').match(/POL-(\d+)-/);
+            if (m) { const ts = parseInt(m[1]); return ts >= qStart && ts <= qEnd; }
+            return false;
+        });
+
+        let totalWrittenPremium = 0;
+        const premiumByLine = {}, agentPremium = {}, agentPolicyCnt = {}, carrierPremium = {};
+        qPolicies.forEach(p => {
+            const premium = parseFloat((p.premium || p.annualPremium || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+            totalWrittenPremium += premium;
+            const line  = p.coverageType || p.lineOfBusiness || p.policyType || 'Other';
+            const agent = p.agent || p.assignedTo || p.agentName || 'Unassigned';
+            const carr  = p.carrier || 'Unknown';
+            premiumByLine[line]    = (premiumByLine[line]    || 0) + premium;
+            agentPremium[agent]    = (agentPremium[agent]    || 0) + premium;
+            agentPolicyCnt[agent]  = (agentPolicyCnt[agent]  || 0) + 1;
+            carrierPremium[carr]   = (carrierPremium[carr]   || 0) + premium;
+        });
+        const avgPremPerPolicy = qPolicies.length > 0 ? totalWrittenPremium / qPolicies.length : 0;
+        const topAgents = Object.entries(agentPremium).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+        // ── TOTAL Q1 WRITTEN PREMIUM (all Q1-effective policies, new + renewals) ──
+        const agentTotalPremium = {};
+        let totalBookPremium = 0;
+        allPolicies.filter(p => {
+            const dateStr = p.effectiveDate || p.createdDate || p.created_at || '';
+            if (dateStr) { const ts = new Date(dateStr).getTime(); return ts >= qStart && ts <= qEnd; }
+            const m = String(p.id || '').match(/POL-(\d+)-/);
+            if (m) { const ts = parseInt(m[1]); return ts >= qStart && ts <= qEnd; }
+            return false;
+        }).forEach(p => {
+            const premium = parseFloat((p.premium || p.annualPremium || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+            const agent = p.agent || p.assignedTo || p.agentName || 'Unassigned';
+            agentTotalPremium[agent] = (agentTotalPremium[agent] || 0) + premium;
+            totalBookPremium += premium;
+        });
+
+        // ── FINANCIAL ────────────────────────────────────────────────────────
+        const plMonthly = plData.monthly || [];
+        const qMonthlyPL = plMonthly.filter((_, i) => qMonths.includes(i));
+        const qRevPL   = qMonthlyPL.reduce((s, m) => s + (m.income   || 0), 0);
+        const qExpPL   = qMonthlyPL.reduce((s, m) => s + (m.expenses || 0), 0);
+
+        const EQUITY_CATS = new Set(['Capital Contribution','Owner Contribution','Equity Contribution','Owner Deposit']);
+        const txnIncomeCats = {}, txnExpenseCats = {};
+        let txnTotalIncome = 0, txnTotalExpenses = 0;
+        (Array.isArray(txnData) ? txnData : []).forEach(t => {
+            if (t.amount > 0 && !EQUITY_CATS.has(t.category)) {
+                const cat = t.category || 'Other Income';
+                txnIncomeCats[cat] = (txnIncomeCats[cat] || 0) + t.amount;
+                txnTotalIncome += t.amount;
+            } else if (t.amount < 0) {
+                const cat = t.category || 'Other Expense';
+                txnExpenseCats[cat] = (txnExpenseCats[cat] || 0) + Math.abs(t.amount);
+                txnTotalExpenses += Math.abs(t.amount);
+            }
+        });
+        const hasTxData    = txnTotalIncome > 0 || txnTotalExpenses > 0;
+        const dispRevenue  = hasTxData ? txnTotalIncome  : qRevPL;
+        const dispExpenses = hasTxData ? txnTotalExpenses : qExpPL;
+        const dispNet      = dispRevenue - dispExpenses;
+
+        // ── CASH FLOW ────────────────────────────────────────────────────────
+        const cfMonthly = (cashData.monthly || []);
+        const qCFMonths = cfMonthly.filter((_, i) => qMonths.includes(i));
+        const qInflow  = qCFMonths.reduce((s, m) => s + (m.inflow  || 0), 0);
+        const qOutflow = qCFMonths.reduce((s, m) => s + (m.outflow || 0), 0);
+        const qNetCF   = qInflow - qOutflow;
+
+        // ── LEADS / ACTIVITY ─────────────────────────────────────────────────
+        const localLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const leadMap = new Map(localLeads.map(l => [String(l.id), l]));
+        let allLeads = (Array.isArray(leadsRaw) ? leadsRaw : []).map(sl => {
+            const ll = leadMap.get(String(sl.id));
+            return ll ? Object.assign({}, sl, {reachOut: ll.reachOut || sl.reachOut}) : sl;
+        });
+        localLeads.forEach(l => { if (!allLeads.find(s => String(s.id) === String(l.id))) allLeads.push(l); });
+
+        // Exclude Maureen's leads
+        allLeads = allLeads.filter(l => isVanguard(l.assignedTo) && isVanguard(l.agent));
+
+        let qLeads = 0, qCalls = 0, qConnected = 0, totalCallSecs = 0;
+        const agCRM = {};
+        const getAgCRM = a => { if (!agCRM[a]) agCRM[a] = {leads:0, calls:0, connected:0, callSecs:0, appsToMarket:0}; return agCRM[a]; };
+        allLeads.forEach(lead => {
+            const agent = lead.assignedTo || lead.agent || 'Unassigned';
+            const cTs = new Date(lead.createdAt || lead.created_at || '').getTime();
+            if (cTs >= qStart && cTs <= qEnd) { qLeads++; getAgCRM(agent).leads++; }
+            const app = lead.appStage || {};
+            if (app.app || app.lossRuns || app.iftas || app.saa) getAgCRM(agent).appsToMarket++;
+            const callLogs = (lead.reachOut || {}).callLogs || [];
+            callLogs.forEach(c => {
+                const lTs = new Date(c.timestamp || '').getTime();
+                if (lTs >= qStart && lTs <= qEnd) {
+                    qCalls++; getAgCRM(agent).calls++;
+                    if (c.connected) { qConnected++; getAgCRM(agent).connected++; }
+                    const dur = c.duration || 0;
+                    totalCallSecs += dur; getAgCRM(agent).callSecs += dur;
+                }
+            });
+        });
+
+        const connectionRate  = pct(qConnected, qCalls);
+        const leadToSaleRatio = pct(qPolicies.length, qLeads);
+        const callToSaleRatio = pct(qPolicies.length, qCalls);
+        const avgCallsPerSale = qPolicies.length > 0 ? (qCalls / qPolicies.length).toFixed(1) : '—';
+        const avgCallsPerLead = qLeads   > 0 ? (qCalls / qLeads).toFixed(1)   : '—';
+        const avgTalkMins     = qCalls   > 0 ? (totalCallSecs / qCalls / 60).toFixed(1) : '—';
+        const costPerPolicy   = (qPolicies.length > 0 && dispExpenses > 0) ? dispExpenses / qPolicies.length : 0;
+        const acctAgentSummary = (summaryData.agentSummary || []).filter(a => isVanguard(a.agent));
+
+        // ── VICIDIAL TOTALS + PER-AGENT ──────────────────────────────────────
+        let vdTotalCalls = 0, vdTotalSales = 0, vdTotalAnswered = 0, vdAvgTalkSecs = 0, vdHasData = false;
+        const vdAgentMap = {}; // keyed by lowercase name fragments for flexible lookup
+        try {
+            if (vdData && vdData.success && vdData.html) {
+                const vdDoc = new DOMParser().parseFromString(vdData.html, 'text/html');
+                const vdPre = vdDoc.querySelector('pre');
+                const vdLines = (vdPre ? vdPre.textContent : '').split('\n');
+                const vdCS = vdLines.findIndex(l => l.includes('CALL STATS BREAKDOWN'));
+                const vdPS = vdLines.findIndex(l => l.includes('PAUSE CODE BREAKDOWN'));
+                const vdCE = vdPS >= 0 ? vdPS : vdLines.length;
+                if (vdCS >= 0) {
+                    const vdCm = vdGetColMap(vdLines, vdCS, vdCE);
+                    const vdRows = vdParseRows(vdLines, vdCS, vdCE);
+                    const vdTots = vdParseTotals(vdLines, vdCS, vdCE);
+                    const rci = (r, name) => r[vdCm[name] ?? -1] ?? '-';
+                    // Store per-agent VD data keyed by first name (lowercase) and full name
+                    vdRows.forEach(r => {
+                        const fullName = (r[0] || '').toLowerCase().trim();
+                        const firstName = fullName.split(' ')[0];
+                        const entry = {
+                            fullName: r[0] || '',
+                            calls:    parseInt((rci(r,'CALLS')||'0').replace(/[^\d]/g,'')) || 0,
+                            answered: parseInt((rci(r,'A')||'0').replace(/[^\d]/g,''))     || 0,
+                            sales:    parseInt((rci(r,'SALE')||'0').replace(/[^\d]/g,''))  || 0,
+                            dnc:      parseInt((rci(r,'DNC')||'0').replace(/[^\d]/g,''))   || 0,
+                            callbk:   parseInt((rci(r,'CALLBK')||'0').replace(/[^\d]/g,''))|| 0,
+                            dispo:    parseInt((rci(r,'DISPO')||'0').replace(/[^\d]/g,'')) || 0,
+                            dead:     parseInt((rci(r,'DEAD')||'0').replace(/[^\d]/g,''))  || 0,
+                            talkTime: rci(r,'TALK'), talkAvg: rci(r,'TALKAVG'),
+                            loginTime: rci(r,'TIME'), pauseTime: rci(r,'PAUSE'), waitTime: rci(r,'WAIT')
+                        };
+                        vdAgentMap[fullName]  = entry;
+                        vdAgentMap[firstName] = entry;
+                    });
+                    if (vdTots) {
+                        const SHIFT = 3;
+                        const vtc = name => { const i = (vdCm[name] ?? -1) - SHIFT; return i >= 0 ? (vdTots[i] || '0') : '0'; };
+                        vdTotalCalls    = parseInt(vtc('CALLS').replace(/[^\d]/g, ''))  || 0;
+                        vdTotalSales    = parseInt(vtc('SALE').replace(/[^\d]/g, ''))   || 0;
+                        vdTotalAnswered = parseInt(vtc('A').replace(/[^\d]/g, ''))      || 0;
+                        vdAvgTalkSecs   = vdTotalCalls > 0 ? vdTimeSec(vtc('TALK')) / vdTotalCalls : 0;
+                        vdHasData = vdTotalCalls > 0;
+                    }
+                }
+            }
+        } catch(e) { console.warn('ViciDial parse in quarterly report:', e); }
+
+        // NOTE: ViciDial "SALE" dispo = a Lead in Vanguard terminology (not a true policy sale)
+        // vdTotalSales = ViciDial leads (SALE dispo count)
+        // qPolicies.length = actual sales (CRM policies written)
+        const vdTotalVDLeads    = vdTotalSales; // rename for clarity
+        // Lead→Sale: VD leads (SALE dispo) as denominator, CRM policies as numerator
+        const vdLeadToSaleRatio = vdHasData && vdTotalVDLeads > 0 ? pct(qPolicies.length, vdTotalVDLeads) : pct(qPolicies.length, qLeads);
+        const vdConnectionRate  = vdHasData ? pct(vdTotalAnswered, vdTotalCalls) : connectionRate;
+        const vdCallsPerLead    = (vdHasData && vdTotalVDLeads > 0) ? (vdTotalCalls / vdTotalVDLeads).toFixed(1) : '—';
+        const vdAvgTalkMins     = vdAvgTalkSecs > 0 ? (vdAvgTalkSecs / 60).toFixed(1) : (totalCallSecs > 0 && qCalls > 0 ? (totalCallSecs / qCalls / 60).toFixed(1) : '—');
+
+        // ── STORE DATA FOR POPUPS ─────────────────────────────────────────────
+        window._qrptQPolicies = qPolicies;
+        window._qrptLabel = qLabel;
+        window._qrptAgentData = {};
+        const allAgNames = new Set([...Object.keys(agentPremium), ...Object.keys(agCRM)]);
+        allAgNames.forEach(a => {
+            const aLow = a.toLowerCase();
+            const vdEntry = vdAgentMap[aLow] || vdAgentMap[aLow.split(' ')[0]] || null;
+            window._qrptAgentData[a] = { name: a, crm: agCRM[a] || {leads:0,calls:0,connected:0,callSecs:0,appsToMarket:0}, policies: agentPolicyCnt[a] || 0, premium: agentPremium[a] || 0, vd: vdEntry };
+        });
+
+        // ── HELPERS ──────────────────────────────────────────────────────────
+        const th = 'padding:10px 14px;text-align:left;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;background:#f8fafc;border-bottom:2px solid #e2e8f0;';
+        const td = 'padding:10px 14px;border-bottom:1px solid #f1f5f9;color:#374151;';
+        const tdr = td + 'text-align:right;font-weight:600;';
+        const tbl = 'width:100%;border-collapse:collapse;font-size:13px;';
+
+        const kpiCard = (icon, label, value, sub, color) =>
+            '<div style="background:#fff;border-radius:14px;padding:20px 22px;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,0.05);">' +
+            '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+            '<div style="width:38px;height:38px;border-radius:10px;background:' + color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+            '<i class="fas ' + icon + '" style="color:' + color + ';font-size:15px"></i></div>' +
+            '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em">' + label + '</div></div>' +
+            '<div style="font-size:26px;font-weight:800;color:#111827;margin-bottom:4px">' + value + '</div>' +
+            '<div style="font-size:12px;color:#94a3b8">' + sub + '</div></div>';
+
+        const secHdr = (icon, title, color) =>
+            '<div style="display:flex;align-items:center;gap:10px;margin:28px 0 16px">' +
+            '<div style="width:34px;height:34px;border-radius:9px;background:' + color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+            '<i class="fas ' + icon + '" style="color:' + color + ';font-size:14px"></i></div>' +
+            '<h3 style="margin:0;font-size:16px;font-weight:700;color:#111827">' + title + '</h3>' +
+            '<div style="flex:1;height:1px;background:#e2e8f0;margin-left:8px"></div></div>';
+
+        const card = (title, icon, color, html) =>
+            '<div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">' +
+            '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;font-weight:700;font-size:14px;color:#111827;background:#fafafa">' +
+            '<i class="fas ' + icon + '" style="color:' + color + ';margin-right:8px"></i>' + title + '</div>' + html + '</div>';
+
+        const noDataRow = (cols, msg) => '<tr><td colspan="' + cols + '" style="' + td + 'text-align:center;color:#94a3b8;padding:20px">' + msg + '</td></tr>';
+
+        // ── Revenue by line ──────────────────────────────────────────────────
+        const lineRows = Object.entries(premiumByLine).sort((a, b) => b[1] - a[1]).map(([line, prem]) =>
+            '<tr><td style="' + td + '">' + line + '</td>' +
+            '<td style="' + tdr + 'color:#7c3aed">' + fmt(prem) + '</td>' +
+            '<td style="' + tdr + '">' + pct(prem, totalWrittenPremium) + '</td></tr>'
+        ).join('') || noDataRow(3, 'No production data for ' + qLabel);
+
+        // ── Top agents ───────────────────────────────────────────────────────
+        const agColors = ['#7c3aed','#4338ca','#0891b2','#059669','#d97706','#dc2626'];
+        const agentRows = topAgents.map(([agent, prem], i) =>
+            '<tr><td style="' + td + '"><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:' + (agColors[i]||'#64748b') + '18;color:' + (agColors[i]||'#64748b') + ';font-size:11px;font-weight:700;margin-right:8px">' + (i+1) + '</span>' + agent + '</td>' +
+            '<td style="' + tdr + '">' + fmtN(agentPolicyCnt[agent] || 0) +
+              ' <button onclick="viewQRptAgentPolicies(\'' + agent.replace(/'/g,"\\'") + '\')" title="View ' + agent + ' policies" style="background:#fef3c7;border:none;border-radius:5px;padding:3px 7px;cursor:pointer;color:#d97706;font-size:11px;margin-left:4px"><i class="fas fa-eye"></i></button></td>' +
+            '<td style="' + tdr + '">' + fmt(prem) + '</td>' +
+            '<td style="' + tdr + 'color:#059669">' + fmt(agentTotalPremium[agent] || 0) + '</td>' +
+            '<td style="' + tdr + '">' + (agentPolicyCnt[agent] ? fmt(prem / agentPolicyCnt[agent]) : '—') + '</td>' +
+            '<td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:center"><button onclick="viewQRptAgentStats(\'' + agent.replace(/'/g,"\\'") + '\')" title="View ' + agent + ' full stats" style="background:#ede9fe;border:none;border-radius:6px;padding:5px 9px;cursor:pointer;color:#7c3aed;font-size:12px"><i class="fas fa-eye"></i></button></td></tr>'
+        ).join('') || noDataRow(6, 'No agent data for ' + qLabel);
+
+        // ── Income by category ───────────────────────────────────────────────
+        const incRows = Object.entries(txnIncomeCats).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([cat, amt]) =>
+            '<tr><td style="' + td + '">' + cat + '</td>' +
+            '<td style="' + tdr + 'color:#059669">' + fmt(amt) + '</td>' +
+            '<td style="' + tdr + '">' + pct(amt, txnTotalIncome) + '</td></tr>'
+        ).join('') || noDataRow(3, 'No income transactions for ' + qLabel);
+
+        const incFoot = txnTotalIncome > 0 ? '<tfoot><tr style="background:#f0fdf4"><td style="padding:10px 14px;font-weight:700;font-size:12px;color:#064e3b">Total</td><td style="padding:10px 14px;text-align:right;font-weight:800;color:#059669">' + fmt(txnTotalIncome) + '</td><td style="padding:10px 14px;text-align:right;font-weight:600;color:#64748b">100%</td></tr></tfoot>' : '';
+
+        // ── Expenses by category ─────────────────────────────────────────────
+        const expRows = Object.entries(txnExpenseCats).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([cat, amt]) =>
+            '<tr><td style="' + td + '">' + cat + '</td>' +
+            '<td style="' + tdr + 'color:#ef4444">' + fmt(amt) + '</td>' +
+            '<td style="' + tdr + '">' + pct(amt, txnTotalExpenses) + '</td></tr>'
+        ).join('') || noDataRow(3, 'No expense transactions for ' + qLabel);
+
+        const expFoot = txnTotalExpenses > 0 ? '<tfoot><tr style="background:#fff7f7"><td style="padding:10px 14px;font-weight:700;font-size:12px;color:#991b1b">Total</td><td style="padding:10px 14px;text-align:right;font-weight:800;color:#ef4444">' + fmt(txnTotalExpenses) + '</td><td style="padding:10px 14px;text-align:right;font-weight:600;color:#64748b">100%</td></tr></tfoot>' : '';
+
+        // ── Cash flow by month ───────────────────────────────────────────────
+        const cfRows = qCFMonths.map(m =>
+            '<tr><td style="' + td + 'font-weight:600">' + m.label + '</td>' +
+            '<td style="' + tdr + 'color:#059669">' + fmt(m.inflow) + '</td>' +
+            '<td style="' + tdr + 'color:#ef4444">' + fmt(m.outflow) + '</td>' +
+            '<td style="' + tdr + (m.net >= 0 ? 'color:#059669' : 'color:#ef4444') + '">' + (m.net >= 0 ? '+' : '') + fmt(m.net) + '</td></tr>'
+        ).join('') || noDataRow(4, 'No cash flow data for ' + qLabel);
+
+        // ── Agent compensation ───────────────────────────────────────────────
+        const acctAgRows = acctAgentSummary.slice(0, 6).map(a =>
+            '<tr><td style="' + td + '">' + a.agent + '</td>' +
+            '<td style="' + tdr + '">' + fmtN(a.policyCount || 0) + '</td>' +
+            '<td style="' + tdr + '">' + fmt(a.premiumYTD || 0) + '</td>' +
+            '<td style="' + tdr + 'color:#2563eb">' + fmt(a.commissionYTD || 0) + '</td>' +
+            '<td style="' + tdr + 'color:#059669">' + fmt(a.paidYTD || 0) + '</td>' +
+            '<td style="' + tdr + 'color:#f59e0b">' + fmt(a.pendingYTD || 0) + '</td></tr>'
+        ).join('') || noDataRow(6, 'No compensation data — commissions tracked in Accounting tab');
+
+        const noTxNote = !hasTxData
+            ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;margin-bottom:16px"><i class="fas fa-info-circle" style="margin-right:6px"></i>No bank transactions found for ' + qLabel + '. Upload a CSV in <strong>Accounting → Transactions</strong> to see detailed P&amp;L and expense breakdowns.</div>'
+            : '';
+
+        resultsEl.innerHTML =
+            '<div style="font-size:13px;color:#64748b;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between">' +
+            '<span>Report period: <strong>' + startDate + '</strong> → <strong>' + endDate + '</strong></span>' +
+            '<span style="background:#ede9fe;color:#4c1d95;padding:4px 14px;border-radius:20px;font-weight:700;font-size:12px">📊 ' + qLabel + '</span></div>' +
+
+            // ── KPI ROW ──────────────────────────────────────────────────────
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:8px">' +
+            kpiCard('fa-shield-alt',   'New Written Premium', fmt(totalWrittenPremium), qPolicies.length + ' policies this quarter', '#7c3aed') +
+            kpiCard('fa-book-open',    'Total Q1 Written',  fmt(totalBookPremium),    'New business + renewals written in quarter', '#059669') +
+            kpiCard('fa-dollar-sign',  'Net Revenue',   fmt(dispRevenue),  hasTxData ? fmt(dispNet) + ' net income' : 'P&L estimate', '#059669') +
+            kpiCard('fa-file-contract','New Policies',  fmtN(qPolicies.length), 'Avg premium: ' + fmt(avgPremPerPolicy), '#4338ca') +
+            kpiCard('fa-phone-volume', 'Calls → Leads %', vdHasData ? pct(vdTotalVDLeads, vdTotalCalls) : '—', vdHasData ? fmtN(vdTotalCalls) + ' calls · ' + fmtN(vdTotalVDLeads) + ' leads' : 'ViciDial unavailable', '#0891b2') +
+            kpiCard('fa-percentage',   'Lead → Sale %', vdLeadToSaleRatio, vdHasData ? fmtN(vdTotalVDLeads) + ' leads → ' + fmtN(qPolicies.length) + ' sales' : qLeads + ' leads → ' + qPolicies.length + ' sales', '#d97706') +
+            kpiCard('fa-chart-line',   'Net Income',    fmt(dispNet),      'Revenue − Expenses', dispNet >= 0 ? '#059669' : '#dc2626') +
+            '</div>' +
+
+            // ── SECTION 1: SALES & PRODUCTION ────────────────────────────────
+            secHdr('fa-shield-alt', 'Sales & Production Metrics', '#7c3aed') +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">' +
+            card('Premium by Line of Business', 'fa-layer-group', '#7c3aed',
+                '<table style="' + tbl + '"><thead><tr>' +
+                '<th style="' + th + '">Line</th><th style="' + th + 'text-align:right">Premium</th><th style="' + th + 'text-align:right">% of Total</th>' +
+                '</tr></thead><tbody>' + lineRows + '</tbody></table>') +
+            '<div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">' +
+            '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;font-weight:700;font-size:14px;color:#111827;background:#fafafa;display:flex;align-items:center;justify-content:space-between">' +
+            '<span><i class="fas fa-trophy" style="color:#d97706;margin-right:8px"></i>Top Agents by Written Premium</span>' +
+            '<button onclick="viewQRptAgentPolicies(\'--ALL--\')" title="View all policies this quarter" style="background:#fef3c7;border:1.5px solid #fcd34d;border-radius:7px;padding:5px 11px;cursor:pointer;color:#d97706;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px"><i class="fas fa-eye"></i> All Policies</button>' +
+            '</div>' +
+            '<table style="' + tbl + '"><thead><tr>' +
+            '<th style="' + th + '">Agent</th><th style="' + th + 'text-align:right">Policies</th><th style="' + th + 'text-align:right">New Prem</th><th style="' + th + 'text-align:right">Total Prem</th><th style="' + th + 'text-align:right">Avg/Policy</th><th style="' + th + 'text-align:center">Stats</th>' +
+            '</tr></thead><tbody>' + agentRows + '</tbody></table></div>' +
+            '</div>' +
+
+            // ── SECTION 2: FINANCIAL METRICS ─────────────────────────────────
+            secHdr('fa-chart-pie', 'Financial Metrics', '#059669') +
+            noTxNote +
+            '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">' +
+            '<div style="background:#fff;border-radius:10px;border:1px solid #e2e8f0;padding:14px 16px;text-align:center"><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:6px">Total Revenue</div><div style="font-size:22px;font-weight:800;color:#059669">' + fmt(dispRevenue) + '</div></div>' +
+            '<div style="background:#fff;border-radius:10px;border:1px solid #e2e8f0;padding:14px 16px;text-align:center"><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:6px">Total Expenses</div><div style="font-size:22px;font-weight:800;color:#ef4444">' + fmt(dispExpenses) + '</div></div>' +
+            '<div style="background:#fff;border-radius:10px;border:1px solid #e2e8f0;padding:14px 16px;text-align:center"><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:6px">Gross Profit</div><div style="font-size:22px;font-weight:800;color:' + (dispNet >= 0 ? '#059669' : '#ef4444') + '">' + fmt(dispNet) + '</div></div>' +
+            '<div style="background:#fff;border-radius:10px;border:1px solid #e2e8f0;padding:14px 16px;text-align:center"><div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:6px">Profit Margin</div><div style="font-size:22px;font-weight:800;color:' + (dispNet >= 0 ? '#059669' : '#ef4444') + '">' + (dispRevenue > 0 ? pct(dispNet, dispRevenue) : 'N/A') + '</div></div>' +
+            '</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">' +
+            card('Revenue by Category', 'fa-coins', '#059669',
+                '<table style="' + tbl + '"><thead><tr><th style="' + th + '">Category</th><th style="' + th + 'text-align:right">Amount</th><th style="' + th + 'text-align:right">%</th></tr></thead><tbody>' + incRows + '</tbody>' + incFoot + '</table>') +
+            card('Expenses by Category', 'fa-receipt', '#ef4444',
+                '<table style="' + tbl + '"><thead><tr><th style="' + th + '">Category</th><th style="' + th + 'text-align:right">Amount</th><th style="' + th + 'text-align:right">%</th></tr></thead><tbody>' + expRows + '</tbody>' + expFoot + '</table>') +
+            card('Monthly Cash Flow', 'fa-water', '#0891b2',
+                '<table style="' + tbl + '"><thead><tr><th style="' + th + '">Month</th><th style="' + th + 'text-align:right">Inflow</th><th style="' + th + 'text-align:right">Outflow</th><th style="' + th + 'text-align:right">Net</th></tr></thead><tbody>' + cfRows + '</tbody>' +
+                '<tfoot><tr style="background:#f0f9ff"><td style="padding:10px 14px;font-weight:700;font-size:12px;color:#0c4a6e">Quarter Total</td>' +
+                '<td style="padding:10px 14px;text-align:right;font-weight:800;color:#059669">' + fmt(qInflow) + '</td>' +
+                '<td style="padding:10px 14px;text-align:right;font-weight:800;color:#ef4444">' + fmt(qOutflow) + '</td>' +
+                '<td style="padding:10px 14px;text-align:right;font-weight:800;color:' + (qNetCF >= 0 ? '#059669' : '#ef4444') + '">' + (qNetCF >= 0 ? '+' : '') + fmt(qNetCF) + '</td></tr></tfoot></table>') +
+            '</div>' +
+
+            // ── SECTION 3: SALES METRICS ──────────────────────────────────────
+            secHdr('fa-funnel-dollar', 'Sales Activity Metrics', '#4338ca') +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">' +
+            kpiCard('fa-phone-volume', 'ViciDial Calls',  vdHasData ? fmtN(vdTotalCalls) : '—',         fmtN(vdTotalCalls) + ' calls → ' + fmtN(vdTotalVDLeads) + ' leads', '#0891b2') +
+            kpiCard('fa-users',        'ViciDial Leads', vdHasData ? fmtN(vdTotalVDLeads) : '—',       'SALE dispo = qualified lead in ViciDial', '#7c3aed') +
+            kpiCard('fa-phone',        'CRM Calls',      fmtN(qCalls),                                  'Call logs recorded in CRM', '#4338ca') +
+            kpiCard('fa-plug',         'Connection Rate', vdConnectionRate,                              vdHasData ? fmtN(vdTotalAnswered) + ' answered (ViciDial)' : fmtN(qConnected) + ' connected (CRM)', '#059669') +
+            kpiCard('fa-file-contract','Policies Sold',  fmtN(qPolicies.length),                        'Written this quarter (CRM)', '#d97706') +
+            kpiCard('fa-percentage',   'Lead → Sale %',  vdLeadToSaleRatio,                             vdHasData ? fmtN(vdTotalVDLeads) + ' leads → ' + fmtN(qPolicies.length) + ' sales' : qLeads + ' leads → ' + qPolicies.length + ' sales', '#dc2626') +
+            kpiCard('fa-calculator',   'Calls per Lead', vdCallsPerLead,                                vdHasData ? 'ViciDial calls ÷ VD leads' : 'CRM calls ÷ CRM leads', '#64748b') +
+            kpiCard('fa-clock',        'Avg Talk Time',  vdAvgTalkMins + ' min',                        vdHasData ? 'Per call (ViciDial)' : 'Per CRM call', '#0891b2') +
+            '</div>' +
+
+            // ── SECTION 4: EXPENSE METRICS ────────────────────────────────────
+            secHdr('fa-wallet', 'Expense & Efficiency Metrics', '#dc2626') +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px">' +
+            '<div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px">' +
+            '<div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:16px"><i class="fas fa-tachometer-alt" style="color:#dc2626;margin-right:8px"></i>Operating Efficiency</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+            [
+                ['Cost per Policy', costPerPolicy > 0 ? fmt(costPerPolicy) : 'N/A', 'Expenses ÷ policies written'],
+                ['Expense Ratio',   dispRevenue   > 0 ? pct(dispExpenses, dispRevenue) : 'N/A', 'Expenses as % of revenue'],
+                ['Profit Margin',   dispRevenue   > 0 ? pct(dispNet, dispRevenue) : 'N/A', 'Net income / revenue'],
+                ['Cost per Lead',   (qLeads > 0 && dispExpenses > 0) ? fmt(dispExpenses / qLeads) : 'N/A', 'Total expenses ÷ new leads'],
+                ['Cost per Call',   (qCalls > 0 && dispExpenses > 0) ? fmt(dispExpenses / qCalls) : 'N/A', 'Total expenses ÷ calls made'],
+                ['Rev per Policy',  qPolicies.length > 0 && dispRevenue > 0 ? fmt(dispRevenue / qPolicies.length) : 'N/A', 'Revenue ÷ policies written'],
+            ].map(([label, val, sub]) =>
+                '<div style="padding:12px;background:#fafafa;border-radius:8px;border:1px solid #f1f5f9">' +
+                '<div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:5px">' + label + '</div>' +
+                '<div style="font-size:20px;font-weight:800;color:#111827;margin-bottom:2px">' + val + '</div>' +
+                '<div style="font-size:11px;color:#94a3b8">' + sub + '</div></div>'
+            ).join('') + '</div></div>' +
+            card('Agent Compensation — YTD (from Accounting)', 'fa-user-tie', '#4338ca',
+                '<table style="' + tbl + '"><thead><tr>' +
+                '<th style="' + th + '">Agent</th><th style="' + th + 'text-align:right">Policies</th><th style="' + th + 'text-align:right">YTD Premium</th><th style="' + th + 'text-align:right">Commission</th><th style="' + th + 'text-align:right">Paid</th><th style="' + th + 'text-align:right">Pending</th>' +
+                '</tr></thead><tbody>' + acctAgRows + '</tbody></table>') +
+            '</div>';
+
+        if (footerEl) footerEl.textContent = qLabel + ' loaded — ' + qPolicies.length + ' policies | ' + qLeads + ' leads | ' + fmtN(qCalls) + ' calls | ' + fmt(totalWrittenPremium) + ' written premium';
+
+    } catch (err) {
+        console.error('Quarterly report error:', err);
+        resultsEl.innerHTML = '<div style="text-align:center;padding:60px;color:#ef4444"><i class="fas fa-exclamation-triangle" style="font-size:32px;margin-bottom:12px;display:block"></i><p style="font-weight:600">Error loading report: ' + err.message + '</p></div>';
+        if (footerEl) footerEl.textContent = 'Error — ' + err.message;
+    }
+}
+
+function exportQRptCSV() {
+    const qEl = document.getElementById('qrpt-q');
+    const yEl = document.getElementById('qrpt-year');
+    if (!qEl || !yEl) return;
+    const q = qEl.value, year = yEl.value;
+    const qMonth0 = (parseInt(q) - 1) * 3;
+    const startDate = new Date(parseInt(year), qMonth0, 1).toISOString().slice(0, 10);
+    const endDate   = new Date(parseInt(year), qMonth0 + 3, 0).toISOString().slice(0, 10);
+    Promise.all([
+        fetch('/api/policies?includeInactive=true').then(r => r.json()).catch(() => []),
+        fetch('/api/finance/transactions?start=' + startDate + '&end=' + endDate).then(r => r.json()).catch(() => [])
+    ]).then(([policies, txns]) => {
+        const qStart = new Date(startDate + 'T00:00:00').getTime();
+        const qEnd   = new Date(endDate   + 'T23:59:59').getTime();
+        const qPols = policies.filter(p => {
+            const ds = p.effectiveDate || p.createdDate || p.created_at || '';
+            if (ds) return new Date(ds).getTime() >= qStart && new Date(ds).getTime() <= qEnd;
+            const m = String(p.id||'').match(/POL-(\d+)-/);
+            return m && parseInt(m[1]) >= qStart && parseInt(m[1]) <= qEnd;
+        });
+        let csv = 'Type,Date,Description,Amount,Category\n';
+        qPols.forEach(p => {
+            const prem = parseFloat((p.premium||p.annualPremium||'0').toString().replace(/[^0-9.]/g,''))||0;
+            csv += 'Policy,' + (p.effectiveDate||p.createdDate||'') + ',"' + (p.insured_name||p.name||p.client||'') + ' — ' + (p.carrier||'') + '",' + prem + ',' + (p.coverageType||p.policyType||'Policy') + '\n';
+        });
+        (Array.isArray(txns)?txns:[]).forEach(t => {
+            csv += 'Transaction,' + t.date + ',"' + (t.description||'').replace(/"/g,"'") + '",' + t.amount + ',' + (t.category||'') + '\n';
+        });
+        const blob = new Blob([csv], {type:'text/csv'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url;
+        a.download = 'quarterly-report-Q' + q + '-' + year + '.csv';
+        a.click(); URL.revokeObjectURL(url);
+        showNotification('CSV exported — Q' + q + ' ' + year, 'success');
+    });
+}
+
+function viewQRptAgentPolicies(agentName) {
+    const allPols = window._qrptQPolicies || [];
+    const qLabel  = window._qrptLabel || 'Quarter';
+    const agPols  = agentName === '--ALL--' ? allPols : allPols.filter(p => {
+        const a = (p.agent || p.assignedTo || p.agentName || '').toLowerCase();
+        return a.includes(agentName.toLowerCase().split(' ')[0].toLowerCase());
+    });
+    const displayName = agentName === '--ALL--' ? 'All Agents' : agentName;
+    document.querySelectorAll('.qrpt-pol-overlay').forEach(e => e.remove());
+
+    const fmt  = n => '$' + (isNaN(n)||!n ? '0' : Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}));
+    const fmtD = d => { try { return d ? new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—'; } catch(e) { return d||'—'; } };
+
+    const totalPrem = agPols.reduce((s,p) => s + (parseFloat((p.premium||p.annualPremium||'0').toString().replace(/[^0-9.]/g,''))||0), 0);
+
+    const th = 'padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;background:#f8fafc;border-bottom:2px solid #e2e8f0;white-space:nowrap;';
+    const td = 'padding:9px 12px;font-size:13px;color:#374151;border-bottom:1px solid #f1f5f9;';
+    const tdr = td + 'text-align:right;font-weight:600;';
+
+    const showAgent = agentName === '--ALL--';
+    const colCount = showAgent ? 10 : 9;
+    const rows = agPols.length ? agPols.map((p, i) => {
+        const prem = parseFloat((p.premium||p.annualPremium||'0').toString().replace(/[^0-9.]/g,'')) || 0;
+        const client = p.insured_name || p.name || p.client || p.insuredName || '—';
+        const carrier = p.carrier || '—';
+        const line = p.coverageType || p.lineOfBusiness || p.policyType || '—';
+        const polNum = p.policyNumber || p.policy_number || '—';
+        const effDate = p.effectiveDate || p.effective_date || p.createdDate || '';
+        const expDate = p.expirationDate || p.expiration_date || '';
+        const status = p.status || 'Active';
+        const agentCol = p.agent || p.assignedTo || p.agentName || '—';
+        const statusColor = /active|in.force|current/i.test(status) ? '#059669' : '#94a3b8';
+        return '<tr style="' + (i%2===1?'background:#fafafa':'') + '">' +
+            '<td style="' + td + '">' + (i+1) + '</td>' +
+            (showAgent ? '<td style="' + td + 'font-weight:600;color:#4338ca">' + agentCol + '</td>' : '') +
+            '<td style="' + td + 'max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + client + '">' + client + '</td>' +
+            '<td style="' + td + '">' + carrier + '</td>' +
+            '<td style="' + td + '">' + line + '</td>' +
+            '<td style="' + td + 'font-family:monospace;font-size:12px">' + polNum + '</td>' +
+            '<td style="' + td + 'white-space:nowrap">' + fmtD(effDate) + '</td>' +
+            '<td style="' + td + 'white-space:nowrap;color:#94a3b8">' + fmtD(expDate) + '</td>' +
+            '<td style="' + tdr + 'color:#7c3aed">' + fmt(prem) + '</td>' +
+            '<td style="' + td + 'text-align:center"><span style="font-size:11px;font-weight:700;color:' + statusColor + ';background:' + statusColor + '18;padding:2px 8px;border-radius:20px">' + status + '</span></td>' +
+            '</tr>';
+    }).join('') : '<tr><td colspan="' + colCount + '" style="' + td + 'text-align:center;color:#94a3b8;padding:24px">No policies found for ' + displayName + ' in ' + qLabel + '</td></tr>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'qrpt-pol-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.65);display:flex;align-items:center;justify-content:center;z-index:9999999;padding:16px;box-sizing:border-box;';
+
+    overlay.innerHTML =
+        '<div style="background:#fff;border-radius:16px;width:100%;max-width:1100px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.4)" onclick="event.stopPropagation()">' +
+        '<div style="background:linear-gradient(135deg,#d97706,#f59e0b);padding:16px 22px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">' +
+        '<div><div style="color:#fff;font-size:17px;font-weight:700"><i class="fas fa-file-contract" style="margin-right:8px"></i>' + agentName + ' — Policies</div>' +
+        '<div style="color:rgba(255,255,255,0.75);font-size:12px">' + qLabel + ' · ' + agPols.length + ' polic' + (agPols.length===1?'y':'ies') + ' · Total: ' + fmt(totalPrem) + '</div></div>' +
+        '<button onclick="this.closest(\'.qrpt-pol-overlay\').remove()" style="background:rgba(255,255,255,0.2);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:20px;color:#fff;display:flex;align-items:center;justify-content:center">&times;</button></div>' +
+        '<div style="overflow-y:auto;flex:1">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+        '<thead style="position:sticky;top:0;z-index:1"><tr>' +
+        '<th style="' + th + '">#</th>' +
+        '<th style="' + th + '">Client</th>' +
+        '<th style="' + th + '">Carrier</th>' +
+        '<th style="' + th + '">Line</th>' +
+        '<th style="' + th + '">Policy #</th>' +
+        '<th style="' + th + '">Effective</th>' +
+        '<th style="' + th + '">Expires</th>' +
+        '<th style="' + th + 'text-align:right">Premium</th>' +
+        '<th style="' + th + 'text-align:center">Status</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody>' +
+        (agPols.length ? '<tfoot><tr style="background:#fffbeb"><td colspan="7" style="padding:10px 12px;font-weight:700;font-size:12px;color:#92400e">Total (' + agPols.length + ' policies)</td><td style="padding:10px 12px;text-align:right;font-weight:800;color:#d97706;font-size:14px">' + fmt(totalPrem) + '</td><td></td></tr></tfoot>' : '') +
+        '</table></div></div>';
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+function viewQRptAgentStats(agentName) {
+    const data = (window._qrptAgentData || {})[agentName];
+    const qLabel = window._qrptLabel || 'Quarter';
+    if (!data) { showNotification('No data for ' + agentName, 'warning'); return; }
+    document.querySelectorAll('.qrpt-agent-overlay').forEach(e => e.remove());
+
+    const crm = data.crm || {};
+    const vd  = data.vd  || null;
+    const fmt  = n => '$' + (isNaN(n)||n==null ? '0' : Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}));
+    const fmtN = n => isNaN(n)||n==null ? '0' : Number(n).toLocaleString('en-US');
+    const pct  = (a, b) => b > 0 ? ((a/b)*100).toFixed(1)+'%' : '0%';
+    const secs2hm = s => { s=Math.round(s||0); const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?h+'h '+m+'m':m+'m'; };
+
+    const mCard = (label, value, sub, color) =>
+        '<div style="background:#fff;border-radius:10px;border:1.5px solid #e2e8f0;padding:14px 16px">' +
+        '<div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">' + label + '</div>' +
+        '<div style="font-size:22px;font-weight:800;color:' + color + ';line-height:1.1;margin-bottom:3px">' + value + '</div>' +
+        '<div style="font-size:11px;color:#94a3b8">' + sub + '</div></div>';
+
+    const secHdr = (icon, title, color) =>
+        '<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px">' +
+        '<div style="width:28px;height:28px;border-radius:7px;background:' + color + '18;display:flex;align-items:center;justify-content:center">' +
+        '<i class="fas ' + icon + '" style="color:' + color + ';font-size:12px"></i></div>' +
+        '<span style="font-size:12px;font-weight:700;color:' + color + ';text-transform:uppercase;letter-spacing:.06em">' + title + '</span></div>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'qrpt-agent-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(17,24,39,0.65);display:flex;align-items:center;justify-content:center;z-index:9999999;padding:16px;box-sizing:border-box;';
+
+    const vdBlock = vd
+        ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:10px">' +
+          mCard('Calls', fmtN(vd.calls), 'Dialer calls made', '#1e40af') +
+          mCard('Answered', fmtN(vd.answered), pct(vd.answered, vd.calls) + ' answer rate', '#059669') +
+          mCard('VD Leads', fmtN(vd.sales), 'SALE dispo (qualified)', '#7c3aed') +
+          mCard('Calls → Leads %', pct(vd.sales, vd.calls), fmtN(vd.calls) + ' calls', '#d97706') +
+          mCard('Talk Time', vd.talkTime || '—', 'Total ViciDial talk', '#0891b2') +
+          mCard('Talk Avg', vd.talkAvg || '—', 'Per call average', '#64748b') +
+          mCard('Login Time', vd.loginTime || '—', 'Time in dialer', '#4338ca') +
+          mCard('Pause Time', vd.pauseTime || '—', 'Total paused', '#f59e0b') +
+          mCard('Callbacks', fmtN(vd.callbk), 'Scheduled in dialer', '#0284c7') +
+          mCard('DNC', fmtN(vd.dnc), pct(vd.dnc, vd.calls) + ' DNC rate', '#dc2626') +
+          '</div>'
+        : '<div style="text-align:center;padding:20px;color:#94a3b8;background:#f1f5f9;border-radius:8px;font-size:13px">No ViciDial data found for this agent in the selected quarter</div>';
+
+    overlay.innerHTML =
+        '<div style="background:#f8fafc;border-radius:16px;width:100%;max-width:880px;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4)" onclick="event.stopPropagation()">' +
+        '<div style="background:linear-gradient(135deg,#4338ca,#7c3aed);padding:16px 22px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:1">' +
+        '<div><div style="color:#fff;font-size:18px;font-weight:700">' + agentName + '</div>' +
+        '<div style="color:rgba(255,255,255,0.65);font-size:12px">' + qLabel + ' · Combined CRM &amp; ViciDial Stats</div></div>' +
+        '<button onclick="this.closest(\'.qrpt-agent-overlay\').remove()" style="background:rgba(255,255,255,0.15);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:20px;color:#fff;display:flex;align-items:center;justify-content:center">&times;</button></div>' +
+
+        '<div style="padding:20px">' +
+
+        secHdr('fa-database', 'CRM Stats — ' + qLabel, '#4338ca') +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:10px;margin-bottom:22px">' +
+        mCard('Leads (in range)', fmtN(crm.leads), 'Created this quarter', '#4338ca') +
+        mCard('CRM Calls', fmtN(crm.calls), 'Call logs in range', '#0891b2') +
+        mCard('Connected', fmtN(crm.connected), pct(crm.connected, crm.calls) + ' connection rate', '#059669') +
+        mCard('Talk Time', crm.callSecs > 0 ? secs2hm(crm.callSecs) : '0m', 'CRM call duration total', '#7c3aed') +
+        mCard('Apps to Market', fmtN(crm.appsToMarket), 'App/LossRuns/IFTA/SAA set', '#d97706') +
+        mCard('Policies Sold', fmtN(data.policies), 'Written this quarter', '#059669') +
+        mCard('Written Premium', fmt(data.premium), 'This quarter', '#7c3aed') +
+        mCard('Avg Premium', data.policies > 0 ? fmt(data.premium / data.policies) : '—', 'Per policy', '#4338ca') +
+        '</div>' +
+
+        secHdr('fa-phone-volume', 'ViciDial Stats — ' + qLabel, '#015b91') +
+        vdBlock +
+
+        '</div></div>';
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+// ─── END QUARTERLY REPORT ────────────────────────────────────────────────────
 
 function generateViciDialPerformanceReport() {
     document.querySelectorAll('.vicidial-perf-report-overlay').forEach(e => e.remove());
