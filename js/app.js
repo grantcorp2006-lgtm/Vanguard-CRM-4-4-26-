@@ -19837,50 +19837,49 @@ function parseIvansFixed(content) {
             if (DISCOUNT_CODES.has(code)) continue;
             const desc = clean(b.substring(148, 208));
             if (!desc) continue;
-            const pm = b.substring(66, 79).match(/(\d{10,12})[+\-]/);
-            const covPrem = pm ? parseInt(pm[1]) / 100 : 0;
             const lims = (b.substring(79, 130).match(/\d{8}/g) || [])
                           .map(x => parseInt(x)).filter(x => x > 0 && x < 9999999);
-            let val = '';
-            if (lims.length >= 2)    val = `$${lims[0].toLocaleString()}/$${lims[1].toLocaleString()}`;
-            else if (lims.length === 1) val = `$${lims[0].toLocaleString()}`;
-            if (covPrem > 0) val += (val ? ' ' : '') + `($${Math.round(covPrem)}/yr)`;
-            if (val && !coverages[desc]) coverages[desc] = val;
+            if (!lims.length) continue;
+            // Store plain numeric (dropdown-compatible); skip if already set
+            if (!coverages[desc]) coverages[desc] = lims.length >= 2 ? `${lims[0]}/${lims[1]}` : String(lims[0]);
         }
         // ── 5CVG: coverages (commercial auto) ───────────────────────────────
         const CVG_LABELS = {
-            CSL:  'Liability Limits',       // = Combined Single Limit
-            UMCSL:'Uninsured Motorist CSL',
-            COMP: 'Comprehensive Deductible',
-            COLL: 'Collision Deductible',
-            MTRTK:'Motor Truck Cargo',
-            MTC:  'Motor Truck Cargo',      // alternate cargo code
-            MTGL: 'General Liability',      // GL occurrence/aggregate
-            MEDPM:'Medical Payments',
-            GLCBI:'General Liability BI',
-            GLCPD:'General Liability PD',
-            PRDCO:'Products/Completed Ops',
-            PIADV:'Personal Injury/Advertising',
-            FIRDM:'Fire Damage Liability',
-            MDEXP:'Medical Expense',
-            UMAUTO:'Uninsured Motorist',
-            UMPD: 'UM Property Damage',
+            CSL:   'Liability Limits',              // Combined Single Limit
+            UMCSL: 'Uninsured/Underinsured Motorist', // matches form label exactly
+            UNCSL: 'Uninsured/Underinsured Motorist',
+            UMAUTO:'Uninsured/Underinsured Motorist',
+            COMP:  'Comprehensive Deductible',
+            COLL:  'Collision Deductible',
+            MTGL:  'General Liability',             // GL occurrence/aggregate
+            MEDPM: 'Medical Payments',
+            GLCBI: 'General Liability BI',
+            GLCPD: 'General Liability PD',
+            PRDCO: 'Products/Completed Ops',
+            PIADV: 'Personal Injury/Advertising',
+            FIRDM: 'Fire Damage Liability',
+            MDEXP: 'Medical Expense',
+            UMPD:  'UM Property Damage',
+            NOTRL: 'Non-Trucking Liability',
         };
-        const CVG_SKIP = new Set(['EFTD','POLFE','HODIS','MCAR','AQD','LFREE','PPLSD','MULTI','SNGL']);
+        // MTC/MTRTK are handled separately below (split into Cargo Limit + Cargo Deductible)
+        const CVG_SKIP = new Set(['EFTD','POLFE','HODIS','MCAR','AQD','LFREE','PPLSD','MULTI','SNGL','FILFE']);
         for (const b of (by['5CVG'] || [])) {
             const code = b.substring(30, 35).trim();
             if (CVG_SKIP.has(code)) continue;
+            const body = b.substring(35);
+            const limNums = (body.match(/0\d{9}/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x < 1000000000);
+            if (!limNums.length) continue;
+            // MTC / MTRTK: split into separate Cargo Limit and Cargo Deductible keys (matches form fields)
+            if (code === 'MTC' || code === 'MTRTK') {
+                if (!coverages['Cargo Limit'])      coverages['Cargo Limit']      = String(limNums[0]);
+                if (!coverages['Cargo Deductible'] && limNums[1]) coverages['Cargo Deductible'] = String(limNums[1]);
+                continue;
+            }
             const desc = CVG_LABELS[code] || code;
             if (!desc || coverages[desc]) continue;
-            const body = b.substring(35);
-            const pm = body.match(/(\d{8,12})\+/);
-            const covPrem = pm ? parseInt(pm[1]) / 100 : 0;
-            const limNums = (body.match(/0\d{9}/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x < 1000000000);
-            let val = '';
-            if (limNums.length >= 2) val = `$${limNums[0].toLocaleString()}/$${limNums[1].toLocaleString()}`;
-            else if (limNums.length === 1) val = `$${limNums[0].toLocaleString()}`;
-            if (covPrem > 0) val += (val ? ' ' : '') + `($${Math.round(covPrem)}/yr)`;
-            if (val) coverages[desc] = val;
+            // Store plain numeric values (dropdown-compatible)
+            coverages[desc] = limNums.length >= 2 ? `${limNums[0]}/${limNums[1]}` : String(limNums[0]);
         }
 
         // ── 5DRV: drivers (personal auto) ───────────────────────────────────
@@ -21114,15 +21113,22 @@ function generateViewTabContent(tabId, policy) {
             const additionalCoveragesList = coverageData.additionalCoverages || [];
             // Normalize raw IVANS codes and internal field IDs to display labels
             const COVERAGE_DISPLAY_LABELS = {
+                // IVANS codes → display label
                 'MTGL': 'General Liability', 'MEDPM': 'Medical Payments',
-                'MTC': 'Motor Truck Cargo', 'MTRTK': 'Motor Truck Cargo',
+                'MTC': 'Cargo Limit', 'MTRTK': 'Cargo Limit',
                 'CSL': 'Liability Limits', 'Combined Single Limit': 'Liability Limits',
                 'COMP': 'Comprehensive Deductible', 'Comprehensive': 'Comprehensive Deductible',
                 'COLL': 'Collision Deductible', 'Collision': 'Collision Deductible',
-                'UMCSL': 'Uninsured Motorist CSL', 'UNCSL': 'Uninsured Motorist CSL', 'UMAUTO': 'Uninsured Motorist',
+                'UMCSL': 'Uninsured/Underinsured Motorist', 'UNCSL': 'Uninsured/Underinsured Motorist',
+                'UMAUTO': 'Uninsured/Underinsured Motorist',
+                // Legacy key aliases (old IVANS imports used these keys)
+                'Uninsured Motorist CSL': 'Uninsured/Underinsured Motorist',
+                'Uninsured Motorist': 'Uninsured/Underinsured Motorist',
+                'Motor Truck Cargo': 'Cargo Limit',
                 'GLCBI': 'General Liability BI', 'GLCPD': 'General Liability PD',
                 'FIRDM': 'Fire Damage Liability', 'MDEXP': 'Medical Expense',
-                'UMPD': 'UM Property Damage',
+                'UMPD': 'UM Property Damage', 'NOTRL': 'Non-Trucking Liability',
+                // Form field IDs
                 'coverage-liability-limits': 'Liability Limits',
                 'coverage-general-aggregate': 'General Liability',
                 'coverage-comp-deduct': 'Comprehensive Deductible',
@@ -21135,19 +21141,39 @@ function generateViewTabContent(tabId, policy) {
                 'coverage-non-trucking': 'Non-Trucking Liability',
                 'coverage-reefer': 'Reefer Breakdown',
             };
-            // Deduplicate: group by display label, prefer entry with real data over empty/N/A
+            // Deduplicate: group by display label.
+            // Form-save entries have human-label keys (NOT in COVERAGE_DISPLAY_LABELS) and plain numeric values (e.g. "1000000").
+            // IVANS entries have code keys (IN COVERAGE_DISPLAY_LABELS) and formatted display strings (e.g. "$1,000,000").
+            // Always prefer form-save entries — they are what the edit form and COI generation rely on.
             const _deduped = new Map();
             Object.entries(coverageData).forEach(([key, value]) => {
                 if (key === 'additionalCoverages') return;
                 const displayLabel = COVERAGE_DISPLAY_LABELS[key] || key;
+                const isFormSave = !COVERAGE_DISPLAY_LABELS[key]; // key not in map = saved by form with human label
                 const existing = _deduped.get(displayLabel);
-                // Prefer non-empty value; if existing already has real data keep it
-                if (!existing || (!existing.value && value)) {
-                    _deduped.set(displayLabel, { value });
+                if (!existing) {
+                    _deduped.set(displayLabel, { value, isFormSave });
+                } else if (isFormSave && !existing.isFormSave) {
+                    // Form-save beats IVANS
+                    _deduped.set(displayLabel, { value, isFormSave: true });
+                } else if (isFormSave === existing.isFormSave && !existing.value && value) {
+                    // Same type, prefer non-empty
+                    _deduped.set(displayLabel, { value, isFormSave });
                 }
             });
+            // Format a plain numeric value for display (e.g. "1000000" → "$1,000,000")
+            const _fmtCovVal = (val) => {
+                if (!val) return val;
+                const s = String(val).trim();
+                if (s.includes('$') || s.includes('/') && s.includes('$')) return s;
+                const parts = s.split('/');
+                if (parts.every(p => /^\d+(\.\d+)?$/.test(p.trim()))) {
+                    return parts.map(p => '$' + parseFloat(p.trim()).toLocaleString()).join('/');
+                }
+                return s;
+            };
             // Filter out entries with no real value
-            const coverageEntries = [..._deduped.entries()].filter(([, entry]) => entry.value && String(entry.value).trim() !== '');
+            const coverageEntries = [..._deduped.entries()].filter(([, entry]) => entry.value && String(entry.value).trim() !== '' && String(entry.value).trim().toLowerCase() !== 'n/a');
             return `
                 <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
                     <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Coverage Details</h3>
@@ -21155,7 +21181,7 @@ function generateViewTabContent(tabId, policy) {
                         ${coverageEntries.map(([label, entry]) => `
                             <div class="view-item">
                                 <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${label}</label>
-                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${entry.value}</p>
+                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${entry.isFormSave ? _fmtCovVal(entry.value) : entry.value}</p>
                             </div>
                         `).join('')}
                         ${coverageEntries.length === 0 ? '<p style="color: #6b7280;">No coverage information available</p>' : ''}

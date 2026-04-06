@@ -690,6 +690,8 @@ function generateTabContent(tabId, policyType) {
                                 <select class="form-control coverage-dropdown" id="coverage-general-aggregate" style="display: block;">
                                     <option value="">Select General Liability Limit</option>
                                     <option value="excluded">No Coverage</option>
+                                    <option value="1000/2000">$1,000/$2,000</option>
+                                    <option value="500000/1000000">$500,000/$1,000,000</option>
                                     <option value="1000000/1000000">$1,000,000/$1,000,000</option>
                                     <option value="1000000/2000000">$1,000,000/$2,000,000</option>
                                     <option value="1000000">$1,000,000</option>
@@ -717,6 +719,11 @@ function generateTabContent(tabId, policyType) {
                                     <option value="1000">$1,000</option>
                                     <option value="2500">$2,500</option>
                                     <option value="5000">$5,000</option>
+                                    <option value="7500">$7,500</option>
+                                    <option value="10000">$10,000</option>
+                                    <option value="15000">$15,000</option>
+                                    <option value="25000">$25,000</option>
+                                    <option value="50000">$50,000</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -732,6 +739,9 @@ function generateTabContent(tabId, policyType) {
                                     <option value="2500">$2,500</option>
                                     <option value="5000">$5,000</option>
                                     <option value="10000">$10,000</option>
+                                    <option value="15000">$15,000</option>
+                                    <option value="25000">$25,000</option>
+                                    <option value="50000">$50,000</option>
                                 </select>
                             </div>
                         </div>
@@ -768,7 +778,10 @@ function generateTabContent(tabId, policyType) {
                                     <option value="1000">$1,000</option>
                                     <option value="2500">$2,500</option>
                                     <option value="5000">$5,000</option>
+                                    <option value="7500">$7,500</option>
                                     <option value="10000">$10,000</option>
+                                    <option value="15000">$15,000</option>
+                                    <option value="20000">$20,000</option>
                                 </select>
                             </div>
                         </div>
@@ -804,7 +817,9 @@ function generateTabContent(tabId, policyType) {
                                     <option value="75000">$75,000 CSL</option>
                                     <option value="100000">$100,000 CSL</option>
                                     <option value="250/500">$250K/$500K</option>
+                                    <option value="300000">$300,000 CSL</option>
                                     <option value="500/1000">$500K/$1M</option>
+                                    <option value="500000">$500,000 CSL</option>
                                     <option value="750000">$750,000 CSL</option>
                                     <option value="1000000">$1,000,000 CSL</option>
                                 </select>
@@ -835,6 +850,9 @@ function generateTabContent(tabId, policyType) {
                                     <option value="0">No Coverage</option>
                                     <option value="30/60/25">$30K/$60K/$25K</option>
                                     <option value="100/300/100">$100K/$300K/$100K</option>
+                                    <option value="300000">$300,000 CSL</option>
+                                    <option value="500000">$500,000 CSL</option>
+                                    <option value="750000">$750,000 CSL</option>
                                     <option value="1000000">$1,000,000 CSL</option>
                                 </select>
                             </div>
@@ -2183,7 +2201,7 @@ function populatePolicyForm(policyData) {
     // Helper function to set field value
     function setFieldValue(field, value) {
         if (value === null || value === undefined) return;
-        
+
         if (field.type === 'checkbox') {
             if (Array.isArray(value)) {
                 const checkboxLabel = field.parentElement.textContent.trim();
@@ -2193,6 +2211,24 @@ function populatePolicyForm(policyData) {
             }
         } else if (field.type === 'radio') {
             field.checked = field.value === value;
+        } else if (field.tagName === 'SELECT') {
+            // Normalize IVANS-formatted strings (e.g. "$1,000,000 ($100/yr)") to plain numeric
+            let normalVal = String(value).trim();
+            normalVal = normalVal.replace(/\s*\(\$[\d,]+\/yr\)/gi, '').trim(); // strip ($X/yr) suffix
+            normalVal = normalVal.replace(/[$,\s]/g, '');                       // strip $, commas, spaces
+            // Try setting the normalized value
+            field.value = normalVal;
+            if (field.value !== normalVal && normalVal !== '') {
+                // Value not in any existing option — inject it dynamically so it can be selected
+                const opt = document.createElement('option');
+                opt.value = normalVal;
+                const parts = normalVal.split('/');
+                opt.textContent = parts.every(p => /^\d+$/.test(p))
+                    ? parts.map(p => '$' + parseInt(p).toLocaleString()).join('/')
+                    : normalVal;
+                field.appendChild(opt);
+                field.value = normalVal;
+            }
         } else {
             field.value = value;
         }
@@ -2201,16 +2237,50 @@ function populatePolicyForm(policyData) {
     // Iterate through all form fields and populate them
     document.querySelectorAll('.tab-content').forEach(tabContent => {
         const tabId = tabContent.id.replace('-content', '');
-        
+
         // Check for data in various locations
         const tabData = policyData[tabId] || policyData;
-        
+
+        // For coverage tab: create a normalized copy that fixes IVANS key mismatches and compound values
+        let resolvedTabData = tabData;
+        if (tabId === 'coverage' && tabData && typeof tabData === 'object') {
+            resolvedTabData = Object.assign({}, tabData); // shallow copy — don't mutate real data
+
+            // Split "Motor Truck Cargo" ($limit/$deductible) into separate Cargo Limit + Cargo Deductible keys
+            const mtcRaw = resolvedTabData['Motor Truck Cargo'];
+            if (mtcRaw) {
+                const mtcClean = String(mtcRaw).replace(/\s*\(\$[\d,]+\/yr\)/gi, '').replace(/[$,\s]/g, '');
+                const [mtcLim, mtcDed] = mtcClean.split('/');
+                if (mtcLim && !resolvedTabData['Cargo Limit'])      resolvedTabData['Cargo Limit'] = mtcLim.trim();
+                if (mtcDed && !resolvedTabData['Cargo Deductible']) resolvedTabData['Cargo Deductible'] = mtcDed.trim();
+                delete resolvedTabData['Motor Truck Cargo'];
+            }
+
+            // Alias: "Uninsured Motorist CSL" / "Uninsured Motorist" → form label "Uninsured/Underinsured Motorist"
+            const umKey = resolvedTabData['Uninsured Motorist CSL'] ?? resolvedTabData['Uninsured Motorist'];
+            if (umKey !== undefined && resolvedTabData['Uninsured/Underinsured Motorist'] === undefined) {
+                resolvedTabData['Uninsured/Underinsured Motorist'] = umKey;
+            }
+
+            // Alias: IVANS codes that might still be stored as raw keys
+            const ivansCoverageAliases = {
+                'Combined Single Limit': 'Liability Limits',
+                'Comprehensive': 'Comprehensive Deductible',
+                'Collision': 'Collision Deductible',
+            };
+            Object.entries(ivansCoverageAliases).forEach(([alias, canonical]) => {
+                if (resolvedTabData[alias] !== undefined && resolvedTabData[canonical] === undefined) {
+                    resolvedTabData[canonical] = resolvedTabData[alias];
+                }
+            });
+        }
+
         // Populate regular input fields
         tabContent.querySelectorAll('input, select, textarea').forEach(field => {
             const label = field.closest('.form-group')?.querySelector('label')?.textContent.replace(' *', '').replace(':', '').trim();
             const fieldId = field.id;
             const fieldName = field.name;
-            
+
             // Try multiple key variations
             const possibleKeys = [
                 label,
@@ -2230,14 +2300,14 @@ function populatePolicyForm(policyData) {
                 label?.replace('Operating Radius', 'operatingRadius'),
                 label?.replace('Vehicle Type', 'vehicleType')
             ].filter(Boolean);
-            
-            let value = findFieldValue(tabData, possibleKeys);
-            
+
+            let value = findFieldValue(resolvedTabData, possibleKeys);
+
             // Also check in the root policyData
-            if (!value) {
+            if (value === null || value === undefined) {
                 value = findFieldValue(policyData, possibleKeys);
             }
-            
+
             setFieldValue(field, value);
         });
     });
