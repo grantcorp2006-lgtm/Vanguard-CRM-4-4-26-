@@ -15,37 +15,88 @@ function formatPremiumDisplay(premium) {
 }
 
 (function() {
+    // Helper function to check highlight status independently (no circular dependencies)
+    function isHighlightActiveForLead(lead) {
+        // SPECIAL CASE: App sent stage always has active highlighting (indefinite)
+        if (lead && lead.stage === 'app sent') {
+            console.log(`🔍 HIGHLIGHT STATUS: Lead ${lead.id} - app sent stage, indefinite highlight: true`);
+            return true;
+        }
+
+        if (!lead || !lead.reachOut) {
+            return false; // No reach-out data means no highlight
+        }
+
+        // Must have completion data for highlight to be possible
+        if (!lead.reachOut.completedAt && !lead.reachOut.reachOutCompletedAt) {
+            return false; // No completion means no highlight
+        }
+
+        // Check for active highlight duration
+        let highlightExpiry = null;
+
+        if (lead.reachOut.greenHighlightUntil) {
+            highlightExpiry = new Date(lead.reachOut.greenHighlightUntil);
+        } else if (lead.greenHighlight?.expiresAt) {
+            highlightExpiry = new Date(lead.greenHighlight.expiresAt);
+        } else if (lead.greenUntil) {
+            highlightExpiry = new Date(lead.greenUntil);
+        } else {
+            // Has completion but no highlight duration set = no highlight
+            return false;
+        }
+
+        // Check if highlight is still active (not expired)
+        const now = new Date();
+        const isActive = now < highlightExpiry;
+
+        console.log(`🔍 HIGHLIGHT STATUS: Lead ${lead.id} - expiry: ${highlightExpiry.toLocaleString()}, active: ${isActive}`);
+        return isActive;
+    }
+
     // Function to get next action based on stage and reach out status
     function getNextActionFixed(stage, lead) {
-        // Check if reach out is complete
-        if (lead && lead.reachOut) {
-            const reachOut = lead.reachOut;
+        // SPECIAL CASE: App sent stage never shows TODO text (always green highlighted)
+        if (stage === 'app sent') {
+            console.log(`✅ Lead ${lead?.id}: App sent stage - no TODO text (indefinite green)`);
+            return '';
+        }
 
-            // Check if stage requires reach out (NOT info_received - that needs quote preparation)
-            if (stage === 'quoted' || stage === 'info_requested' ||
-                stage === 'quote_sent' || stage === 'quote-sent-unaware' || stage === 'quote-sent-aware' ||
-                stage === 'interested') {
+        // Check if stage requires reach-out
+        const stagesRequiringReachOut = ['quoted', 'info_requested', 'quote_sent', 'quote-sent-unaware', 'quote-sent-aware', 'interested', 'contact_attempted', 'loss_runs_requested'];
 
-                // If connected call was made or text sent (final step), reach out is complete
-                if (reachOut.callsConnected > 0 || reachOut.textCount > 0) {
-                    return ''; // Empty TO DO when reach out is complete
-                }
+        if (stagesRequiringReachOut.includes(stage)) {
+            console.log(`🔍 STAGE CHECK: Lead ${lead?.id} - stage "${stage}" requires reach-out`);
+
+            // Check if highlight is currently active
+            const hasActiveHighlight = isHighlightActiveForLead(lead);
+
+            if (hasActiveHighlight) {
+                // Lead has active green highlight - no TODO text needed
+                console.log(`✅ ACTIVE HIGHLIGHT: Lead ${lead.id} - showing no TODO (green highlight active)`);
+                return '';
+            } else {
+                // Lead needs reach-out action (no active highlight)
+                console.log(`🔴 NO ACTIVE HIGHLIGHT: Lead ${lead.id} - showing red reach-out text`);
+                return '<span style="color: #dc2626; font-weight: bold;">Reach out</span>';
             }
         }
 
         const actionMap = {
             'new': 'Assign Stage',
-            'contact_attempted': 'Reach out',
-            'info_requested': 'Reach out to lead',
+            'contact_attempted': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
+            'info_requested': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
             'info_received': 'Prepare Quote',
-            'loss_runs_requested': 'Reach out to lead',
+            'loss_runs_requested': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
             'loss_runs_received': 'Prepare app.',
-            'app_prepared': 'Send application',
-            'quoted': 'Email Quote, and make contact',
-            'quote_sent': 'Reach out to lead',
-            'quote-sent-unaware': 'Reach out to lead',
-            'quote-sent-aware': 'Reach out',
-            'interested': 'Reach out',
+            'app_prepared': 'Email brokers',
+            'app_sent': '',  // App sent stage should have NO TODO text
+            'app sent': '', // Handle both variations
+            'quoted': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
+            'quote_sent': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
+            'quote-sent-unaware': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
+            'quote-sent-aware': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
+            'interested': '<span style="color: #dc2626; font-weight: bold;">Reach out</span>',
             'not-interested': 'Archive lead',
             'closed': 'Process complete'
         };
@@ -54,6 +105,129 @@ function formatPremiumDisplay(premium) {
 
     // Make the getNextAction function globally available to fix TO DO text
     window.getNextAction = getNextActionFixed;
+
+    // Function to clean up expired highlight durations across all leads
+    function cleanupExpiredHighlights() {
+        console.log('🧹 Cleaning up expired highlight durations...');
+
+        try {
+            const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            let updatedCount = 0;
+
+            leads.forEach(lead => {
+                if (lead.reachOut &&
+                    (lead.reachOut.completedAt || lead.reachOut.reachOutCompletedAt) &&
+                    lead.reachOut.greenHighlightUntil) {
+
+                    const highlightExpiry = new Date(lead.reachOut.greenHighlightUntil);
+                    const now = new Date();
+
+                    if (now > highlightExpiry) {
+                        console.log(`🔴 EXPIRED CLEANUP: Lead ${lead.id} (${lead.name}) - highlight expired at ${lead.reachOut.greenHighlightUntil}`);
+                        console.log(`   Before reset: callsConnected=${lead.reachOut.callsConnected}, textCount=${lead.reachOut.textCount}`);
+
+                        // Mark as expired but keep completion timestamps for proper TO DO logic
+                        lead.reachOut.callsConnected = 0;
+                        lead.reachOut.textCount = 0;
+                        lead.reachOut.emailSent = false;
+                        lead.reachOut.textSent = false;
+                        lead.reachOut.callMade = false;
+
+                        // CRITICAL: Keep completion timestamps but mark as expired
+                        lead.reachOut.highlightExpired = true;
+                        lead.reachOut.expiredAt = new Date().toISOString();
+
+                        // ENHANCEMENT: Reset reach-out status to make it show "TO DO: Call" in profile
+                        lead.reachOut.completed = false;
+                        lead.reachOut.status = 'pending';
+
+                        delete lead.reachOut.greenHighlightUntil;
+                        delete lead.reachOut.greenHighlightDays;
+
+                        console.log(`   After reset: callsConnected=${lead.reachOut.callsConnected}, textCount=${lead.reachOut.textCount}`);
+                        updatedCount++;
+                    } else {
+                        // Debug: Log leads that aren't expired yet
+                        if (lead.name && lead.name.includes('SKUR TRANSPORT')) {
+                            console.log(`🟡 SKUR TRANSPORT not expired: expires ${highlightExpiry.toLocaleString()}, now is ${now.toLocaleString()}`);
+                        }
+                    }
+                }
+            });
+
+            if (updatedCount > 0) {
+                localStorage.setItem('insurance_leads', JSON.stringify(leads));
+                console.log(`✅ Cleaned up ${updatedCount} expired highlight durations`);
+
+                // Save expired leads to server
+                leads.forEach(async lead => {
+                    if (lead.reachOut && lead.reachOut.highlightExpired) {
+
+                        try {
+                            await fetch(`/api/leads/${lead.id}`, {
+                                method: 'PUT',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({reachOut: lead.reachOut})
+                            });
+                            console.log(`✅ Saved expired lead ${lead.id} to server`);
+                        } catch (error) {
+                            console.error(`❌ Failed to save expired lead ${lead.id}:`, error);
+                        }
+                    }
+                });
+
+                // Force table refresh to show updated TO DO text
+                if (window.displayLeads) {
+                    window.displayLeads();
+                } else if (window.loadLeadsView) {
+                    window.loadLeadsView();
+                }
+
+                // Force refresh any open lead profiles to show updated reach-out status
+                leads.forEach(lead => {
+                    if (lead.reachOut && lead.reachOut.highlightExpired) {
+                        const profileContainer = document.getElementById('lead-profile-container');
+                        if (profileContainer && profileContainer.dataset.leadId === String(lead.id)) {
+                            console.log(`🔄 Refreshing open profile for expired lead ${lead.id}`);
+                            if (window.applyReachOutStyling) {
+                                // Refresh the reach-out section for this lead's profile
+                                const stage = lead.stage || 'new';
+                                const hasReachOutTodo = ['quoted', 'info_requested', 'quote_sent', 'quote-sent-unaware',
+                                                       'quote-sent-aware', 'interested'].includes(stage);
+                                window.applyReachOutStyling(lead.id, hasReachOutTodo);
+                            }
+                        }
+                    }
+                });
+            } else {
+                console.log('✅ No expired highlights found to clean up');
+            }
+        } catch (error) {
+            console.error('❌ Error cleaning up expired highlights:', error);
+        }
+    }
+
+    // Run cleanup immediately on page load and every 5 minutes
+    console.log('🚀 Running immediate highlight expiration cleanup...');
+    cleanupExpiredHighlights();
+    setInterval(cleanupExpiredHighlights, 5 * 60 * 1000); // Every 5 minutes
+
+    // Also run cleanup whenever the table is refreshed
+    const originalDisplayLeads = window.displayLeads;
+    if (originalDisplayLeads) {
+        window.displayLeads = function(...args) {
+            cleanupExpiredHighlights();
+            return originalDisplayLeads.apply(this, args);
+        };
+    }
+
+    const originalLoadLeadsView = window.loadLeadsView;
+    if (originalLoadLeadsView) {
+        window.loadLeadsView = function(...args) {
+            cleanupExpiredHighlights();
+            return originalLoadLeadsView.apply(this, args);
+        };
+    }
 
     // Store original if it exists
     const originalGenerateSimpleLeadRows = window.generateSimpleLeadRows;
@@ -192,9 +366,32 @@ function formatPremiumDisplay(premium) {
                     <td>${window.getStageHtml ? window.getStageHtml(lead.stage, lead) : getStageHtmlFixed(lead.stage)}</td>
                     <td>
                         ${(() => {
-                            const todoText = getNextActionFixed(lead.stage || 'new', lead);
-                            const color = todoText && todoText.toLowerCase().includes('reach out') ? '#dc2626' : 'black';
-                            return `<div style="font-weight: bold; color: ${color};">${todoText}</div>`;
+                            // Use the global getNextAction function that gets overridden by other scripts
+                            const todoText = window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : getNextActionFixed(lead.stage || 'new', lead);
+
+                            // Enhanced debug logging for leads requiring reach-out
+                            const requiresReachoutStages = ['quoted', 'info_requested', 'quote_sent', 'quote-sent-unaware', 'quote-sent-aware', 'interested', 'contact_attempted', 'loss_runs_requested'];
+                            if (requiresReachoutStages.includes(lead.stage) || (lead.name && lead.name.includes('SKUR TRANSPORT'))) {
+                                console.log(`🔍 LEAD DEBUG (${lead.name}):`, {
+                                    id: lead.id,
+                                    stage: lead.stage,
+                                    todoText: todoText,
+                                    completedAt: lead.reachOut?.completedAt,
+                                    greenHighlightUntil: lead.reachOut?.greenHighlightUntil,
+                                    callsConnected: lead.reachOut?.callsConnected,
+                                    textCount: lead.reachOut?.textCount
+                                });
+                            }
+
+                            // CRITICAL FIX: Don't wrap HTML in additional styling if it already contains color styling
+                            if (todoText && todoText.includes('<span style=')) {
+                                // Already has styling (red reach-out text), return as-is
+                                return todoText;
+                            } else {
+                                // Plain text, apply default styling
+                                const color = todoText && todoText.toLowerCase().includes('reach out') ? '#dc2626' : 'black';
+                                return `<div style="font-weight: bold; color: ${color};">${todoText}</div>`;
+                            }
                         })()}
                     </td>
                     <td>${lead.renewalDate || 'N/A'}</td>
@@ -461,6 +658,9 @@ function formatPremiumDisplay(premium) {
         return false;
     }
 
+    // Make isHighlightActiveForLead globally available for highlighting function
+    window.isHighlightActiveForLead = isHighlightActiveForLead;
+
     // Function to apply reach out complete highlighting
     function applyReachOutCompleteHighlighting() {
         console.log('🎨 Applying reach out complete highlighting...');
@@ -482,72 +682,50 @@ function formatPremiumDisplay(premium) {
         let highlightCount = 0;
 
         rows.forEach(row => {
-            // FIRST CHECK: Look for empty TO DO column (7th column, index 6)
-            const todoCell = row.querySelectorAll('td')[6];
-            if (todoCell) {
-                const todoText = todoCell.textContent.trim();
-                console.log(`Checking TO DO cell: "${todoText}"`);
-
-                // If TO DO is empty, this means reach out is complete
-                if (todoText === '' || todoText.length === 0) {
-                    console.log(`✅ Found lead with empty TO DO - applying green highlight!`);
-
-                    // Apply green styling
-                    row.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
-                    row.style.setProperty('background', 'rgba(16, 185, 129, 0.2)', 'important');
-                    row.style.setProperty('border-left', '4px solid #10b981', 'important');
-                    row.style.setProperty('border-right', '2px solid #10b981', 'important');
-                    row.classList.add('reach-out-complete');
-                    highlightCount++;
-                    return; // Skip to next row
-                }
-            }
-            // Find the lead ID from the checkbox
+            // Find the lead ID from the checkbox first
             const checkbox = row.querySelector('.lead-checkbox');
             if (!checkbox) return;
 
             const leadId = checkbox.value;
             const lead = leads.find(l => String(l.id) === String(leadId));
+            if (!lead) return;
 
-            if (lead) {
-                const reachOut = lead.reachOut || {};
-                const stage = lead.stage || 'new';
+            // Get TODO cell content
+            const todoCell = row.querySelectorAll('td')[6];
+            if (!todoCell) return;
 
-                // Log lead info for debugging
-                if (lead.reachOut) {
-                    console.log(`🔍 Lead ${leadId} (${lead.name}): stage=${stage}, reachOut exists`);
+            const todoText = todoCell.textContent.trim();
+
+            // CRITICAL FIX: For ALL leads, check if they should have green highlighting
+            // Only apply green highlighting if BOTH conditions are true:
+            // 1. TODO is empty (reach-out complete)
+            // 2. Highlight is actually ACTIVE (not expired/missing)
+
+            const hasActiveHighlight = isHighlightActiveForLead(lead);
+            const hasEmptyTodo = todoText === '' || todoText.length === 0;
+
+            console.log(`🔍 Lead ${leadId} (${lead.name}): TODO="${todoText}", Active highlight=${hasActiveHighlight}`);
+
+            // UPDATED LOGIC: Apply green highlighting if TODO is empty (universal rule)
+            if (hasEmptyTodo) {
+                // Empty TODO always gets green highlighting
+                console.log(`✅ Lead ${leadId} - applying green highlight (empty TODO cell)`);
+                row.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
+                row.style.setProperty('background', 'rgba(16, 185, 129, 0.2)', 'important');
+                row.style.setProperty('border-left', '4px solid #10b981', 'important');
+                row.style.setProperty('border-right', '2px solid #10b981', 'important');
+                row.classList.add('reach-out-complete');
+                highlightCount++;
+            } else {
+                // Remove any existing green highlighting
+                if (row.style.backgroundColor.includes('185, 129') || row.classList.contains('reach-out-complete')) {
+                    console.log(`🔴 Lead ${leadId} - removing green highlight (TODO="${todoText}", Active=${hasActiveHighlight})`);
                 }
-
-                // Check if stage requires reach out (NOT info_received - that needs quote preparation)
-                if (stage === 'quoted' || stage === 'info_requested' ||
-                    stage === 'quote_sent' || stage === 'quote-sent-unaware' || stage === 'quote-sent-aware' ||
-                    stage === 'interested') {
-
-                    // Convert values to numbers in case they're stored as strings
-                    const callsConnected = Number(reachOut.callsConnected) || 0;
-                    const callAttempts = Number(reachOut.callAttempts) || 0;
-                    const emailCount = Number(reachOut.emailCount) || 0;
-                    const textCount = Number(reachOut.textCount) || 0;
-
-                    // If connected call was made or all methods attempted, reach out is complete
-                    if (callsConnected > 0 ||
-                        (callAttempts > 0 && emailCount > 0 && textCount > 0)) {
-
-                        console.log(`✅ Lead ${leadId} (${lead.name}) is reach out complete!`);
-                        console.log(`   - Calls connected: ${callsConnected}`);
-                        console.log(`   - Call attempts: ${callAttempts}`);
-                        console.log(`   - Emails sent: ${emailCount}`);
-                        console.log(`   - Texts sent: ${textCount}`);
-
-                        // Apply green styling
-                        row.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
-                        row.style.setProperty('background', 'rgba(16, 185, 129, 0.2)', 'important');
-                        row.style.setProperty('border-left', '4px solid #10b981', 'important');
-                        row.style.setProperty('border-right', '2px solid #10b981', 'important');
-                        row.classList.add('reach-out-complete');
-                        highlightCount++;
-                    }
-                }
+                row.style.removeProperty('background-color');
+                row.style.removeProperty('background');
+                row.style.removeProperty('border-left');
+                row.style.removeProperty('border-right');
+                row.classList.remove('reach-out-complete');
             }
         });
 
@@ -1249,9 +1427,9 @@ function formatPremiumDisplay(premium) {
         });
     };
 
-    // Run immediately
-    setTimeout(runAggressiveHighlighting, 500);
-    setTimeout(runAggressiveHighlighting, 1000);
+    // DISABLED: These were overriding correct initial highlighting
+    // setTimeout(runAggressiveHighlighting, 500);
+    // setTimeout(runAggressiveHighlighting, 1000);
     // DISABLED multiple aggressive timeouts to prevent blinking
     // setTimeout(runAggressiveHighlighting, 1500);
     // setTimeout(runAggressiveHighlighting, 2000);
@@ -1272,6 +1450,58 @@ function formatPremiumDisplay(premium) {
     // setInterval(runAggressiveHighlighting, 2000);
 
     console.log('✅ FINAL LEAD TABLE FIX READY');
+
+    // DISABLED: This was interfering with correct initial highlighting
+    // setTimeout(() => {
+        console.log('🚨 AUTO-FIXING HARRY WELLING...');
+
+        // Force table regeneration if needed
+        if (window.generateSimpleLeadRows) {
+            const tableBody = document.querySelector('#leadsTableBody') || document.querySelector('tbody');
+            if (tableBody) {
+                const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+                tableBody.innerHTML = window.generateSimpleLeadRows(leads);
+                console.log('✅ Table regenerated');
+            }
+        }
+
+        // DISABLED: This was interfering with correct initial highlighting
+        // setTimeout(applyReachOutCompleteHighlighting, 500);
+
+        // Verify and manual fix if needed
+        // setTimeout(() => {
+            // const tableBody = document.querySelector('#leadsTableBody') || document.querySelector('tbody');
+            // if (tableBody) {
+                // const rows = tableBody.querySelectorAll('tr');
+                // rows.forEach(row => {
+                    // const nameCell = row.querySelector('td:first-child');
+                    // if (nameCell && nameCell.textContent.includes('HARRY WELLING')) {
+                        // const todoCell = row.querySelectorAll('td')[6];
+                        // if (todoCell) {
+                            // const currentText = todoCell.textContent.trim();
+                            // const hasRedStyling = todoCell.innerHTML.includes('color: #dc2626');
+
+                            // console.log(`🔍 Harry Welling TODO: "${currentText}", Red styling: ${hasRedStyling}`);
+
+                            // if (!hasRedStyling || !currentText.toLowerCase().includes('reach')) {
+                                // console.log('🔧 FORCE FIXING Harry Welling TODO cell...');
+                                // todoCell.innerHTML = '<span style="color: #dc2626; font-weight: bold;">Reach out</span>';
+                            // }
+                        // }
+
+                        // Remove any green highlighting
+                        // row.style.removeProperty('background-color');
+                        // row.style.removeProperty('background');
+                        // row.style.removeProperty('border-left');
+                        // row.style.removeProperty('border-right');
+                        // row.classList.remove('reach-out-complete');
+
+                        // console.log('✅ Harry Welling fixed: Red TODO text + No green highlight');
+                    // }
+                // });
+            // }
+        // }, 1500);
+    // }, 3000);
 
     // RUN IMMEDIATELY ONE MORE TIME - DISABLED to prevent blinking
     // setTimeout(() => {

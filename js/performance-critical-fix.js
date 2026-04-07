@@ -56,6 +56,7 @@ console.log('🚀 Applying critical performance fixes...');
 
     const originalGetItem = localStorage.getItem;
     const originalSetItem = localStorage.setItem;
+    const originalRemoveItem = localStorage.removeItem;
 
     localStorage.getItem = function(key) {
         if (localStorageCache.has(key)) {
@@ -71,9 +72,55 @@ console.log('🚀 Applying critical performance fixes...');
         return value;
     };
 
+    // Helper: slim an array of leads by trimming callLogs
+    function slimLeadsArray(leads, maxLogs) {
+        return leads.map(lead => {
+            if (!lead.reachOut || !lead.reachOut.callLogs) return lead;
+            return { ...lead, reachOut: { ...lead.reachOut, callLogs: lead.reachOut.callLogs.slice(-maxLogs) } };
+        });
+    }
+
     localStorage.setItem = function(key, value) {
         localStorageCache.set(key, value);
-        return originalSetItem.call(localStorage, key, value);
+        try {
+            return originalSetItem.call(localStorage, key, value);
+        } catch (e) {
+            if (e.name !== 'QuotaExceededError') throw e;
+
+            console.warn(`⚠️ QUOTA: localStorage full writing "${key}" - attempting recovery...`);
+
+            // Step 1: If this is a leads array, try trimming callLogs progressively
+            try {
+                const data = JSON.parse(value);
+                if (Array.isArray(data) && data.length > 0 && (data[0].reachOut !== undefined || data[0].id !== undefined)) {
+                    for (const maxLogs of [10, 5, 0]) {
+                        try {
+                            const slimmed = slimLeadsArray(data, maxLogs);
+                            const slimJSON = JSON.stringify(slimmed);
+                            localStorageCache.set(key, slimJSON);
+                            originalSetItem.call(localStorage, key, slimJSON);
+                            console.log(`✅ QUOTA: Saved "${key}" with callLogs trimmed to ${maxLogs}`);
+                            return;
+                        } catch (e2) { /* try next level */ }
+                    }
+                }
+            } catch (parseErr) { /* not JSON or not a leads array */ }
+
+            // Step 2: Free space by clearing non-critical keys, then retry original value
+            const evictable = ['lossRunsData', 'dotLookupCache', 'leads', 'debug_log', 'tempData'];
+            for (const evictKey of evictable) {
+                if (evictKey !== key) {
+                    try { originalRemoveItem.call(localStorage, evictKey); } catch (_) {}
+                }
+            }
+            try {
+                originalSetItem.call(localStorage, key, value);
+                console.log(`✅ QUOTA: Saved "${key}" after freeing space`);
+                return;
+            } catch (e3) {
+                console.error(`❌ QUOTA: Cannot save "${key}" even after recovery - skipping`);
+            }
+        }
     };
 
     // Throttle expensive operations

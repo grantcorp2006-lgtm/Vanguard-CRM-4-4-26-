@@ -1,7 +1,7 @@
 // My Leads Toggle - Direct Element Targeting
 console.log('🚀 Direct My Leads Toggle loading...');
 
-window.myLeadsOnlyActive = false;
+window.myLeadsOnlyActive = true;
 
 function getCurrentUser() {
     try {
@@ -17,105 +17,67 @@ function getCurrentUser() {
 }
 
 window.toggleMyLeadsFilter = function(enabled) {
-    console.log('🔄 DIRECT TOGGLE:', enabled ? 'ENABLED' : 'DISABLED');
-    window.myLeadsOnlyActive = enabled;
+    window.myLeadsOnlyActive = !!enabled;
+    const currentUser = getCurrentUser().toLowerCase();
+    console.log('🔄 MY LEADS FILTER:', enabled ? 'ON' : 'OFF', '| User:', currentUser);
 
-    const currentUser = getCurrentUser();
-    console.log('👤 Current user:', currentUser);
+    const tableBody = document.getElementById('leadsTableBody');
+    if (!tableBody) {
+        updateToggleButtonUI();
+        return;
+    }
 
-    // Get all table rows
-    const allRows = Array.from(document.querySelectorAll('tbody tr, table tr'));
-    console.log(`📋 Found ${allRows.length} total table rows`);
-
-    let hiddenCount = 0;
-    let shownCount = 0;
-    let currentSection = '';
-
-    allRows.forEach((row, index) => {
-        const colspanTd = row.querySelector('td[colspan]');
-
-        // Check if this is a section header
-        if (colspanTd) {
-            const headerText = colspanTd.textContent || '';
-            if (headerText.includes("'s Leads (") || headerText.includes(" Leads (")) {
-                currentSection = headerText;
-                console.log(`📍 Section header found: "${headerText}"`);
-
-                // Determine if this group belongs to current user
-                const isMyGroup = headerText.includes(`${currentUser}'s Leads`) ||
-                                 headerText.toLowerCase().includes(`${currentUser.toLowerCase()}'s leads`);
-                const isSpecialGroup = headerText.includes('Unassigned') ||
-                                      headerText.includes('Closed') ||
-                                      headerText.includes('New Leads');
-
-                // Hide/show the header row
-                if (enabled) {
-                    if (isMyGroup || isSpecialGroup) {
-                        row.style.display = '';
-                        console.log(`✅ Showing header: "${headerText}"`);
-                    } else {
-                        row.style.display = 'none';
-                        hiddenCount++;
-                        console.log(`❌ Hiding header: "${headerText}"`);
-                    }
-                } else {
-                    row.style.display = '';
-                }
-                return; // Skip to next row
-            }
+    // Re-render the table using the cached leads — no server round-trip needed
+    if (window.currentActiveLeads && typeof window.generateSimpleLeadRowsWithDividers === 'function') {
+        if (!enabled || !currentUser) {
+            // Filter OFF: show all leads
+            tableBody.innerHTML = window.generateSimpleLeadRowsWithDividers(window.currentActiveLeads);
+        } else {
+            // Filter ON: only this user's leads (including their closed leads)
+            const myLeads = window.currentActiveLeads.filter(lead =>
+                (lead.assignedTo || '').toLowerCase() === currentUser
+            );
+            console.log(`👤 Showing ${myLeads.length} of ${window.currentActiveLeads.length} leads for "${currentUser}"`);
+            tableBody.innerHTML = window.generateSimpleLeadRowsWithDividers(myLeads);
         }
 
-        // Check if this is a lead row
-        const isLeadRow = row.hasAttribute('data-lead-id') ||
-                         row.classList.contains('timestamp-red') ||
-                         row.querySelector('input.lead-checkbox') ||
-                         row.textContent.includes('Commercial Auto');
+        // Re-apply visual enhancements after re-render
+        setTimeout(() => {
+            if (window.applyReachOutCompleteHighlighting) window.applyReachOutCompleteHighlighting();
+            if (window.forceAllHighlighting) window.forceAllHighlighting();
+        }, 50);
 
-        if (isLeadRow) {
-            const leadName = row.getAttribute('data-lead-name') ||
-                            row.querySelector('.lead-name')?.textContent ||
-                            'Unknown Lead';
-
-            console.log(`🔍 Lead "${leadName}" in section "${currentSection}"`);
-
-            // Determine which section this lead belongs to
-            const isMyGroup = currentSection.includes(`${currentUser}'s Leads`) ||
-                             currentSection.toLowerCase().includes(`${currentUser.toLowerCase()}'s leads`);
-            const isSpecialGroup = currentSection.includes('Unassigned') ||
-                                  currentSection.includes('Closed') ||
-                                  currentSection.includes('New Leads');
-
-            if (enabled) {
-                if (isMyGroup || isSpecialGroup) {
-                    row.style.display = '';
-                    shownCount++;
-                    console.log(`✅ Showing lead: "${leadName}"`);
-                } else {
-                    row.style.display = 'none';
-                    hiddenCount++;
-                    console.log(`❌ Hiding lead: "${leadName}" from section "${currentSection}"`);
-                }
+    } else {
+        // Fallback: DOM show/hide using data-agent on checkboxes
+        if (!document.getElementById('my-leads-hide-style')) {
+            const s = document.createElement('style');
+            s.id = 'my-leads-hide-style';
+            s.textContent = '.ml-hidden { display: none !important; }';
+            document.head.appendChild(s);
+        }
+        tableBody.querySelectorAll('tr').forEach(row => {
+            if (!enabled) { row.classList.remove('ml-hidden'); return; }
+            if (row.classList.contains('lead-divider')) {
+                const agentCb = row.querySelector('input.agent-group-checkbox');
+                (agentCb && agentCb.dataset.agent === currentUser)
+                    ? row.classList.remove('ml-hidden')
+                    : row.classList.add('ml-hidden');
             } else {
-                row.style.display = '';
-                shownCount++;
+                const leadCb = row.querySelector('input.lead-checkbox');
+                if (leadCb) {
+                    (leadCb.dataset.agent === currentUser)
+                        ? row.classList.remove('ml-hidden')
+                        : row.classList.add('ml-hidden');
+                }
             }
-        }
-    });
+        });
+    }
 
-    console.log(`📊 ${enabled ? `Hidden ${hiddenCount} items, shown ${shownCount}` : `Restored ${shownCount} items`}`);
-    updateToggleUI(enabled);
+    updateToggleButtonUI();
 };
 
 function updateToggleUI(enabled) {
-    const checkbox = document.getElementById('myLeadsToggle');
-    if (checkbox) checkbox.checked = enabled;
-
-    const slider = document.querySelector('#myLeadsToggle + span');
-    const dot = slider?.querySelector('span');
-    if (slider && dot) {
-        slider.style.backgroundColor = enabled ? '#3b82f6' : '#ccc';
-        dot.style.transform = enabled ? 'translateX(16px)' : 'translateX(0)';
-    }
+    updateToggleButtonUI(); // kept for backward compatibility
 }
 
 // Function to remove all toggle buttons - AGGRESSIVE REMOVAL
@@ -173,9 +135,10 @@ function insertToggle() {
         return;
     }
 
-    // Check if toggle already exists - if so, don't create another one
+    // Check if toggle already exists - if so, just wire up behavior
     if (document.getElementById('myLeadsToggle')) {
-        console.log('🚫 Toggle already exists, skipping insertion');
+        console.log('✅ Toggle already exists in DOM, wiring up behavior');
+        setupToggleBehavior();
         return;
     }
 
@@ -186,19 +149,18 @@ function insertToggle() {
     setTimeout(() => {
         // Double-check that no toggle exists after cleanup
         if (document.getElementById('myLeadsToggle')) {
-            console.log('🚫 Toggle created by another instance, aborting');
+            console.log('✅ Toggle exists after cleanup, wiring up behavior');
+            setupToggleBehavior();
             return;
         }
 
         console.log('🔄 Inserting fresh toggle...');
 
         const toggleHTML = `
-        <button type="button" id="myLeadsToggle" onclick="window.toggleMyLeadsFilter()"
-                style="background: #6b7280; border-color: #6b7280; color: white; margin-right: 10px; position: relative; overflow: hidden; transition: all 0.3s;"
-                class="btn-secondary toggle-button">
-            <i class="fas fa-user" style="margin-right: 6px;"></i>
-            <span class="toggle-text">My Leads Only</span>
-            <div class="toggle-indicator" style="position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; opacity: 0; transition: opacity 0.3s;"></div>
+        <button type="button" id="myLeadsToggle" onclick="window.toggleMyLeadsFilter(!window.myLeadsOnlyActive)"
+                style="margin-left: 6px; padding: 4px 7px; font-size: 12px; background: transparent; color: #9ca3af; border: 1px solid #4b5563; border-radius: 4px; cursor: pointer; vertical-align: middle; transition: all 0.2s;"
+                title="My Leads Only">
+            <i id="myLeadsToggleIcon" class="fas fa-eye"></i>
         </button>
     `;
 
@@ -242,39 +204,26 @@ function insertToggle() {
     }, 100); // Close the setTimeout
 }
 
-// Setup toggle behavior for button-style toggle
+// Setup toggle behavior — just sync the UI state; onclick in HTML handles clicks
 function setupToggleBehavior() {
-    const toggleButton = document.getElementById('myLeadsToggle');
-    if (!toggleButton) return;
-
-    // Remove onclick and use addEventListener
-    toggleButton.removeAttribute('onclick');
-
-    toggleButton.addEventListener('click', function() {
-        window.myLeadsOnlyActive = !window.myLeadsOnlyActive;
-        window.toggleMyLeadsFilter(window.myLeadsOnlyActive);
-        updateToggleButtonUI();
-    });
-
     updateToggleButtonUI();
 }
 
 function updateToggleButtonUI() {
     const toggleButton = document.getElementById('myLeadsToggle');
-    const indicator = toggleButton?.querySelector('.toggle-indicator');
-    const text = toggleButton?.querySelector('.toggle-text');
+    const icon = document.getElementById('myLeadsToggleIcon');
 
     if (toggleButton) {
         if (window.myLeadsOnlyActive) {
-            toggleButton.style.background = '#3b82f6';
+            toggleButton.style.background = '#1e40af';
             toggleButton.style.borderColor = '#3b82f6';
-            if (indicator) indicator.style.opacity = '1';
-            if (text) text.textContent = 'My Leads Only ✓';
+            toggleButton.style.color = '#93c5fd';
+            if (icon) { icon.className = 'fas fa-eye-slash'; }
         } else {
-            toggleButton.style.background = '#6b7280';
-            toggleButton.style.borderColor = '#6b7280';
-            if (indicator) indicator.style.opacity = '0';
-            if (text) text.textContent = 'My Leads Only';
+            toggleButton.style.background = 'transparent';
+            toggleButton.style.borderColor = '#4b5563';
+            toggleButton.style.color = '#9ca3af';
+            if (icon) { icon.className = 'fas fa-eye'; }
         }
     }
 }

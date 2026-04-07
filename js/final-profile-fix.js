@@ -150,6 +150,7 @@ window.createEnhancedProfile = function(lead) {
                             <option value="interested" ${lead.stage === 'interested' ? 'selected' : ''}>Interested</option>
                             <option value="not-interested" ${lead.stage === 'not-interested' ? 'selected' : ''}>Not Interested</option>
                             <option value="closed" ${lead.stage === 'closed' ? 'selected' : ''}>Closed</option>
+                            <option value="custom">Custom</option>
                         </select>
                         <div id="stage-timestamp-${lead.id}">
                             <!-- Stage timestamp will be dynamically inserted here -->
@@ -162,12 +163,12 @@ window.createEnhancedProfile = function(lead) {
                     <h3><i class="fas fa-info-circle"></i> Lead Details</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                         <div>
-                            <label style="font-weight: 600; font-size: 12px;">Lead Status:</label>
-                            <select onchange="updateLeadStatus('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
-                                <option value="Active" ${(lead.status === 'Active' || !lead.status) ? 'selected' : ''}>Active</option>
-                                <option value="Inactive" ${lead.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
-                                <option value="Pending" ${lead.status === 'Pending' ? 'selected' : ''}>Pending</option>
-                                <option value="Converted" ${lead.status === 'Converted' ? 'selected' : ''}>Converted</option>
+                            <label style="font-weight: 600; font-size: 12px;">Response Rate:</label>
+                            <select onchange="updateLeadPriority('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                                <option value="High" ${lead.priority === 'High' ? 'selected' : ''}>High</option>
+                                <option value="Mid" ${(lead.priority === 'Mid' || !lead.priority) ? 'selected' : ''}>Mid</option>
+                                <option value="Lower" ${lead.priority === 'Lower' ? 'selected' : ''}>Lower</option>
+                                <option value="Low" ${lead.priority === 'Low' ? 'selected' : ''}>Low</option>
                             </select>
                         </div>
                         <div>
@@ -260,13 +261,23 @@ window.createEnhancedProfile = function(lead) {
                             <label style="font-weight: 600; font-size: 12px;">Contact:</label>
                             <input type="text" value="${lead.contact || ''}" onchange="updateLeadField('${lead.id}', 'contact', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
                         </div>
-                        <div>
+                        <div style="position: relative;">
                             <label style="font-weight: 600; font-size: 12px;">Phone:</label>
-                            <input type="text" value="${lead.phone || ''}" onchange="updateLeadField('${lead.id}', 'phone', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" value="${lead.phone || ''}" onchange="updateLeadField('${lead.id}', 'phone', this.value)" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <button onclick="window.open('tel:${lead.phone || ''}')" title="Call ${lead.phone || ''}" style="background: #10b981; color: white; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; font-size: 14px; transition: background 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+                                    <i class="fas fa-phone" style="margin: 0;"></i>
+                                </button>
+                            </div>
                         </div>
-                        <div>
+                        <div style="position: relative;">
                             <label style="font-weight: 600; font-size: 12px;">Email:</label>
-                            <input type="text" value="${lead.email || ''}" onchange="updateLeadField('${lead.id}', 'email', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" value="${lead.email || ''}" onchange="updateLeadField('${lead.id}', 'email', this.value)" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <button onclick="window.open('mailto:${lead.email || ''}')" title="Compose email to ${lead.email || ''}" style="background: #3b82f6; color: white; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; font-size: 14px; transition: background 0.2s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+                                    <i class="fas fa-envelope" style="margin: 0;"></i>
+                                </button>
+                            </div>
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">DOT Number:</label>
@@ -838,6 +849,10 @@ function handleCallOutcome(leadId, answered) {
             console.log(`🐛 DEBUG handleCallOutcome - calling updateReachOutStatus`);
             updateReachOutStatus(leadId);
 
+            // Calculate and update response rate based on new call data
+            console.log(`🎯 DEBUG handleCallOutcome - calculating response rate`);
+            calculateAndUpdateResponseRate(leadId);
+
             // Refresh leads table to update TO DO column
             if (window.loadLeadsView) {
                 setTimeout(() => window.loadLeadsView(), 100);
@@ -950,14 +965,36 @@ window.updateReachOut = function(leadId, type, checked) {
     console.log(`🐛 DEBUG updateReachOut called: leadId=${leadId}, type=${type}, checked=${checked}`);
 
     const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-    const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
+
+    // Enhanced debugging for lead lookup
+    console.log(`🔍 DEBUG: Looking for lead ID "${leadId}" (type: ${typeof leadId})`);
+    console.log(`🔍 DEBUG: Total leads in storage: ${leads.length}`);
+
+    // Try multiple lookup methods
+    let leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
 
     if (leadIndex === -1) {
-        console.log('🐛 DEBUG updateReachOut - lead not found');
-        return;
+        // Try looking up by number/integer
+        leadIndex = leads.findIndex(l => l.id == leadId);
+        console.log(`🔍 DEBUG: Loose comparison result: index=${leadIndex}`);
     }
 
-    console.log(`🐛 DEBUG found lead at index: ${leadIndex}`);
+    if (leadIndex === -1) {
+        // Try parsing leadId as number
+        const numLeadId = parseInt(leadId);
+        if (!isNaN(numLeadId)) {
+            leadIndex = leads.findIndex(l => l.id === numLeadId);
+            console.log(`🔍 DEBUG: Number lookup result: index=${leadIndex}`);
+        }
+    }
+
+    if (leadIndex === -1) {
+        console.log(`🐛 DEBUG updateReachOut - lead not found after all lookup methods`);
+        console.log(`🔍 DEBUG: Available lead IDs:`, leads.slice(0, 5).map(l => `"${l.id}" (${typeof l.id})`));
+        return;
+    } else {
+        console.log(`✅ DEBUG: Found lead at index ${leadIndex} with ID ${leads[leadIndex].id}`);
+    }
 
     if (!leads[leadIndex].reachOut) {
         leads[leadIndex].reachOut = {
@@ -1228,6 +1265,202 @@ window.updateWinLossStatus = function(leadId, winLoss) {
 
 window.updateLeadAssignedTo = function(leadId, assignedTo) {
     updateLeadField(leadId, 'assignedTo', assignedTo);
+};
+
+// Automatic response rate calculation based on call attempts to connected ratio
+function calculateAndUpdateResponseRate(leadId) {
+    console.log('🎯 calculateAndUpdateResponseRate called for leadId:', leadId);
+
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
+
+    if (leadIndex === -1) {
+        console.log('❌ Lead not found for response rate calculation:', leadId);
+        return;
+    }
+
+    const lead = leads[leadIndex];
+    const reachOut = lead.reachOut || {};
+    const attempts = parseInt(reachOut.callAttempts) || 0;
+    const connected = parseInt(reachOut.callsConnected) || 0;
+
+    console.log(`📊 Response rate calculation: ${attempts} attempts, ${connected} connected`);
+
+    // Only calculate if there have been call attempts
+    if (attempts === 0) {
+        console.log('ℹ️ No call attempts yet, keeping current priority');
+        return;
+    }
+
+    // Calculate ratio (attempts per connection)
+    let ratio = connected > 0 ? attempts / connected : attempts;
+    let newPriority = lead.priority || 'Mid'; // Keep existing if no change needed
+    let shouldClose = false;
+
+    console.log(`📈 Calculated ratio: ${ratio} (${attempts}:${connected})`);
+
+    // Determine new response rate based on ratio
+    if (connected > 0 && ratio <= 2) {
+        // 2 or fewer attempts per connection = High response rate
+        newPriority = 'High';
+        console.log('✅ High response rate: ≤2 attempts per connection');
+    } else if (connected > 0 && ratio <= 3) {
+        // 3 attempts per connection = Mid response rate
+        newPriority = 'Mid';
+        console.log('⚡ Mid response rate: 3 attempts per connection');
+    } else if (connected > 0 && ratio <= 4) {
+        // 4 attempts per connection = Lower response rate
+        newPriority = 'Lower';
+        console.log('⚠️ Lower response rate: 4 attempts per connection');
+    } else if (connected > 0 && ratio <= 5) {
+        // 5 attempts per connection = Low response rate
+        newPriority = 'Low';
+        console.log('🔴 Low response rate: 5 attempts per connection');
+    } else if (attempts >= 6 && connected === 0) {
+        // 6+ attempts with no connections = Very low pickup rate
+        newPriority = 'Low';
+        shouldClose = true;
+        console.log('🚨 VERY LOW pickup rate: 6+ attempts with no connections');
+    }
+
+    // Update priority if it changed
+    if (newPriority !== lead.priority) {
+        console.log(`🔄 Updating priority from "${lead.priority}" to "${newPriority}"`);
+        leads[leadIndex].priority = newPriority;
+        localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+        // Update the dropdown in the modal if it exists
+        const prioritySelect = document.querySelector(`select[onchange*="updateLeadPriority('${leadId}"]`);
+        if (prioritySelect) {
+            prioritySelect.value = newPriority;
+            console.log('✅ Updated priority dropdown in modal');
+        }
+
+        // Update the table display
+        if (window.displayLeads) {
+            setTimeout(() => window.displayLeads(), 100);
+        }
+    }
+
+    // Handle very low pickup rate case
+    if (shouldClose) {
+        console.log('🚨 Showing close lead popup due to very low pickup rate');
+        showLowPickupRatePopup(leadId, attempts);
+    }
+}
+
+// Popup for very low pickup rate (6+ attempts with no connections)
+function showLowPickupRatePopup(leadId, attempts) {
+    // Create backdrop
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+
+    // Create popup
+    const popup = document.createElement('div');
+    popup.style.cssText = `
+        background: white;
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        max-width: 400px;
+        width: 90%;
+        text-align: center;
+    `;
+
+    popup.innerHTML = `
+        <div style="margin-bottom: 20px;">
+            <div style="color: #ef4444; font-size: 48px; margin-bottom: 15px;">⚠️</div>
+            <h3 style="color: #dc2626; margin: 0 0 15px 0;">Very Low Pickup Rate</h3>
+            <p style="color: #374151; margin: 0 0 20px 0;">
+                This lead has a very low pickup rate with <strong>${attempts} attempts</strong> and <strong>no connections</strong>.
+            </p>
+            <p style="color: #6b7280; margin: 0;">
+                Would you like to close this lead?
+            </p>
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+            <button id="close-lead-yes" style="background: #dc2626; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                Yes, Close Lead
+            </button>
+            <button id="close-lead-no" style="background: #6b7280; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                No, Keep Open
+            </button>
+        </div>
+    `;
+
+    backdrop.appendChild(popup);
+    document.body.appendChild(backdrop);
+
+    // Handle button clicks
+    document.getElementById('close-lead-yes').onclick = function() {
+        console.log('🔒 User chose to close lead due to low pickup rate');
+
+        // Update lead stage to closed
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const leadIndex = leads.findIndex(l => String(l.id) === String(leadId));
+
+        if (leadIndex !== -1) {
+            leads[leadIndex].stage = 'closed';
+            leads[leadIndex].closedReason = 'Very low pickup rate - no response after multiple attempts';
+            localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+            console.log('✅ Lead closed due to low pickup rate');
+
+            // Update stage dropdown in modal if open
+            const stageSelect = document.querySelector(`select[onchange*="updateLeadStage('${leadId}"]`);
+            if (stageSelect) {
+                stageSelect.value = 'closed';
+            }
+
+            // Refresh table
+            if (window.displayLeads) {
+                setTimeout(() => window.displayLeads(), 100);
+            }
+
+            // Close the lead profile modal if open
+            const profileModal = document.querySelector('.lead-profile-modal');
+            if (profileModal) {
+                profileModal.remove();
+            }
+        }
+
+        backdrop.remove();
+    };
+
+    document.getElementById('close-lead-no').onclick = function() {
+        console.log('ℹ️ User chose to keep lead open despite low pickup rate');
+        backdrop.remove();
+    };
+
+    // Close on backdrop click
+    backdrop.onclick = function(e) {
+        if (e.target === backdrop) {
+            backdrop.remove();
+        }
+    };
+}
+
+window.updateLeadPriority = function(leadId, priority) {
+    console.log('Updating lead priority:', leadId, 'to', priority);
+    updateLeadField(leadId, 'priority', priority);
+
+    // Update the lead name color in the table immediately
+    if (window.displayLeads) {
+        setTimeout(() => {
+            window.displayLeads();
+        }, 100);
+    }
 };
 
 window.addVehicleToLead = function(leadId) {

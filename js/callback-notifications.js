@@ -10,6 +10,9 @@
     // Map of alarmKey → timeoutId  (value -1 = handled, no active timeout)
     const scheduledAlarms = new Map();
 
+    // Same map for todo reminders
+    const scheduledTodoAlarms = new Map();
+
     // Email keys sent this session (prevent duplicates)
     const sentEmailKeys = new Set();
 
@@ -94,8 +97,8 @@
                         scheduledAlarms.set(warn30Key, tid);
                         console.log(`⏰ 30-min alarm set for lead ${leadId} in ${Math.round(msUntilWarn/60000)}m`);
                         scheduled++;
-                    } else if (msUntilWarn > -10 * 60 * 1000 && msOut > 0) {
-                        // Missed 30-min window by < 10 min but call not yet due — warn now
+                    } else if (msUntilWarn > -30 * 60 * 1000 && msOut > 0) {
+                        // Missed 30-min window by < 30 min but call not yet due — warn now
                         scheduledAlarms.set(warn30Key, -1);
                         setTimeout(() => fireAlarm(leadId, cb, '30min'), 0);
                     } else {
@@ -104,7 +107,7 @@
                 } else {
                     // Key exists — check if a live timer was throttled and is now overdue
                     const tid = scheduledAlarms.get(warn30Key);
-                    if (tid !== -1 && msUntilWarn <= 0 && msUntilWarn > -10 * 60 * 1000 && msOut > 0) {
+                    if (tid !== -1 && msUntilWarn <= 0 && msUntilWarn > -30 * 60 * 1000 && msOut > 0) {
                         clearTimeout(tid);
                         scheduledAlarms.set(warn30Key, -1);
                         console.log(`⏰ 30-min alarm was throttled, firing now for lead ${leadId}`);
@@ -114,6 +117,10 @@
 
                 // ── Due-now alarm ─────────────────────────────────────────
                 const dueKey = `${leadId}_${cbId}_due`;
+
+                // Grace window: 2 hours.  Catches callbacks missed while the
+                // browser was throttled / the user was away from the computer.
+                const GRACE_MS = 2 * 60 * 60 * 1000;
 
                 if (!scheduledAlarms.has(dueKey)) {
                     if (msOut > 0) {
@@ -125,17 +132,17 @@
                         scheduledAlarms.set(dueKey, tid);
                         console.log(`⏰ Due-now alarm set for lead ${leadId} in ${Math.round(msOut/1000)}s`);
                         scheduled++;
-                    } else if (msOut >= -30 * 60 * 1000) {
-                        // Overdue within 30-min grace window (e.g. page just refreshed)
+                    } else if (msOut >= -GRACE_MS) {
+                        // Overdue within grace window — fire now (page refresh / timer throttled)
                         scheduledAlarms.set(dueKey, -1);
                         setTimeout(() => fireAlarm(leadId, cb, 'due'), 0);
                     } else {
-                        scheduledAlarms.set(dueKey, -1); // more than 30 min overdue, skip
+                        scheduledAlarms.set(dueKey, -1); // too old, skip
                     }
                 } else {
                     // Key exists — check if a live timer was throttled and is now overdue
                     const tid = scheduledAlarms.get(dueKey);
-                    if (tid !== -1 && msOut <= 0 && msOut >= -30 * 60 * 1000) {
+                    if (tid !== -1 && msOut <= 0 && msOut >= -GRACE_MS) {
                         clearTimeout(tid);
                         scheduledAlarms.set(dueKey, -1);
                         console.log(`⏰ Due-now alarm was throttled, firing now for lead ${leadId}`);
@@ -163,7 +170,7 @@
             return;
         }
 
-        const title   = isUrgent ? '🔥 CALL DUE NOW!'              : '⏰ Call Due in 30 Minutes';
+        const title   = isUrgent ? 'CALL DUE NOW!'              : 'Call Due in 30 Minutes';
         const message = isUrgent ? `URGENT: Call now with ${lead.name}` : `Scheduled call with ${lead.name}`;
 
         const notification = {
@@ -312,6 +319,49 @@
         .catch(e => console.error('❌ Email error:', e));
     }
 
+    // ── Grant all-users toggle ─────────────────────────────────────────────────
+    function isGrantAllUsersOn() {
+        return localStorage.getItem('grantAllUsersNotif') !== 'false';
+    }
+
+    window.toggleGrantAllUsers = function() {
+        const newState = !isGrantAllUsersOn();
+        localStorage.setItem('grantAllUsersNotif', newState ? 'true' : 'false');
+        const track = document.getElementById('grantToggleTrack');
+        const thumb = document.getElementById('grantToggleThumb');
+        const label = document.getElementById('grantToggleLabel');
+        if (track) track.style.background = newState ? '#3b82f6' : '#d1d5db';
+        if (thumb) thumb.style.left = newState ? '19px' : '3px';
+        if (label) label.textContent = newState ? 'All Users' : 'My Leads';
+        updateNotificationDisplay();
+        updateNotificationBadge();
+    };
+
+    function injectGrantToggle() {
+        const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((sessionData.username || '').toLowerCase() !== 'grant') return;
+        if (document.getElementById('grantToggleTrack')) return;
+        const header = document.querySelector('.notification-sidebar-header');
+        if (!header) return;
+        const isOn = isGrantAllUsersOn();
+        const wrapper = document.createElement('label');
+        wrapper.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;margin:0 8px 0 0;user-select:none;flex-shrink:0;';
+        wrapper.innerHTML = `
+            <span id="grantToggleLabel" style="font-size:12px;font-weight:500;color:#374151;">${isOn ? 'All Users' : 'My Leads'}</span>
+            <div style="position:relative;width:36px;height:20px;flex-shrink:0;">
+                <span id="grantToggleTrack" onclick="toggleGrantAllUsers()" style="
+                    position:absolute;inset:0;border-radius:10px;cursor:pointer;
+                    background:${isOn ? '#3b82f6' : '#d1d5db'};transition:background 0.2s;"></span>
+                <span id="grantToggleThumb" style="
+                    position:absolute;top:3px;left:${isOn ? '19px' : '3px'};
+                    width:14px;height:14px;border-radius:50%;background:white;
+                    transition:left 0.2s;pointer-events:none;
+                    box-shadow:0 1px 3px rgba(0,0,0,0.3);"></span>
+            </div>`;
+        const closeBtn = header.querySelector('.close-sidebar-btn');
+        header.insertBefore(wrapper, closeBtn);
+    }
+
     // ── Sidebar display ────────────────────────────────────────────────────────
     function updateNotificationDisplay() {
         const el = document.querySelector('.notification-sidebar-content');
@@ -321,10 +371,19 @@
 
         const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
         const currentUser = sessionData.username || '';
+        const isGrant = currentUser.toLowerCase() === 'grant';
+        const showAll = isGrant && isGrantAllUsersOn();
 
         const active = callbackNotifications
             .filter(n => !isNotificationExpired(n))
             .filter(n => !(n.dismissedBy && n.dismissedBy[currentUser]))
+            .filter(n => {
+                if (showAll) return true;
+                // Non-Grant users already see only their own; Grant with toggle OFF: filter by assignedAgent
+                if (!isGrant) return true;
+                const agent = n.assignedAgent || (n.leadId ? (getLeadData(n.leadId).assignedTo || '') : '');
+                return !agent || agent.toLowerCase() === currentUser.toLowerCase();
+            })
             .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
         if (active.length === 0) {
@@ -354,7 +413,7 @@
                     <i class="fas fa-times"></i>
                 </button>
                 <div class="notification-icon">
-                    <i class="fas fa-phone" style="color:${notification.urgent ? '#dc2626' : '#059669'};"></i>
+                    <i class="fas ${notification.type && notification.type.startsWith('todo_') ? 'fa-clipboard-list' : 'fa-phone'}" style="color:${notification.urgent ? '#dc2626' : '#059669'};"></i>
                 </div>
                 <div class="notification-content">
                     <div class="notification-title">${notification.title}</div>
@@ -386,7 +445,18 @@
 
     // ── Badge ──────────────────────────────────────────────────────────────────
     function updateNotificationBadge() {
-        const unread = callbackNotifications.filter(n => !n.read && !isNotificationExpired(n)).length;
+        const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const currentUser = sessionData.username || '';
+        const isGrant = currentUser.toLowerCase() === 'grant';
+        const showAll = isGrant && isGrantAllUsersOn();
+
+        const unread = callbackNotifications.filter(n => {
+            if (n.read || isNotificationExpired(n)) return false;
+            if (showAll) return true;
+            if (!isGrant) return true;
+            const agent = n.assignedAgent || (n.leadId ? (getLeadData(n.leadId).assignedTo || '') : '');
+            return !agent || agent.toLowerCase() === currentUser.toLowerCase();
+        }).length;
         const btn    = document.querySelector('.notification-btn');
         if (!btn) return;
         let badge = btn.querySelector('.notification-badge');
@@ -440,29 +510,302 @@
         }
     }
 
+    // ── Shared single-alarm helper ─────────────────────────────────────────────
+    // Schedules (or fires immediately) one alarm stage using the given map.
+    // alarmMap  : scheduledTodoAlarms  (used for todos AND calendar events)
+    // alarmKey  : unique string key
+    // msOut     : ms until this stage should fire (negative = already past)
+    // fireFn    : callback to invoke when the alarm fires
+    // label     : debug label
+    const REMINDER_GRACE = 2 * 60 * 60 * 1000; // 2-hour grace window
+
+    function scheduleOne(alarmMap, alarmKey, msOut, fireFn, label) {
+        if (!alarmMap.has(alarmKey)) {
+            if (msOut > 0) {
+                const tid = setTimeout(() => { fireFn(); alarmMap.delete(alarmKey); }, msOut);
+                alarmMap.set(alarmKey, tid);
+                console.log(`⏰ ${label} set in ${Math.round(msOut / 1000)}s`);
+            } else if (msOut >= -REMINDER_GRACE) {
+                alarmMap.set(alarmKey, -1);
+                setTimeout(fireFn, 0);
+            } else {
+                alarmMap.set(alarmKey, -1); // too old — skip
+            }
+        } else {
+            const tid = alarmMap.get(alarmKey);
+            if (tid !== -1 && msOut <= 0 && msOut >= -REMINDER_GRACE) {
+                clearTimeout(tid);
+                alarmMap.set(alarmKey, -1);
+                console.log(`⏰ ${label} throttled — firing now`);
+                setTimeout(fireFn, 0);
+            }
+        }
+    }
+
+    // ── Todo reminder scheduler (1 h + 30 min + due-now) ──────────────────────
+    function scheduleTodoAlarms() {
+        const now = Date.now();
+
+        ['syncedPersonalTodos', 'syncedAgencyTodos'].forEach(storageKey => {
+            let todos;
+            try { todos = JSON.parse(localStorage.getItem(storageKey) || '[]'); }
+            catch (e) { return; }
+
+            todos.forEach(todo => {
+                if (todo.completed)          return;
+                if (!todo.scheduledReminder) return;
+                if (!todo.targetDate)        return;
+
+                const targetTs = new Date(todo.targetDate).getTime();
+                if (isNaN(targetTs))         return;
+
+                const msOut = targetTs - now;
+                const lbl   = `Todo "${todo.text.substring(0, 20)}"`;
+
+                scheduleOne(scheduledTodoAlarms, `todo_${todo.id}_1hour`,
+                    msOut - 60 * 60 * 1000,
+                    () => fireTodoAlarm(todo, '1hour'), `${lbl} 1-hour warning`);
+
+                scheduleOne(scheduledTodoAlarms, `todo_${todo.id}_30min`,
+                    msOut - 30 * 60 * 1000,
+                    () => fireTodoAlarm(todo, '30min'), `${lbl} 30-min warning`);
+
+                scheduleOne(scheduledTodoAlarms, `todo_${todo.id}_due`,
+                    msOut,
+                    () => fireTodoAlarm(todo, 'due'),   `${lbl} due-now`);
+            });
+        });
+    }
+
+    // Fetch the latest version of a todo (check if since completed)
+    function getLatestTodoData(todoId) {
+        for (const key of ['syncedPersonalTodos', 'syncedAgencyTodos']) {
+            try {
+                const found = JSON.parse(localStorage.getItem(key) || '[]')
+                    .find(t => String(t.id) === String(todoId));
+                if (found) return found;
+            } catch (e) { /* ignore */ }
+        }
+        return null;
+    }
+
+    function fireTodoAlarm(todo, stage) {
+        const notifId = `todo_${todo.id}_${stage}`;
+        if (callbackNotifications.find(n => n.id === notifId)) return;
+
+        const current = getLatestTodoData(todo.id);
+        if (current && current.completed) return;
+
+        const targetTime = new Date(todo.targetDate);
+        const fmtTime    = targetTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        const titleMap   = { due: 'Task Due Now!', '30min': 'Task in 30 Minutes', '1hour': 'Task in 1 Hour' };
+        const title      = titleMap[stage] || 'Task Reminder';
+        const todoData   = current || todo;
+        const message    = todoData.text;
+        const urgent     = stage === 'due';
+        const author     = todoData.author || todo.author || '';
+
+        const notification = {
+            id: notifId, type: 'todo_' + stage, title, message,
+            callbackTime: todo.targetDate, callbackTimeFormatted: fmtTime,
+            callbackNotes: '', createdAt: new Date().toISOString(),
+            read: false, actionable: false, urgent, dismissedBy: {},
+            assignedAgent: author
+        };
+
+        callbackNotifications.push(notification);
+        saveNotifications();
+        updateNotificationDisplay();
+        updateNotificationBadge();
+
+        showReminderPopup(notification, '#3b82f6', 'fa-tasks');
+        fireBrowserNotification(title, `${message} · ${fmtTime}`, notifId);
+        if (urgent) playNotificationSound(notification);
+
+        console.log(`📋 Todo alarm FIRED [${stage}] for "${message}" at ${fmtTime}`);
+    }
+
+    // ── Calendar event alarm scheduler (1 h + 30 min + due-now) ──────────────
+    function scheduleCalendarEventAlarms() {
+        const now = Date.now();
+
+        // ── Server calendar events ─────────────────────────────────────────────
+        const serverEvents = window.calendarState?.serverEvents || [];
+        serverEvents.forEach(ev => {
+            if (ev.completed) return;
+            const targetTs = new Date(`${ev.date}T${ev.time || '09:00'}`).getTime();
+            if (isNaN(targetTs)) return;
+
+            const msOut  = targetTs - now;
+            const evType = ev.description || 'meeting';
+            const color  = calEventColor(evType);
+            const icon   = calEventIcon(evType);
+            const lbl    = `Cal-event "${(ev.title || '').substring(0, 20)}"`;
+            const id     = `srv_${ev.id}`;
+
+            scheduleOne(scheduledTodoAlarms, `calevent_${id}_1hour`,
+                msOut - 60 * 60 * 1000,
+                () => fireCalendarAlarm(ev, evType, color, icon, '1hour'), `${lbl} 1-hour`);
+            scheduleOne(scheduledTodoAlarms, `calevent_${id}_30min`,
+                msOut - 30 * 60 * 1000,
+                () => fireCalendarAlarm(ev, evType, color, icon, '30min'), `${lbl} 30-min`);
+            scheduleOne(scheduledTodoAlarms, `calevent_${id}_due`,
+                msOut,
+                () => fireCalendarAlarm(ev, evType, color, icon, 'due'),   `${lbl} due-now`);
+        });
+
+        // ── Local (fallback) calendar events ──────────────────────────────────
+        let localEvents;
+        try { localEvents = JSON.parse(localStorage.getItem('calendarEvents') || '[]'); }
+        catch (e) { return; }
+
+        localEvents.forEach(ev => {
+            if (ev.completed) return;
+            const targetTs = new Date(`${ev.date}T${ev.time || '09:00'}`).getTime();
+            if (isNaN(targetTs)) return;
+
+            const msOut  = targetTs - now;
+            const evType = ev.type || 'meeting';
+            const color  = calEventColor(evType);
+            const icon   = calEventIcon(evType);
+            const lbl    = `Cal-event "${(ev.title || '').substring(0, 20)}"`;
+            const id     = `local_${ev.id}`;
+
+            scheduleOne(scheduledTodoAlarms, `calevent_${id}_1hour`,
+                msOut - 60 * 60 * 1000,
+                () => fireCalendarAlarm(ev, evType, color, icon, '1hour'), `${lbl} 1-hour`);
+            scheduleOne(scheduledTodoAlarms, `calevent_${id}_30min`,
+                msOut - 30 * 60 * 1000,
+                () => fireCalendarAlarm(ev, evType, color, icon, '30min'), `${lbl} 30-min`);
+            scheduleOne(scheduledTodoAlarms, `calevent_${id}_due`,
+                msOut,
+                () => fireCalendarAlarm(ev, evType, color, icon, 'due'),   `${lbl} due-now`);
+        });
+    }
+
+    function calEventColor(evType) {
+        const map = {
+            meeting: '#3b82f6', call: '#10b981', appointment: '#8b5cf6',
+            reminder: '#ef4444', 'follow-up': '#8b5cf6', callback: '#f97316'
+        };
+        return map[evType] || '#6b7280';
+    }
+
+    function calEventIcon(evType) {
+        const map = {
+            meeting: 'fa-users', call: 'fa-phone', appointment: 'fa-calendar-check',
+            reminder: 'fa-bell', 'follow-up': 'fa-redo', callback: 'fa-phone-alt'
+        };
+        return map[evType] || 'fa-calendar';
+    }
+
+    function fireCalendarAlarm(ev, evType, color, icon, stage) {
+        const evId    = ev.id;
+        const src     = ev.isLocalOnly ? 'local' : 'srv';
+        const notifId = `calevent_${src}_${evId}_${stage}`;
+        if (callbackNotifications.find(n => n.id === notifId)) return;
+
+        // Re-check completion at fire time from live state
+        const liveEv = (window.calendarState?.serverEvents || []).find(e => e.id === evId);
+        if (liveEv && liveEv.completed) return;
+
+        const targetTime = new Date(`${ev.date}T${ev.time || '09:00'}`);
+        const fmtTime    = targetTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+        const typeLabel  = evType.charAt(0).toUpperCase() + evType.slice(1);
+        const titleMap   = {
+            due:   `${typeLabel} Starting Now!`,
+            '30min': `${typeLabel} in 30 Minutes`,
+            '1hour': `${typeLabel} in 1 Hour`
+        };
+        const title   = titleMap[stage] || 'Event Reminder';
+        const message = ev.title || 'Calendar Event';
+        const urgent  = stage === 'due';
+
+        const notification = {
+            id: notifId, type: 'calendar_' + stage, title, message,
+            callbackTime: targetTime.toISOString(), callbackTimeFormatted: fmtTime,
+            callbackNotes: ev.description || ev.notes || '', createdAt: new Date().toISOString(),
+            read: false, actionable: false, urgent, dismissedBy: {}
+        };
+
+        callbackNotifications.push(notification);
+        saveNotifications();
+        updateNotificationDisplay();
+        updateNotificationBadge();
+
+        showReminderPopup(notification, color, icon);
+        fireBrowserNotification(title, `${message} · ${fmtTime}`, notifId);
+        if (urgent) playNotificationSound(notification);
+
+        console.log(`📅 Calendar alarm FIRED [${stage}] for "${message}" (${evType}) at ${fmtTime}`);
+    }
+
+    // ── Shared reminder popup (todos + calendar events) ────────────────────────
+    function showReminderPopup(notification, color, icon) {
+        try {
+            const existing = document.querySelector('.callback-popup-notification');
+            if (existing) existing.remove();
+
+            const popup = document.createElement('div');
+            popup.className = 'callback-popup-notification';
+            popup.innerHTML = `
+                <div class="popup-content">
+                    <div class="popup-icon">
+                        <i class="fas ${icon}" style="color:${color};"></i>
+                    </div>
+                    <div class="popup-text">
+                        <div class="popup-title">${notification.title}</div>
+                        <div class="popup-message">${notification.message}</div>
+                        <div class="popup-time">${notification.callbackTimeFormatted}</div>
+                    </div>
+                    <div class="popup-actions">
+                        <button class="popup-dismiss-btn" onclick="CallbackNotifications.dismissPopup()"
+                            style="background:${color};">
+                            <i class="fas fa-check"></i> Got it
+                        </button>
+                    </div>
+                </div>`;
+
+            document.body.insertBefore(popup, document.body.firstChild);
+
+            const delay = notification.urgent ? 20_000 : 15_000;
+            setTimeout(() => {
+                const p = document.querySelector('.callback-popup-notification');
+                if (p) { p.style.transform = 'translateY(-100%)'; setTimeout(() => p.remove(), 300); }
+            }, delay);
+
+            console.log(`🔔 Reminder popup shown: "${notification.title}" — ${notification.message}`);
+        } catch (e) {
+            console.error('Error showing reminder popup:', e);
+        }
+    }
+
+    // ── Clear all live timers and re-scan (used when waking from throttle) ────
+    function clearAndRescan(reason) {
+        console.log(`🔔 ${reason} — clearing stale timers and re-scanning`);
+        cleanupOldNotifications();
+        // Clear every active callback timer
+        scheduledAlarms.forEach((tid, key) => {
+            if (tid !== -1) { clearTimeout(tid); scheduledAlarms.delete(key); }
+        });
+        // Clear every active todo timer
+        scheduledTodoAlarms.forEach((tid, key) => {
+            if (tid !== -1) { clearTimeout(tid); scheduledTodoAlarms.delete(key); }
+        });
+        scheduleAlarms();
+        scheduleTodoAlarms();
+        scheduleCalendarEventAlarms();
+        updateNotificationBadge();
+    }
+
     // ── Visibility-change handler ──────────────────────────────────────────────
     // Browsers throttle/suspend setTimeout in background tabs.
     // When the user switches back to this tab, immediately re-scan for overdue
     // callbacks so they are never silently missed.
     function onVisibilityChange() {
         if (document.visibilityState === 'visible') {
-            console.log('🔔 Tab became visible — clearing stale timers and re-scanning callbacks');
-            cleanupOldNotifications();
-            // Clear any live timers whose callback time has already passed so
-            // scheduleAlarms() will catch them in the overdue grace-window branch
-            const now2 = Date.now();
-            scheduledAlarms.forEach((tid, key) => {
-                if (tid !== -1) {
-                    // Extract leadId + cbId + type from key
-                    const type = key.endsWith('_due') ? 'due' : '30min';
-                    // We can't easily get cbTs from the key alone, so clear all live
-                    // timers — scheduleAlarms will re-set any that are still future
-                    clearTimeout(tid);
-                    scheduledAlarms.delete(key);
-                }
-            });
-            scheduleAlarms();
-            updateNotificationBadge();
+            clearAndRescan('Tab became visible');
         }
     }
 
@@ -474,34 +817,51 @@
             updateNotificationDisplay();
             updateNotificationBadge();
 
-            // Schedule exact-fire alarms for all existing callbacks
+            // Schedule exact-fire alarms for callbacks, todos, and calendar events
             scheduleAlarms();
+            scheduleTodoAlarms();
+            scheduleCalendarEventAlarms();
 
-            // Re-scan every 30 seconds (catch throttled timers and new callbacks)
+            // ── Drift-aware polling loop ─────────────────────────────────────
+            // 10-second interval stays under browser throttle thresholds.
+            // We also track drift: if the interval fires significantly late it
+            // means timers were suspended — clear everything and re-scan so
+            // overdue notifications fire the moment the user returns.
+            let lastTick = Date.now();
             setInterval(() => {
-                cleanupOldNotifications();
-                scheduleAlarms();
-                updateNotificationBadge();
-            }, 30 * 1000);
+                const now   = Date.now();
+                const drift = now - lastTick - 10_000;   // extra ms since last tick
+                lastTick    = now;
 
-            // Re-scan when tab becomes visible (handles background-tab throttling)
+                if (drift > 5_000) {
+                    // Timers were throttled (browser background/suspend)
+                    clearAndRescan(`Drift detected (${Math.round(drift / 1000)}s) — timers were throttled`);
+                } else {
+                    cleanupOldNotifications();
+                    scheduleAlarms();
+                    scheduleTodoAlarms();
+                    scheduleCalendarEventAlarms();
+                    updateNotificationBadge();
+                }
+            }, 10_000);
+
+            // Re-scan when tab becomes visible (background-tab throttling)
             document.addEventListener('visibilitychange', onVisibilityChange);
 
-            // Re-scan when another tab writes to scheduled_callbacks (cross-tab support)
-            window.addEventListener('storage', e => {
-                if (e.key === 'scheduled_callbacks') {
-                    console.log('🔔 scheduled_callbacks changed in another tab — rescheduling');
-                    scheduleAlarms();
-                }
-            });
+            // Re-scan when the browser window regains focus (user switched to
+            // another app while the tab stayed visible — visibilitychange won't
+            // fire in that case, but focus will).
+            window.addEventListener('focus', () => clearAndRescan('Window focused'));
 
-            console.log('✅ Exact-timer notification system active');
+            console.log('✅ Exact-timer notification system active (10 s poll + drift detection + focus listener)');
         },
 
-        // Called immediately after a new callback is saved
+        // Called immediately after a new callback, todo, or calendar event is saved
         refresh() {
             console.log('🔔 refresh() — rescheduling alarms');
             scheduleAlarms();
+            scheduleTodoAlarms();
+            scheduleCalendarEventAlarms();
         },
 
         dismissPopup() {
@@ -545,16 +905,196 @@
             saveNotifications();
             updateNotificationDisplay();
             updateNotificationBadge();
+        },
+
+        // ── COI email notification ─────────────────────────────────────────────
+        // Called from _runCOICheck (app.js) whenever a genuinely new COI email
+        // arrives.  Adds an entry to the sidebar notification list, increments
+        // the badge, and shows the shared reminder popup.
+        // Browser notification is NOT fired here — the existing showCOINotification
+        // already handles that so we avoid doubling up.
+        notifyNewCOI(email) {
+            const notifId = `coi_${email.id || Date.now()}`;
+
+            // Dedup — same email shouldn't fire twice
+            if (callbackNotifications.find(n => n.id === notifId)) return;
+
+            const fromRaw  = email.from  || '';
+            const fromName = fromRaw.replace(/<.*>/, '').trim() || fromRaw;
+            const subject  = email.subject || '(no subject)';
+            const recvTime = new Date(email.date || Date.now());
+            const fmtTime  = recvTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+            const title   = 'New COI Request';
+            const message = subject + (fromName ? ' — ' + fromName : '');
+
+            // Set callbackTime well in the future so isNotificationExpired()
+            // condition #1 (1 h after callback) doesn't immediately remove it.
+            // Condition #2 (24 h from createdAt) will clean it up naturally.
+            const expiryTime = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
+
+            const notification = {
+                id:                    notifId,
+                type:                  'coi_request',
+                title,
+                message,
+                leadId:                null,
+                callbackTime:          expiryTime,
+                callbackTimeFormatted: fmtTime,
+                callbackNotes:         email.snippet || '',
+                createdAt:             new Date().toISOString(),
+                read:                  false,
+                actionable:            true,
+                urgent:                false,
+                dismissedBy:           {}
+            };
+
+            callbackNotifications.push(notification);
+            saveNotifications();
+            updateNotificationDisplay();
+            updateNotificationBadge();
+
+            // Show the unified slide-down popup (same style as todos/calendar events)
+            showReminderPopup(notification, '#2563eb', 'fa-certificate');
+            playNotificationSound(notification);
+
+            console.log(`📧 COI notification added to sidebar: "${subject}"`);
         }
     };
 
     window.CallbackNotifications = CallbackNotifications;
 
+    // ── Sidebar open/close globals ────────────────────────────────────────────
+    // These were previously in notification-sidebar.js. They live here now so
+    // the single notification system owns the sidebar lifecycle.
+    window.openNotificationSidebar = function () {
+        const sidebar = document.getElementById('notificationSidebar');
+        const overlay = document.getElementById('notificationOverlay');
+        if (sidebar) sidebar.classList.add('active');
+        if (overlay) overlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+        injectGrantToggle();
+        // Mark all as read when opened
+        callbackNotifications.forEach(n => { n.read = true; });
+        saveNotifications();
+        updateNotificationDisplay();
+        updateNotificationBadge();
+    };
+
+    window.closeNotificationSidebar = function () {
+        const sidebar = document.getElementById('notificationSidebar');
+        const overlay = document.getElementById('notificationOverlay');
+        if (sidebar) sidebar.classList.remove('active');
+        if (overlay) overlay.classList.remove('active');
+        document.body.style.overflow = '';
+    };
+
+    window.toggleNotificationSidebar = function () {
+        const sidebar = document.getElementById('notificationSidebar');
+        if (sidebar && sidebar.classList.contains('active')) {
+            window.closeNotificationSidebar();
+        } else {
+            window.openNotificationSidebar();
+        }
+    };
+
+    // Used by the "Mark All Read" button in the sidebar header
+    window.markAllAsRead = function () {
+        callbackNotifications.forEach(n => { n.read = true; });
+        saveNotifications();
+        updateNotificationDisplay();
+        updateNotificationBadge();
+    };
+
+    // Wire the bell button in the navbar
+    function attachBellButton() {
+        const btn = document.querySelector('.notification-btn');
+        if (!btn) return false;
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.toggleNotificationSidebar();
+        });
+        return true;
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => CallbackNotifications.init());
+        document.addEventListener('DOMContentLoaded', () => { CallbackNotifications.init(); attachBellButton(); });
     } else {
         CallbackNotifications.init();
+        attachBellButton();
     }
+
+    // ── COI card watcher ──────────────────────────────────────────────────────
+    // Poll #coi-request-reminders every 10s and track data-coi-id attributes.
+    // Fires a notification for each genuinely new card ID that appears.
+    // This is intentionally polling-based: the card container is rebuilt wholesale
+    // by loadCOIRequestCards(), which destroys any MutationObserver on child nodes.
+    (function startCOICardWatcher() {
+        const _seenIds = new Set();
+        let   _baselineSet = false;
+
+        function scanCards() {
+            const container = document.getElementById('coi-request-reminders');
+            if (!container) return;
+
+            const cards = container.querySelectorAll('.reminder-card[data-coi-id]');
+            if (!_baselineSet) {
+                // First scan — record all existing IDs without firing notifications
+                cards.forEach(c => _seenIds.add(c.dataset.coiId));
+                _baselineSet = true;
+                console.log(`📧 COI card watcher baseline: ${_seenIds.size} existing card(s)`);
+                return;
+            }
+
+            const newCards = [];
+            cards.forEach(c => {
+                if (!_seenIds.has(c.dataset.coiId)) {
+                    _seenIds.add(c.dataset.coiId);
+                    newCards.push(c);
+                }
+            });
+
+            newCards.forEach(card => {
+                const subject = card.querySelector('h4')?.textContent?.trim() || 'New COI Request';
+                const timeStr = card.querySelector('.card-urgency span')?.textContent?.replace(/\n/g, ' ').trim() || '';
+                const notifId = `coi_card_${card.dataset.coiId}`;
+
+                if (callbackNotifications.find(n => n.id === notifId)) return;
+
+                const notification = {
+                    id: notifId, type: 'coi_request',
+                    title: 'New COI Request',
+                    message: subject + (timeStr ? ' — ' + timeStr : ''),
+                    leadId: null,
+                    callbackTime: new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString(),
+                    callbackTimeFormatted: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+                    callbackNotes: '',
+                    createdAt: new Date().toISOString(),
+                    read: false, actionable: true, urgent: false, dismissedBy: {}
+                };
+                callbackNotifications.push(notification);
+                saveNotifications();
+                updateNotificationDisplay();
+                updateNotificationBadge();
+                showReminderPopup(notification, '#2563eb', 'fa-certificate');
+                playNotificationSound(notification);
+                console.log(`📧 New COI card detected: "${subject}" — notification fired`);
+            });
+        }
+
+        // Start polling — runs on the same 10s cadence as the main notification loop
+        // but with its own interval so it keeps running even when clearAndRescan fires
+        setInterval(scanCards, 10_000);
+
+        // Also run immediately once DOM is ready to set the baseline
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', scanCards);
+        } else {
+            // Container may not be rendered yet; try after a short delay
+            setTimeout(scanCards, 3000);
+        }
+    })();
 
     console.log('✅ Callback Notifications loaded (exact-timer v2)');
 })();

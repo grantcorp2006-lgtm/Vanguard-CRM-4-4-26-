@@ -1,11 +1,4 @@
 
-# System/tool directories (never commit)
-.dotnet/
-.nuget/
-.vscode-server/
-.aspnet/
-php-8.1.29/
-
 *~
 ._*
 *$py.class

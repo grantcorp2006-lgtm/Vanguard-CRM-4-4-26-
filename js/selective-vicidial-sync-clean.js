@@ -42,10 +42,10 @@ window.syncVicidialLeads = async function() {
         if (window.location.hostname === 'localhost') {
             API_URLS = ['http://localhost:3001', '/'];
         } else {
-            // For production, use HTTPS to match the page protocol
-            const protocol = window.location.protocol; // Gets 'https:' or 'http:'
+            // For production, always use HTTP for direct port access and nginx proxy as fallback
+            // Avoid HTTPS on port 3001 to prevent SSL protocol errors
             API_URLS = [
-                `${protocol}//${window.location.hostname}:3001`,
+                `http://${window.location.hostname}:3001`, // Direct HTTP to backend
                 '/' // Relative URL (goes through nginx proxy)
             ];
         }
@@ -219,8 +219,21 @@ function showLeadSelectionPopup(leads, data) {
     const allListsSummary = data.allListsSummary || [];
     const leadsByListId = {};
 
-    // Group actual leads by list ID
+    // Group actual leads by list ID with deduplication
+    const seenLeads = new Set(); // Track leads we've already seen
+
     leads.forEach((lead, index) => {
+        // Create a unique identifier for this lead (phone + email + name)
+        const leadKey = `${lead.phone || ''}|${lead.email || ''}|${lead.name || ''}`;
+
+        // Skip if we've already seen this exact lead
+        if (seenLeads.has(leadKey)) {
+            console.log(`🔄 DEDUP: Skipping duplicate lead: ${lead.name || lead.contact} (${lead.phone})`);
+            return;
+        }
+
+        seenLeads.add(leadKey);
+
         if (!leadsByListId[lead.listId]) {
             leadsByListId[lead.listId] = [];
         }
@@ -232,6 +245,9 @@ function showLeadSelectionPopup(leads, data) {
     const leadsList = allListsSummary.map(listSummary => {
         const listId = listSummary.listId;
         const listLeads = leadsByListId[listId] || [];
+
+        // FIX: Calculate actual lead count for this list (fixes "undefined SALE leads")
+        const actualLeadCount = listLeads.length;
 
         // Color coding: Green for active (Y), Orange/Red for inactive
         const isActive = listSummary.active === true;
@@ -273,7 +289,7 @@ function showLeadSelectionPopup(leads, data) {
                 align-items: center;
                 justify-content: space-between;
             ">
-                <span>${statusIcon} ${listSummary.listName} (${listSummary.saleCount} SALE leads)</span>
+                <span>${statusIcon} ${listSummary.listName} (${actualLeadCount} SALE leads)</span>
                 ${tagHtml}
             </div>
         `;
@@ -564,10 +580,9 @@ async function importSelectedLeads(quickMode = false) {
         if (window.location.hostname === 'localhost') {
             API_URLS = ['http://localhost:3001', '/'];
         } else {
-            // For production, use HTTPS to match the page protocol
-            const protocol = window.location.protocol; // Gets 'https:' or 'http:'
+            // For production, always use HTTP for port 3001 to avoid SSL protocol errors
             API_URLS = [
-                `${protocol}//${window.location.hostname}:3001`,
+                `http://${window.location.hostname}:3001`,
                 '/' // Relative URL (goes through nginx proxy)
             ];
         }
@@ -667,6 +682,9 @@ async function importSelectedLeads(quickMode = false) {
         // Handle Quick Import differently - it completes immediately
         if (quickMode && result.success) {
             console.log('✅ Quick Import completed immediately');
+
+            // NOTE: DELETED_LEAD_IDS is intentionally preserved — deleted leads must stay deleted across syncs
+
             if (window.updateTranscriptionProgress) {
                 window.updateTranscriptionProgress(100, 'Quick Import complete!');
             }
@@ -677,24 +695,61 @@ async function importSelectedLeads(quickMode = false) {
                     window.showTranscriptionComplete(result.imported || selectedLeads.length);
                 }
 
-                // Refresh leads view
+                // Refresh leads after import - callbacks are processed server-side during import
                 setTimeout(async () => {
+                    console.log('📅 VICIDIAL IMPORT: Callbacks processed server-side during import - now reloading leads...');
+
+                    // Clear imported lead IDs from frontend DELETED_LEAD_IDS so they aren't filtered out
+                    try {
+                        const importedIds = selectedLeads.map(l => String(l.id || l.leadId || '')).filter(Boolean);
+                        if (importedIds.length > 0) {
+                            const deletedIds = JSON.parse(localStorage.getItem('DELETED_LEAD_IDS') || '[]');
+                            const cleaned = deletedIds.filter(id => !importedIds.includes(String(id)));
+                            if (cleaned.length !== deletedIds.length) {
+                                localStorage.setItem('DELETED_LEAD_IDS', JSON.stringify(cleaned));
+                                console.log(`🔓 Cleared ${deletedIds.length - cleaned.length} imported lead(s) from DELETED_LEAD_IDS`);
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // Reload leads using relative URL (avoids HTTPS/HTTP mismatch on port 3001)
                     console.log('🔄 Reloading leads after Quick Import...');
                     try {
-                        const baseUrl = window.location.hostname === 'localhost'
-                            ? 'http://localhost:3001'
-                            : `${window.location.protocol}//${window.location.hostname}:3001`;
-
-                        const response = await fetch(`${baseUrl}/api/leads`);
+                        const response = await fetch('/api/leads');
                         if (response.ok) {
                             const freshLeads = await response.json();
                             localStorage.setItem('insurance_leads', JSON.stringify(freshLeads));
+
                             console.log('✅ Leads reloaded after Quick Import');
+
+                            // Auto-trigger DOT lookup for newly imported leads that have a DOT number
+                            if (window.manualDOTLookupTrigger) {
+                                const importedNames = (selectedLeads || []).map(l => (l.name || '').toLowerCase());
+                                let dotLookupIdx = 0;
+                                freshLeads.forEach(lead => {
+                                    if (!lead.dotNumber || !lead.dotNumber.trim()) return;
+                                    const nameMatch = importedNames.some(n => n && lead.name && lead.name.toLowerCase().includes(n));
+                                    if (!nameMatch) return;
+                                    if (lead.yearsInBusiness && lead.state && lead.commodityHauled) return; // Already has DOT data
+                                    const delay = dotLookupIdx * 800 + 300;
+                                    dotLookupIdx++;
+                                    setTimeout(() => {
+                                        console.log(`🚛 AUTO DOT: Triggering DOT lookup for imported lead ${lead.name} (DOT: ${lead.dotNumber})`);
+                                        window.manualDOTLookupTrigger(lead.id, lead.dotNumber);
+                                    }, delay);
+                                });
+                                if (dotLookupIdx > 0) {
+                                    console.log(`🚛 AUTO DOT: Queued DOT lookup for ${dotLookupIdx} imported lead(s)`);
+                                }
+                            }
+                        } else {
+                            console.warn('⚠️ Failed to reload leads after import - but callbacks were already processed');
                         }
                     } catch (error) {
-                        console.warn('Failed to reload leads:', error);
+                        console.warn('⚠️ Failed to reload leads after import (SSL/fetch error) - but callbacks were already processed:', error.message);
                     }
 
+                    // Always try to refresh the UI regardless of fetch success
                     if (typeof loadLeadsView === 'function') {
                         loadLeadsView();
                     }

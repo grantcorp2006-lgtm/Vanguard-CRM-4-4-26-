@@ -496,7 +496,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                             <select onchange="updateVehicle('${lead.id}', ${index}, 'type', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
                                                 <option value="">Select Type</option>
                                                 <option value="Box Truck" ${vehicle.type === 'Box Truck' ? 'selected' : ''}>Box Truck</option>
-                                                <option value="Semi Truck" ${vehicle.type === 'Semi Truck' ? 'selected' : ''}>Semi Truck</option>
+                                                <option value="Truck Tractor" ${vehicle.type === 'Truck Tractor' || vehicle.type === 'Semi Truck' ? 'selected' : ''}>Truck Tractor</option>
                                                 <option value="Flatbed" ${vehicle.type === 'Flatbed' ? 'selected' : ''}>Flatbed</option>
                                                 <option value="Pickup" ${vehicle.type === 'Pickup' ? 'selected' : ''}>Pickup</option>
                                                 <option value="Van" ${vehicle.type === 'Van' ? 'selected' : ''}>Van</option>
@@ -1062,7 +1062,10 @@ protectedFunctions.openEmailDocumentation = async function(leadId) {
 
     // Prepare subject with lead data (use NULL if not found)
     const companyName = lead.name || 'NULL';
-    const renewalDate = lead.renewalDate || 'NULL';
+    const rawRenewalDate = lead.renewalDate || 'NULL';
+    const renewalDate = rawRenewalDate !== 'NULL'
+        ? rawRenewalDate.replace(/\/\d{4}$/, '/2026').replace(/-\d{4}$/, '-2026')
+        : 'NULL';
     const usdot = lead.dotNumber || 'NULL';
     const subject = `Renewal: ${renewalDate} - USDOT: ${usdot} - ${companyName}`;
 
@@ -1125,6 +1128,18 @@ protectedFunctions.openEmailDocumentation = async function(leadId) {
     protectedFunctions.createEmailComposer(lead, subject, allFiles);
 };
 
+// Agent email map
+const AGENT_EMAILS = {
+    'grant':   'Grant@vigagency.com',
+    'carson':  'Carson@vigagency.com',
+    'hunter':  'Hunter@vigagency.com',
+    'maureen': 'Maureen@vigagency.com'
+};
+function getAgentEmail(assignedTo) {
+    if (!assignedTo) return '';
+    return AGENT_EMAILS[assignedTo.toLowerCase()] || '';
+}
+
 // NEW: Create dedicated email composer modal
 protectedFunctions.createEmailComposer = function(lead, subject, attachments) {
     console.log('✉️ Creating email composer for:', lead.name);
@@ -1182,6 +1197,12 @@ Thank you,`;
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; color: #374151;">To:</label>
                     <input type="email" id="email-to-field" value="Grant@vigagency.com" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+
+                <!-- Agent CC Field -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; color: #374151;">Agent (CC):</label>
+                    <input type="email" id="email-agent-cc-field" value="${getAgentEmail(lead.assignedTo)}" placeholder="agent@vigagency.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                 </div>
 
                 <!-- Subject Field -->
@@ -4671,6 +4692,17 @@ function showCallbackScheduler(leadId) {
             </p>
         </div>
 
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                Quick Schedule:
+            </label>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+1);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+1 Day</button>
+                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+2);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+2 Days</button>
+                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+3);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+3 Days</button>
+            </div>
+        </div>
+
         <div style="margin-bottom: 25px;">
             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
                 Callback Date & Time:
@@ -5081,6 +5113,7 @@ function continueStageUpdate(leadId, stage, contactAttemptedCompleted) {
         // Update stage and timestamp
         leads[leadIndex].stage = stage;
         leads[leadIndex].stageUpdatedAt = now;
+        if (stage === 'app_sent') leads[leadIndex].appSentAt = now;
         // Add lastModified timestamp for smart merge protection
         leads[leadIndex].lastModified = now;
 
@@ -6166,10 +6199,21 @@ protectedFunctions.sendEmail = async function(leadId) {
     const toField = document.getElementById('email-to-field');
     const subjectField = document.getElementById('email-subject-field');
     const bodyField = document.getElementById('email-body-field');
+    const agentCcField = document.getElementById('email-agent-cc-field');
 
-    const to = toField ? toField.value : '';
+    const to = toField ? toField.value.trim() : '';
     const subject = subjectField ? subjectField.value : '';
     const body = bodyField ? bodyField.value : '';
+
+    // Build CC list: agent email (from visible field) + always Grant silently
+    const ALWAYS_CC = 'Grant@vigagency.com';
+    const agentCcRaw = agentCcField ? agentCcField.value.trim() : '';
+    const ccAddresses = [];
+    if (agentCcRaw && agentCcRaw.toLowerCase() !== ALWAYS_CC.toLowerCase()) {
+        ccAddresses.push(agentCcRaw);
+    }
+    ccAddresses.push(ALWAYS_CC);
+    const cc = ccAddresses.join(',');
 
     if (!to) {
         alert('Please enter a recipient email address');
@@ -6187,7 +6231,7 @@ protectedFunctions.sendEmail = async function(leadId) {
     const attachmentCount = attachmentElements.length;
 
     // Show confirmation
-    const confirmMsg = `Send email via Vanguard Insurance?\n\nTo: ${to}\nSubject: ${subject}\nAttachments: ${attachmentCount} files\n\nProceed?`;
+    const confirmMsg = `Send email via Vanguard Insurance?\n\nTo: ${to}\nCC: ${cc}\nSubject: ${subject}\nAttachments: ${attachmentCount} files\n\nProceed?`;
 
     if (!confirm(confirmMsg)) {
         return;
@@ -6412,7 +6456,7 @@ protectedFunctions.sendEmail = async function(leadId) {
             },
             body: JSON.stringify({
                 to: to,
-                cc: '', // CC field not implemented yet
+                cc: cc,
                 bcc: 'contact@vigagency.com', // Always BCC ourselves
                 subject: subject,
                 body: htmlBody,

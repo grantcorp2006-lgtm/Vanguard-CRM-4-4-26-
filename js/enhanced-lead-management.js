@@ -43,6 +43,20 @@
             localStorage.setItem('DELETED_LEAD_IDS', JSON.stringify(deletedLeadIds));
         }
 
+        // Mark as user-deleted to bypass ViciDial protection
+        const userDeletedLeads = JSON.parse(localStorage.getItem('USER_DELETED_LEADS') || '[]');
+        if (!userDeletedLeads.includes(String(leadId))) {
+            userDeletedLeads.push(String(leadId));
+            localStorage.setItem('USER_DELETED_LEADS', JSON.stringify(userDeletedLeads));
+            console.log('🏷️ Marked as user-deleted to bypass ViciDial protection:', leadId);
+        }
+
+        // Record deletion timestamp for smart ViciDial protection
+        const deletedLeadTimestamps = JSON.parse(localStorage.getItem('DELETED_LEAD_TIMESTAMPS') || '{}');
+        deletedLeadTimestamps[String(leadId)] = Date.now();
+        localStorage.setItem('DELETED_LEAD_TIMESTAMPS', JSON.stringify(deletedLeadTimestamps));
+        console.log('⏰ Recorded deletion timestamp for:', leadId);
+
         // Delete from server permanently
         fetch(`/api/leads/${leadId}`, {
             method: 'DELETE',
@@ -124,6 +138,25 @@
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
         localStorage.setItem('DELETED_LEAD_IDS', JSON.stringify(deletedLeadIds));
 
+        // Mark all as user-deleted to bypass ViciDial protection
+        const userDeletedLeads = JSON.parse(localStorage.getItem('USER_DELETED_LEADS') || '[]');
+        selectedLeadIds.forEach(leadId => {
+            if (!userDeletedLeads.includes(String(leadId))) {
+                userDeletedLeads.push(String(leadId));
+            }
+        });
+        localStorage.setItem('USER_DELETED_LEADS', JSON.stringify(userDeletedLeads));
+        console.log('🏷️ Marked as user-deleted to bypass ViciDial protection:', selectedLeadIds);
+
+        // Record deletion timestamps for smart ViciDial protection
+        const deletedLeadTimestamps = JSON.parse(localStorage.getItem('DELETED_LEAD_TIMESTAMPS') || '{}');
+        const now = Date.now();
+        selectedLeadIds.forEach(leadId => {
+            deletedLeadTimestamps[String(leadId)] = now;
+        });
+        localStorage.setItem('DELETED_LEAD_TIMESTAMPS', JSON.stringify(deletedLeadTimestamps));
+        console.log('⏰ Recorded deletion timestamps for:', selectedLeadIds);
+
         console.log(`✅ Locally deleted ${successfulLocalDeletes}/${totalToDelete} leads`);
 
         // Show immediate success notification
@@ -137,40 +170,33 @@
             }
         }, 100);
 
-        // Background server deletion (don't wait for it)
-        let serverDeletionCount = 0;
-        selectedLeadIds.forEach(leadId => {
-            // Add timeout to prevent hanging
-            const timeoutId = setTimeout(() => {
-                console.warn(`⏰ Server deletion timeout for lead ${leadId}`);
-                serverDeletionCount++;
-            }, 5000); // 5 second timeout
-
-            fetch(`/api/leads/${leadId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json'
+        // Background server deletion — sequential with delays to avoid nginx rate limit (10r/s)
+        (async () => {
+            let serverDeletionCount = 0;
+            for (const leadId of selectedLeadIds) {
+                try {
+                    const response = await fetch(`/api/leads/${leadId}`, {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    serverDeletionCount++;
+                    if (response.ok) {
+                        console.log('✅ Lead permanently deleted from server:', leadId);
+                    } else {
+                        console.warn('⚠️ Server deletion failed for lead:', leadId, response.status);
+                    }
+                } catch (error) {
+                    serverDeletionCount++;
+                    console.error('❌ Error deleting lead from server:', leadId, error.message);
                 }
-            })
-            .then(response => {
-                clearTimeout(timeoutId);
-                serverDeletionCount++;
-                if (response.ok) {
-                    console.log('✅ Lead permanently deleted from server:', leadId);
-                } else {
-                    console.warn('⚠️ Server deletion failed for lead:', leadId, response.status);
-                }
-            })
-            .catch(error => {
-                clearTimeout(timeoutId);
-                serverDeletionCount++;
-                console.error('❌ Error deleting lead from server:', leadId, error.message);
-            });
-        });
+                await new Promise(r => setTimeout(r, 120)); // ~8 req/s, under nginx 10r/s limit
+            }
+            console.log(`✅ Server deletion complete: ${serverDeletionCount}/${selectedLeadIds.length} processed`);
+        })();
     };
 
     // Mass archive function for selected leads
-    window.massArchiveLeads = function() {
+    window.massArchiveLeads = async function() {
         const selectedCheckboxes = document.querySelectorAll('.lead-checkbox:checked');
         const selectedLeadIds = Array.from(selectedCheckboxes).map(cb => cb.value);
 
@@ -185,24 +211,43 @@
 
         console.log(`📦 Mass archiving ${selectedLeadIds.length} leads:`, selectedLeadIds);
 
-        let archiveCount = 0;
-        const totalToArchive = selectedLeadIds.length;
+        const u = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const archivedBy = u.username
+            ? u.username.charAt(0).toUpperCase() + u.username.slice(1).toLowerCase()
+            : 'System';
 
-        selectedLeadIds.forEach(leadId => {
-            // Use existing archive function
-            if (typeof window.archiveLead === 'function') {
-                // Call archive function and track completion
-                window.archiveLead(leadId);
-                archiveCount++;
+        const results = await Promise.all(selectedLeadIds.map(id =>
+            fetch(`/api/archive-lead/${id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ archivedBy })
+            }).then(r => r.json()).catch(() => ({ success: false }))
+        ));
 
-                // Check if all archives are complete
-                if (archiveCount === totalToArchive) {
-                    setTimeout(() => {
-                        showNotification(`${totalToArchive} leads archived successfully`, 'success');
-                    }, 1000);
-                }
+        const ok = results.filter(r => r.success).length;
+        const failed = results.length - ok;
+
+        // Remove ALL selected leads from localStorage regardless of server result.
+        // Leads that got 404 (localStorage-only, not in server DB) need to be cleared too.
+        // Leads that succeeded are now in archived_leads on server; ViciDial sync is blocked from re-inserting them.
+        try {
+            const allSelectedIds = new Set(selectedLeadIds.map(String));
+            const stored = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const filtered = stored.filter(l => !allSelectedIds.has(String(l.id)));
+            localStorage.setItem('insurance_leads', JSON.stringify(filtered));
+        } catch(e) {}
+
+        if (ok > 0 || failed < selectedLeadIds.length) {
+            const msg = ok > 0
+                ? `${ok} lead(s) archived successfully${failed ? ` (${failed} not found on server — removed locally)` : ''}`
+                : `${failed} lead(s) removed from local list (not found on server)`;
+            showNotification(msg, ok > 0 ? 'success' : 'warning');
+            if (typeof window.loadLeadsView === 'function') {
+                window.loadLeadsView();
             }
-        });
+        } else {
+            showNotification('Failed to archive leads. Please try again.', 'error');
+        }
     };
 
     // Helper function to update table after deletion
@@ -353,7 +398,7 @@
                             '<option value="loss_runs_requested">Loss Runs Requested</option>' +
                             '<option value="loss_runs_received">Loss Runs Received</option>' +
                             '<option value="app_prepared">App Prepared</option>' +
-                            '<option value="app_sent">App Sent</option>' +
+                            '<option value="app_sent">Waiting on Markets</option>' +
                             '<option value="app_quote_received">App Quote Received</option>' +
                             '<option value="app_quote_sent">App Quote Sent</option>' +
                             '<option value="quoted">Quoted</option>' +
@@ -662,7 +707,7 @@
                     {value: 'loss_runs_requested', text: 'Loss Runs Requested'},
                     {value: 'loss_runs_received', text: 'Loss Runs Received'},
                     {value: 'app_prepared', text: 'App Prepared'},
-                    {value: 'app_sent', text: 'App Sent'},
+                    {value: 'app_sent', text: 'Waiting on Markets'},
                     {value: 'app_quote_received', text: 'App Quote Received'},
                     {value: 'app_quote_sent', text: 'App Quote Sent'},
                     {value: 'quoted', text: 'Quoted'},

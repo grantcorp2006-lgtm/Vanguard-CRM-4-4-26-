@@ -1,8 +1,8 @@
 // Fix for loadLeadGenerationView function not being defined
 console.log('Loading lead generation fix...');
 
-// Ensure loadLeadGenerationView is available globally
-if (typeof window.loadLeadGenerationView !== 'function') {
+// Ensure loadLeadGenerationView is available globally - DO NOT OVERRIDE if complete version is loaded
+if (typeof window.loadLeadGenerationView !== 'function' && !window.completeLeadGenerationLoaded) {
     window.loadLeadGenerationView = function(activeTab = 'lookup') {
         console.log('Loading Lead Generation view with tab:', activeTab);
 
@@ -115,40 +115,9 @@ if (typeof window.loadLeadGenerationView !== 'function') {
                             </div>
                         </div>
 
-                        <!-- Results Section -->
-                        <div class="lead-results-section" id="leadResults" style="margin-top: 20px;">
-                            <div class="results-header">
-                                <h3>Search Results</h3>
-                                <span class="results-count">0 leads found</span>
-                            </div>
-
-                            <div class="lead-results-table">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th><input type="checkbox" onclick="selectAllLeads(this)"></th>
-                                            <th>USDOT #</th>
-                                            <th>Company Name</th>
-                                            <th>Location</th>
-                                            <th>Fleet Size</th>
-                                            <th>Insurance Status</th>
-                                            <th>Expiry Date</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="searchResults">
-                                        <tr>
-                                            <td colspan="8" class="text-center">No results. Use the search form above to find leads.</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div class="results-pagination">
-                                <button class="btn-small" disabled><i class="fas fa-chevron-left"></i> Previous</button>
-                                <span class="page-info">Page 1 of 1</span>
-                                <button class="btn-small" disabled>Next <i class="fas fa-chevron-right"></i></button>
-                            </div>
+                        <!-- Carrier Profile Display -->
+                        <div id="carrierProfileDisplay" class="carrier-profile-display-container">
+                            <!-- Carrier profiles will be displayed here -->
                         </div>
                     </div>
 
@@ -168,18 +137,6 @@ if (typeof window.loadLeadGenerationView !== 'function') {
                                             <span style="color: #16a34a;">Total Leads Found</span>
                                             <p style="font-weight: bold; color: #15803d; margin: 4px 0 0 0;">
                                                 <span id="totalLeadsCount">-</span>
-                                            </p>
-                                        </div>
-                                        <div class="stat-box" style="background: #fef3c7; padding: 12px; border-radius: 6px; flex: 1;">
-                                            <span style="color: #d97706;">Expiring Soon</span>
-                                            <p style="font-weight: bold; color: #d97706; margin: 4px 0 0 0;">
-                                                <span id="expiringSoonCount">-</span>
-                                            </p>
-                                        </div>
-                                        <div class="stat-box" style="background: #dbeafe; padding: 12px; border-radius: 6px; flex: 1;">
-                                            <span style="color: #2563eb;">With Contact Info</span>
-                                            <p style="font-weight: bold; color: #1d4ed8; margin: 4px 0 0 0;">
-                                                <span id="withContactCount">-</span>
                                             </p>
                                         </div>
                                     </div>

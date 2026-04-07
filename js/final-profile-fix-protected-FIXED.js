@@ -215,6 +215,16 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 </div>
 
                 <!-- Callback Scheduler -->
+                ${lead.stage === 'closed' ? `
+                <div class="profile-section" style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #d1d5db;">
+                    <div style="display: flex; align-items: center; gap: 10px; color: #9ca3af;">
+                        <i class="fas fa-ban" style="font-size: 18px;"></i>
+                        <div>
+                            <div style="font-weight: 700; font-size: 14px;">Callbacks Disabled</div>
+                            <div style="font-size: 12px;">This lead is closed — scheduled callbacks are not available.</div>
+                        </div>
+                    </div>
+                </div>` : `
                 <div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3 style="margin: 0; font-weight: bold;"><i class="fas fa-calendar-alt"></i> <span style="color: #0277bd;">Schedule Callback</span></h3>
@@ -258,7 +268,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <!-- Scheduled callbacks will be displayed here -->
                         </div>
                     </div>
-                </div>
+                </div>`}
 
                 <!-- Reach Out Checklist -->
                 <div class="profile-section" style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -403,7 +413,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <label style="font-weight: 600; font-size: 12px;">Phone:</label>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <input type="text" value="${lead.phone || ''}" onchange="updateLeadField('${lead.id}', 'phone', this.value)" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
-                                <button onclick="window.open('tel:${lead.phone || ''}')" title="Call ${lead.phone || ''}" style="background: #10b981; color: white; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; font-size: 14px; transition: background 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+                                <button onclick="window.open('tel:${lead.phone || ''}'); if(window.updateReachOut) { var cb = document.getElementById('call-made-${lead.id}'); if(cb){ cb.checked = true; } window.updateReachOut('${lead.id}', 'call', true); }" title="Call ${lead.phone || ''}" style="background: #10b981; color: white; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; font-size: 14px; transition: background 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
                                     <i class="fas fa-phone" style="margin: 0;"></i>
                                 </button>
                             </div>
@@ -503,7 +513,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                             <select onchange="updateVehicle('${lead.id}', ${index}, 'type', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
                                                 <option value="">Select Type</option>
                                                 <option value="Box Truck" ${vehicle.type === 'Box Truck' ? 'selected' : ''}>Box Truck</option>
-                                                <option value="Semi Truck" ${vehicle.type === 'Semi Truck' ? 'selected' : ''}>Semi Truck</option>
+                                                <option value="Truck Tractor" ${vehicle.type === 'Truck Tractor' || vehicle.type === 'Semi Truck' ? 'selected' : ''}>Truck Tractor</option>
                                                 <option value="Flatbed" ${vehicle.type === 'Flatbed' ? 'selected' : ''}>Flatbed</option>
                                                 <option value="Pickup" ${vehicle.type === 'Pickup' ? 'selected' : ''}>Pickup</option>
                                                 <option value="Van" ${vehicle.type === 'Van' ? 'selected' : ''}>Van</option>
@@ -1144,7 +1154,10 @@ protectedFunctions.openEmailDocumentation = async function(leadId) {
 
     // Prepare subject with lead data (use NULL if not found)
     const companyName = lead.name || 'NULL';
-    const renewalDate = lead.renewalDate || 'NULL';
+    const rawRenewalDate = lead.renewalDate || 'NULL';
+    const renewalDate = rawRenewalDate !== 'NULL'
+        ? rawRenewalDate.replace(/\/\d{4}$/, '/2026').replace(/-\d{4}$/, '-2026')
+        : 'NULL';
     const usdot = lead.dotNumber || 'NULL';
     const subject = `Renewal: ${renewalDate} - USDOT: ${usdot} - ${companyName}`;
 
@@ -1247,6 +1260,12 @@ protectedFunctions.createEmailComposer = function(lead, subject, attachments) {
         opacity: 1;
     `;
 
+    // Determine recipient based on lead state (NJ/NY → Helen, otherwise Amanda)
+    const leadState = (lead.state || '').trim().toUpperCase();
+    const recipientEmail = (leadState === 'NJ' || leadState === 'NY')
+        ? 'Helen_Feygin@rpsins.com'
+        : 'amanda_miller@rpsins.com';
+
     // Broker-focused email body template
     const agentName = lead.assignedTo || 'NULL';
     const agentEmail = getAgentEmail(lead.assignedTo);
@@ -1281,7 +1300,7 @@ Thank you,`;
                 <!-- To Field -->
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; color: #374151;">To:</label>
-                    <input type="email" id="email-to-field" value="amanda_miller@rpsins.com" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                    <input type="email" id="email-to-field" value="${recipientEmail}" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                 </div>
 
                 <!-- Agent CC Field -->
@@ -5630,6 +5649,17 @@ function showCallbackScheduler(leadId) {
             </p>
         </div>
 
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                Quick Schedule:
+            </label>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+1);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+1 Day</button>
+                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+2);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+2 Days</button>
+                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+3);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+3 Days</button>
+            </div>
+        </div>
+
         <div style="margin-bottom: 25px;">
             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
                 Callback Date & Time:
@@ -6101,6 +6131,7 @@ function continueStageUpdate(leadId, stage, contactAttemptedCompleted) {
         // Update stage and timestamp
         leads[leadIndex].stage = stage;
         leads[leadIndex].stageUpdatedAt = now;
+        if (stage === 'app_sent') leads[leadIndex].appSentAt = now;
 
         // Reset reach-out data when stage changes
         // Check for email confirmations as valid completions
@@ -7342,6 +7373,34 @@ window.saveQuoteSubmission = async function(leadId) {
         // Refresh the quotes display
         await refreshQuotesDisplay(leadId);
 
+        // Auto-trigger market import when 2+ quotes exist
+        (async () => {
+            try {
+                const qRes = await fetch(`/api/quotes/${leadId}`);
+                if (!qRes.ok) return;
+                const qData = await qRes.json();
+                const totalQuotes = (qData.quotes || []).length;
+                if (totalQuotes >= 2 && typeof autoImportToMarket === 'function') {
+                    // Resolve lead name from DOM (button already has it) or localStorage
+                    let leadName = '';
+                    const importBtn = document.querySelector(`.auto-import-market-btn[onclick*="'${leadId}'"]`);
+                    if (importBtn) {
+                        const match = importBtn.getAttribute('onclick').match(/autoImportToMarket\('[^']+',\s*'([^']+)'\)/);
+                        if (match) leadName = match[1];
+                    }
+                    if (!leadName) {
+                        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+                        const lead = leads.find(l => String(l.id) === String(leadId));
+                        leadName = lead ? (lead.companyName || lead.name || '') : '';
+                    }
+                    console.log(`Auto-triggering market import for lead ${leadId} (${totalQuotes} quotes)`);
+                    autoImportToMarket(leadId, leadName);
+                }
+            } catch (e) {
+                console.warn('Auto-import check failed:', e);
+            }
+        })();
+
     } catch (error) {
         console.error('Error saving quote to server:', error);
 
@@ -7490,8 +7549,20 @@ window.refreshQuotesDisplay = async function(leadId) {
         `;
     }
 
+    // Get current insurance company for this lead (to auto-flag current carrier)
+    let currentInsuranceCompany = '';
+    try {
+        const allLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const thisLead = allLeads.find(l => String(l.id) === String(leadId));
+        currentInsuranceCompany = (thisLead?.insuranceCompany || '').toLowerCase().trim();
+    } catch (e) { /* ignore */ }
+
     // Function to create placeholder HTML
     function createPlaceholderHTML(carrier, savedStatus = null) {
+        // Check if this carrier is the lead's current insurance company → auto-flag
+        const carrierKey = carrier.toLowerCase();
+        const isCurrentCarrier = currentInsuranceCompany && currentInsuranceCompany.includes(carrierKey);
+
         // Set initial styling based on saved status
         let bgColor = '#f3f4f6';
         let borderColor = '#d1d5db';
@@ -7500,20 +7571,33 @@ window.refreshQuotesDisplay = async function(leadId) {
         let statusText = '';
         let statusColor = '';
 
-        if (savedStatus) {
-            if (savedStatus.status === 'eligible') {
+        // Determine effective status: current carrier auto-overrides unless already marked eligible
+        let effectiveStatus = savedStatus;
+        if (isCurrentCarrier && (!savedStatus || savedStatus.status !== 'eligible')) {
+            effectiveStatus = { status: carrierKey === 'progressive' ? 'aor_required' : 'ineligible' };
+        }
+
+        if (effectiveStatus) {
+            if (effectiveStatus.status === 'eligible') {
                 bgColor = '#dcfce7';
                 borderColor = '#10b981';
                 opacity = '1';
                 statusDisplay = 'block';
                 statusText = 'Eligible';
                 statusColor = '#059669';
-            } else if (savedStatus.status === 'ineligible') {
+            } else if (effectiveStatus.status === 'ineligible') {
                 bgColor = '#fef2f2';
                 borderColor = '#ef4444';
                 opacity = '1';
                 statusDisplay = 'block';
                 statusText = 'Ineligible';
+                statusColor = '#dc2626';
+            } else if (effectiveStatus.status === 'aor_required') {
+                bgColor = '#fef2f2';
+                borderColor = '#ef4444';
+                opacity = '1';
+                statusDisplay = 'block';
+                statusText = 'AOR Required';
                 statusColor = '#dc2626';
             }
         }
@@ -9859,6 +9943,14 @@ window.getReachOutStatus = function(lead) {
 
 // Callback Scheduler Functions
 window.scheduleCallback = async function(leadId) {
+    // Block scheduling for closed leads
+    const allLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = allLeads.find(l => String(l.id) === String(leadId));
+    if (lead && lead.stage === 'closed') {
+        showNotification('Cannot schedule callbacks for closed leads', 'error');
+        return;
+    }
+
     const dateInput = document.getElementById(`callback-date-${leadId}`);
     const timeInput = document.getElementById(`callback-time-${leadId}`);
     const notesInput = document.getElementById(`callback-notes-${leadId}`);
@@ -10057,6 +10149,8 @@ window.displayScheduledCallbacks = async function(leadId) {
     }
 
     const now = new Date();
+    const sessionUser = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const isGrant = (sessionUser.username || '').toLowerCase() === 'grant';
     let html = '<div style="border-top: 1px solid #0277bd; padding-top: 15px;"><h4 style="margin: 0 0 10px 0; color: #0277bd; font-size: 14px;"><i class="fas fa-clock"></i> Scheduled Callbacks</h4>';
 
     // Sort callbacks by date/time
@@ -10089,6 +10183,10 @@ window.displayScheduledCallbacks = async function(leadId) {
                                 style="background: #6b7280; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;" title="Refresh display if stuck">
                             <i class="fas fa-sync-alt"></i>
                         </button>
+                        ${isGrant ? `<button onclick="deleteScheduledCallback('${callback.id}', '${leadId}')"
+                                style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;" title="Delete this callback">
+                            <i class="fas fa-trash"></i>
+                        </button>` : ''}
                     </div>
                 </div>
             </div>
@@ -10132,6 +10230,58 @@ window.forceRefreshCallbackDisplay = function(leadId) {
         console.log('⚠️ FORCE REFRESH: No callback container found for lead', leadId);
     }
 }
+
+window.deleteScheduledCallback = async function(callbackId, leadId) {
+    if (!confirm('Delete this scheduled callback?')) return;
+
+    // Remove from server
+    try {
+        await fetch(`/api/callbacks/${callbackId}`, { method: 'DELETE' });
+        console.log('🗑️ Deleted callback from server:', callbackId);
+    } catch (e) {
+        console.warn('⚠️ Failed to delete callback from server:', e);
+    }
+
+    // Remove from localStorage
+    try {
+        const callbacksKey = 'scheduled_callbacks';
+        const localCallbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
+        if (localCallbacks[leadId]) {
+            localCallbacks[leadId] = localCallbacks[leadId].filter(cb => String(cb.id) !== String(callbackId));
+            localStorage.setItem(callbacksKey, JSON.stringify(localCallbacks));
+        }
+    } catch (e) {
+        console.warn('⚠️ Failed to remove callback from localStorage:', e);
+    }
+
+    // Refresh lead profile callback display if open
+    const profileContainer = document.getElementById(`scheduled-callbacks-${leadId}`);
+    if (profileContainer) {
+        forceRefreshCallbackDisplay(leadId);
+    }
+
+    // Reload server callbacks then re-render calendar so the event disappears
+    if (typeof loadServerCallbacks === 'function') {
+        try {
+            await loadServerCallbacks();
+        } catch (e) { /* ignore */ }
+    }
+    const calState = window.calendarState;
+    const calendarGrid = document.getElementById('calendarGrid');
+    if (calendarGrid && calState && typeof generateCalendarGrid === 'function') {
+        calendarGrid.innerHTML = generateCalendarGrid(calState.currentYear, calState.currentMonth);
+    }
+    // Refresh right panel (selected date or today)
+    const todaysEventsEl = document.getElementById('todaysEvents');
+    if (todaysEventsEl) {
+        const sel = calState?.selectedDate;
+        if (sel && typeof generateEventsForDate === 'function') {
+            todaysEventsEl.innerHTML = generateEventsForDate(sel.getFullYear(), sel.getMonth(), sel.getDate());
+        } else if (typeof generateTodaysEvents === 'function') {
+            todaysEventsEl.innerHTML = generateTodaysEvents();
+        }
+    }
+};
 
 window.completeCallback = async function(leadId, callbackId) {
     console.log('✅ COMPLETING CALLBACK:', leadId, callbackId);
@@ -10397,7 +10547,7 @@ function updateTableAfterCallbackComplete(leadId) {
         const rowLeadId = checkbox.value;
         if (String(rowLeadId) === String(leadId)) {
             // Get the TODO cell (7th column, index 6)
-            const todoCell = row.querySelectorAll('td')[6];
+            const todoCell = row.querySelectorAll('td')[7];
             if (!todoCell) return;
 
             // Check if there are any remaining callbacks for this lead
