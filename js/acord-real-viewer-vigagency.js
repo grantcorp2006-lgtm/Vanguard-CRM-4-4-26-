@@ -69,15 +69,22 @@ function getSignatureForAgency(agency) {
 }
 
 // Helper function to get company information based on agency
-function getCompanyInfoForAgency(agency) {
-    console.log('🏢 Determining company info for agency:', agency);
-    if (agency && agency.toLowerCase().includes('united')) {
+function getCompanyInfoForAgency(agency, agent) {
+    console.log('🏢 Determining company info for agency:', agency, '| agent:', agent);
+    const isUIG = (agency && agency.toLowerCase().includes('united')) ||
+                  (agent && agent.toLowerCase() === 'maureen');
+    if (isUIG) {
         console.log('🔄 Using United Insurance Group company info');
         return {
             producer: 'United Insurance Group',
             email: 'Contact@uigagency.com',
             phone: '(330) 259-7438',
-            fax: '(330) 259-7439'
+            fax: '(330) 259-7439',
+            address1: '2888 Nationwide Pkwy',
+            address2: '',
+            city: 'Brunswick',
+            state: 'OH',
+            zip: '44212'
         };
     } else {
         console.log('🔄 Using Vanguard Insurance Group LLC company info');
@@ -85,7 +92,12 @@ function getCompanyInfoForAgency(agency) {
             producer: 'Vanguard Insurance Group LLC',
             email: 'contact@vigagency.com',
             phone: '(866) 628-9441',
-            fax: '(330) 779-1097'
+            fax: '(330) 779-1097',
+            address1: '2888 Nationwide Pkwy',
+            address2: '',
+            city: 'Brunswick',
+            state: 'OH',
+            zip: '44212'
         };
     }
 }
@@ -455,18 +467,24 @@ async function loadRealPDF(policyId, policyData) {
 
             console.log('🔥 FORCE UPDATE: Policy data:', { policyNum, effDate, expDate });
 
-            // Update General Liability row (ABOVE auto liability)
-            if (glPolicyField) {
-                glPolicyField.value = policyNum;
-                console.log('✅ GL Policy Number field populated:', policyNum);
-            }
-            if (glEffField) {
-                glEffField.value = effDate;
-                console.log('✅ GL Effective Date field populated:', effDate);
-            }
-            if (glExpField) {
-                glExpField.value = expDate;
-                console.log('✅ GL Expiration Date field populated:', expDate);
+            // Update General Liability row (ABOVE auto liability) — only if GL coverage is present
+            const glAggCheck = policyData?.coverage?.['General Aggregate'] || policyData?.coverage?.['General Liability'] || '';
+            const glPresent = !!glAggCheck && glAggCheck !== 'excluded';
+            if (glPresent) {
+                if (glPolicyField) {
+                    glPolicyField.value = policyNum;
+                    console.log('✅ GL Policy Number field populated:', policyNum);
+                }
+                if (glEffField) {
+                    glEffField.value = effDate;
+                    console.log('✅ GL Effective Date field populated:', effDate);
+                }
+                if (glExpField) {
+                    glExpField.value = expDate;
+                    console.log('✅ GL Expiration Date field populated:', expDate);
+                }
+            } else {
+                console.log('ℹ️ GL coverage not present — skipping GL row prefill');
             }
 
             // Update auto liability row
@@ -566,6 +584,10 @@ function createRealFormFields(policyId, policyData) {
     // Clear any existing fields
     overlay.innerHTML = '';
 
+    // Determine if GL coverage is present and not excluded
+    const glAggregateRaw = policyData?.coverage?.['General Aggregate'] || policyData?.coverage?.['General Liability'] || '';
+    const hasGL = !!glAggregateRaw && glAggregateRaw !== 'excluded';
+
     // EXACT field positions extracted from ACORD 25 fillable PDF (scaled at 1.3x)
     const fields = [
         // === DATE (top right) ===
@@ -574,27 +596,27 @@ function createRealFormFields(policyId, policyData) {
 
         // === PRODUCER SECTION (top left) ===
         { id: 'producer', x: 29, y: 172, width: 364, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency).producer },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).producer },
         { id: 'producerAddress1', x: 29, y: 187, width: 364, height: 16,
-          value: '2888 Nationwide Pkwy' },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).address1 },
         { id: 'producerAddress2', x: 29, y: 203, width: 364, height: 16,
-          value: '' },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).address2 },
         { id: 'producerCity', x: 29, y: 218, width: 281, height: 16,
-          value: 'Brunswick' },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).city },
         { id: 'producerState', x: 309, y: 218, width: 23, height: 16,
-          value: 'OH' },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).state },
         { id: 'producerZip', x: 333, y: 218, width: 60, height: 16,
-          value: '44242' },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).zip },
 
         // === CONTACT INFO (right side of producer) ===
         { id: 'contactName', x: 450, y: 156, width: 317, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency).producer },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).producer },
         { id: 'phone', x: 459, y: 172, width: 164, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency).phone },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).phone },
         { id: 'fax', x: 673, y: 172, width: 94, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency).fax },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).fax },
         { id: 'email', x: 450, y: 187, width: 317, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency).email },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).email },
 
         // === INSURED SECTION ===
         { id: 'insured', x: 94, y: 250, width: 299, height: 16,
@@ -653,11 +675,11 @@ function createRealFormFields(policyId, policyData) {
 
         // === GENERAL LIABILITY CHECKBOXES ===
         { id: 'glCheck', x: 47, y: 390, width: 18, height: 16,
-          type: 'checkbox', checked: true },
+          type: 'checkbox', checked: hasGL },
         { id: 'glClaimsMade', x: 65, y: 406, width: 20, height: 16,
           type: 'checkbox' },
         { id: 'glOccurrence', x: 150, y: 406, width: 20, height: 16,
-          type: 'checkbox', checked: true },
+          type: 'checkbox', checked: hasGL },
         { id: 'glOtherCov1', x: 47, y: 421, width: 18, height: 16,
           type: 'checkbox' },
         { id: 'glOtherCov2', x: 47, y: 437, width: 18, height: 16,
@@ -665,7 +687,7 @@ function createRealFormFields(policyId, policyData) {
 
         // === AGGREGATE LIMIT CHECKBOXES ===
         { id: 'aggPolicy', x: 47, y: 468, width: 18, height: 16,
-          type: 'checkbox', checked: true },
+          type: 'checkbox', checked: hasGL },
         { id: 'aggProject', x: 103, y: 468, width: 20, height: 16,
           type: 'checkbox' },
         { id: 'aggLocation', x: 159, y: 468, width: 20, height: 16,
@@ -810,21 +832,21 @@ function createRealFormFields(policyId, policyData) {
               return (compDed > 0 && collDed > 0) ? 'PHYSICAL DAMAGE' : '';
           })() },
         { id: 'glInsurer', x: 23, y: 437, width: 23, height: 16,
-          value: 'A' },
+          value: hasGL ? 'A' : '' },
         { id: 'glAddlInsd', x: 229, y: 437, width: 23, height: 16,
           value: '' },
         { id: 'glSubrWvd', x: 252, y: 437, width: 23, height: 16,
           value: '' },
         { id: 'glPolicyNum', x: 281, y: 437, width: 146, height: 16,
-          value: (policyData?.policyType !== 'commercial-auto') ? (policyData?.policyNumber || '') : '' },
+          value: (hasGL && policyData?.policyType !== 'commercial-auto') ? (policyData?.policyNumber || '') : '' },
         { id: 'glEffDate', x: 430, y: 437, width: 61, height: 16,
-          value: (policyData?.policyType !== 'commercial-auto' && policyData?.effectiveDate) ?
+          value: (hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.effectiveDate) ?
                  formatDateForACORD(policyData.effectiveDate) :
-                 ((policyData?.policyType !== 'commercial-auto' && policyData?.overview?.['Effective Date']) ? formatDateForACORD(policyData.overview['Effective Date']) : '') },
+                 ((hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.overview?.['Effective Date']) ? formatDateForACORD(policyData.overview['Effective Date']) : '') },
         { id: 'glExpDate', x: 491, y: 437, width: 61, height: 16,
-          value: (policyData?.policyType !== 'commercial-auto' && policyData?.expirationDate) ?
+          value: (hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.expirationDate) ?
                  formatDateForACORD(policyData.expirationDate) :
-                 ((policyData?.policyType !== 'commercial-auto' && policyData?.overview?.['Expiration Date']) ? formatDateForACORD(policyData.overview['Expiration Date']) : '') },
+                 ((hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.overview?.['Expiration Date']) ? formatDateForACORD(policyData.overview['Expiration Date']) : '') },
 
         // === AUTOMOBILE LIABILITY FIELDS ===
         { id: 'autoInsurer', x: 23, y: 530, width: 23, height: 16,
@@ -986,70 +1008,100 @@ function createRealFormFields(policyId, policyData) {
               return '';
           })() },
 
-        // === NON OWNED TRAILER PHYSICAL DAMAGE ROW (y: 718) ===
-        { id: 'nonOwnedTrailerInsurer', x: 23, y: 718, width: 23, height: 16,
+        // === LAST ROW (y: 718) — Trailer Interchange if present, else Non-Owned Trailer ===
+        // Helper values computed once for this row
+        { id: 'lastRowInsurer', x: 23, y: 718, width: 23, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              console.log('🚛 NON OWNED TRAILER DEBUG: trailer =', nonOwnedTrailer, 'deductible =', nonOwnedTrailerDed);
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? 'A' : '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              const hasNOT = not && not !== 'None' && not !== 'Not Included';
+              console.log('🚛 LAST ROW DEBUG: TI =', ti, '| Non-Owned Trailer =', not);
+              return (hasTI || hasNOT) ? 'A' : '';
           })() },
-        { id: 'nonOwnedTrailerText', x: 52, y: 718, width: 173, height: 16,
+        { id: 'lastRowText', x: 52, y: 718, width: 173, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              console.log('🚛 NON OWNED TRAILER TEXT DEBUG: show?', nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '');
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? 'NON OWNED TRAIL PHYS DAMAGE' : '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              const hasNOT = not && not !== 'None' && not !== 'Not Included';
+              if (hasTI) return 'TRAILER INTERCHANGE';
+              if (hasNOT) return 'NON OWNED TRAIL PHYS DAMAGE';
+              return '';
           })() },
-        { id: 'nonOwnedTrailerPolicyNum', x: 281, y: 718, width: 146, height: 16,
+        { id: 'lastRowPolicyNum', x: 281, y: 718, width: 146, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? (policyData?.policy_number || policyData?.policyNumber || '') : '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              const hasNOT = not && not !== 'None' && not !== 'Not Included';
+              return (hasTI || hasNOT) ? (policyData?.policy_number || policyData?.policyNumber || '') : '';
           })() },
-        { id: 'nonOwnedTrailerEffDate', x: 430, y: 718, width: 61, height: 16,
+        { id: 'lastRowEffDate', x: 430, y: 718, width: 61, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? formatDateForACORD(policyData?.effective_date) : '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              const hasNOT = not && not !== 'None' && not !== 'Not Included';
+              return (hasTI || hasNOT) ? formatDateForACORD(policyData?.effective_date) : '';
           })() },
-        { id: 'nonOwnedTrailerExpDate', x: 491, y: 718, width: 61, height: 16,
+        { id: 'lastRowExpDate', x: 491, y: 718, width: 61, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? formatDateForACORD(policyData?.expiration_date) : '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              const hasNOT = not && not !== 'None' && not !== 'Not Included';
+              return (hasTI || hasNOT) ? formatDateForACORD(policyData?.expiration_date) : '';
           })() },
-        { id: 'nonOwnedTrailerLimits', x: 552, y: 718, width: 83, height: 16,
+        { id: 'lastRowLimits', x: 552, y: 718, width: 83, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? `LIMIT ${nonOwnedTrailer}` : '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              if (hasTI) {
+                  // Parse '60000/2000ded' → '$60,000'
+                  if (ti.toLowerCase().includes('/')) {
+                      const limit = parseInt(ti.split('/')[0]);
+                      return isNaN(limit) ? '' : `$${limit.toLocaleString()}`;
+                  }
+                  const num = parseInt(ti);
+                  return isNaN(num) ? ti : `$${num.toLocaleString()}`;
+              }
+              const hasNOT = not && not !== 'None' && not !== 'Not Included';
+              return hasNOT ? not : '';
           })() },
-        { id: 'nonOwnedTrailerDeductible', x: 684, y: 718, width: 83, height: 16,
+        { id: 'lastRowDeductible', x: 684, y: 718, width: 83, height: 16,
           value: (function() {
-              const nonOwnedTrailer = policyData?.coverage?.non_owned_trailer || '';
+              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
+              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
+              if (hasTI && ti.toLowerCase().includes('/')) {
+                  // Parse '60000/2000ded' → '$2,000 Ded.'
+                  const ded = parseInt(ti.toLowerCase().replace(/ded/g, '').split('/')[1]);
+                  return isNaN(ded) ? '' : `$${ded.toLocaleString()} Ded.`;
+              }
               const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              return (nonOwnedTrailer && nonOwnedTrailer !== '' && nonOwnedTrailer !== 'None' && nonOwnedTrailerDed && nonOwnedTrailerDed !== '' && nonOwnedTrailerDed !== 'None') ? `DED. ${nonOwnedTrailerDed}` : '';
+              return nonOwnedTrailerDed ? `DED. ${nonOwnedTrailerDed}` : '';
           })() },
 
 
         // === GENERAL LIABILITY LIMITS ===
         { id: 'eachOccurrence', x: 684, y: 390, width: 83, height: 16,
-          value: (policyData?.coverage?.liability_limits || policyData?.coverage?.['Liability Limits'] || '1,000,000').replace(/\s*CSL\s*/i, '').replace(/^\$/, '') },
+          value: hasGL ? (policyData?.coverage?.liability_limits || policyData?.coverage?.['Liability Limits'] || '1,000,000').replace(/\s*CSL\s*/i, '').replace(/^\$/, '') : '' },
         { id: 'damageRented', x: 684, y: 406, width: 83, height: 16,
-          value: '100,000' },
+          value: hasGL ? '100,000' : '' },
         { id: 'medExp', x: 684, y: 421, width: 83, height: 16,
           value: (function() {
+              if (!hasGL) return '';
               const medicalValue = policyData?.coverage?.medical_payments || policyData?.coverage?.['Medical Payments'] || '5,000';
               console.log('💊 Medical Payments value:', medicalValue, 'from coverage:', policyData?.coverage);
               return medicalValue;
           })() },
         { id: 'personalAdv', x: 684, y: 437, width: 83, height: 16,
-          value: (policyData?.coverage?.liability_limits || policyData?.coverage?.['Liability Limits'] || '1,000,000').replace(/\s*CSL\s*/i, '').replace(/^\$/, '') },
+          value: hasGL ? (policyData?.coverage?.liability_limits || policyData?.coverage?.['Liability Limits'] || '1,000,000').replace(/\s*CSL\s*/i, '').replace(/^\$/, '') : '' },
         { id: 'generalAgg', x: 684, y: 452, width: 83, height: 16,
-          value: policyData?.coverage?.general_aggregate || policyData?.coverage?.['General Aggregate'] || '2,000,000' },
+          value: hasGL ? (policyData?.coverage?.general_aggregate || policyData?.coverage?.['General Aggregate'] || '2,000,000') : '' },
         { id: 'productsOps', x: 684, y: 468, width: 83, height: 16,
-          value: policyData?.coverage?.general_aggregate || policyData?.coverage?.['General Aggregate'] || '2,000,000' },
+          value: hasGL ? (policyData?.coverage?.general_aggregate || policyData?.coverage?.['General Aggregate'] || '2,000,000') : '' },
         { id: 'glOtherLimit', x: 684, y: 484, width: 83, height: 16,
           value: '' },
 
