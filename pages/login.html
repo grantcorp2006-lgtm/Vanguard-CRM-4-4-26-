@@ -3,40 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Vanguard Insurance Portal</title>
-    <link rel="stylesheet" href="../css/styles.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <title>Login - United Insurance Group</title>
+    <link rel="stylesheet" href="../css/styles.css?v=1768184156">
+    <link rel="stylesheet" href="../css/pages.css?v=11">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            height: 100vh;
+        .login-container {
+            min-height: calc(100vh - 80px);
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 120px 20px 40px;
+            background-image: url('../images/login-truck-bg.jpg');
+            background-size: cover;
+            background-position: center;
+            position: relative;
         }
 
-        .login-container {
+        .login-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(100, 100, 100, 0.75) 0%, rgba(60, 60, 60, 0.8) 100%);
+            z-index: 0;
+        }
+
+        .login-box {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            padding: 50px;
+            max-width: 480px;
             width: 100%;
-            max-width: 400px;
-            padding: 40px;
-            animation: slideIn 0.4s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                transform: translateY(-20px);
-                opacity: 0;
-            }
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
+            position: relative;
+            z-index: 1;
         }
 
         .login-header {
@@ -44,253 +50,422 @@
             margin-bottom: 40px;
         }
 
-        .logo {
-            width: 80px;
-            height: 80px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 50%;
-            margin: 0 auto 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .login-header h1 {
             font-size: 32px;
-            color: white;
+            font-weight: 700;
+            color: var(--dark-blue);
+            margin-bottom: 10px;
         }
 
-        h1 {
-            color: #333;
-            font-size: 28px;
-            font-weight: 600;
-            margin: 0 0 10px 0;
-        }
-
-        .subtitle {
+        .login-header p {
             color: #666;
             font-size: 16px;
-            margin: 0;
         }
 
         .form-group {
             margin-bottom: 25px;
         }
 
-        label {
+        .form-group label {
             display: block;
+            font-weight: 600;
+            color: var(--dark-blue);
             margin-bottom: 8px;
-            color: #333;
-            font-weight: 500;
             font-size: 14px;
         }
 
-        input[type="text"],
-        input[type="password"] {
+        .form-group input {
             width: 100%;
-            padding: 16px;
-            border: 2px solid #e1e5e9;
+            padding: 14px 16px;
+            border: 2px solid #e1e8ed;
             border-radius: 8px;
             font-size: 16px;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
-            box-sizing: border-box;
+            transition: all 0.3s ease;
+            font-family: 'Inter', sans-serif;
         }
 
-        input[type="text"]:focus,
-        input[type="password"]:focus {
+        .form-group input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
         }
 
-        input.error {
-            border-color: #dc3545;
-            background-color: #ffeaea;
+        .form-group input::placeholder {
+            color: #999;
         }
 
         .login-btn {
             width: 100%;
             padding: 16px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary-blue), var(--dark-blue));
             color: white;
             border: none;
             border-radius: 8px;
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
+            transition: all 0.3s ease;
+            margin-top: 10px;
         }
 
         .login-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 8px 20px rgba(0, 102, 204, 0.3);
         }
 
-        .login-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-            display: none;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .error-message {
-            background-color: #f8d7da;
-            color: #721c24;
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            border: 1px solid #f5c6cb;
-            display: none;
-            align-items: center;
-            gap: 10px;
-            animation: slideIn 0.3s ease;
-        }
-
-        .error-message.show {
-            display: flex;
-        }
-
-        .success-message {
-            background-color: #d4edda;
-            color: #155724;
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            border: 1px solid #c3e6cb;
-            display: none;
-            align-items: center;
-            gap: 10px;
-            animation: slideIn 0.3s ease;
-        }
-
-        .success-message.show {
-            display: flex;
-        }
-
-        .forgot-password {
+        .login-footer {
             text-align: center;
-            margin-top: 20px;
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #e1e8ed;
         }
 
-        .forgot-password a {
-            color: #667eea;
-            text-decoration: none;
+        .login-footer p {
+            color: #666;
             font-size: 14px;
+            margin-bottom: 15px;
         }
 
-        .forgot-password a:hover {
+        .login-footer a {
+            color: var(--primary-blue);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .login-footer a:hover {
             text-decoration: underline;
         }
 
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        .info-text {
+            background: #f0f7ff;
+            border-left: 4px solid var(--primary-blue);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .info-text p {
+            margin: 0;
+            color: #555;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .info-text i {
+            color: var(--primary-blue);
+            margin-right: 8px;
+        }
+
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .login-container {
+                padding: 100px 10px 20px;
+            }
+
+            .login-box {
+                padding: 30px 20px;
+                margin: 0 10px;
+            }
+
+            /* Hide descriptive text on mobile */
+            .login-header p,
+            .info-text {
+                display: none !important;
+            }
+
+            .login-header {
+                margin-bottom: 20px;
+            }
+
+            .login-header h1 {
+                font-size: 24px;
+                margin-bottom: 10px;
+            }
+
+            .form-group {
+                margin-bottom: 15px;
+            }
+
+            .login-footer {
+                margin-top: 20px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="login-header">
-            <div class="logo">
-                <i class="fas fa-shield-alt"></i>
+    <!-- Header Navigation -->
+    <header class="header" id="header">
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="nav-brand">
+                    <img src="../images/uig-logo.png" alt="United Insurance Group" class="logo">
+                </div>
+                <div class="nav-menu" id="navMenu">
+                    <ul class="nav-list">
+                        <li class="nav-item"><a href="login.html" class="nav-link">Login</a></li>
+                        <li class="nav-item"><a href="../index.html" class="nav-link">Home</a></li>
+                        <li class="nav-item dropdown">
+                            <a href="../index.html#products" class="nav-link">Products</a>
+                            <div class="dropdown-content">
+                                <a href="commercial-auto.html">Commercial Auto Insurance</a>
+                                <a href="trucking-insurance.html">Trucking Insurance</a>
+                                <a href="general-liability.html">General Liability</a>
+                                <a href="cargo-insurance.html">Cargo Insurance</a>
+                            </div>
+                        </li>
+                        <li class="nav-item"><a href="../index.html#claims" class="nav-link">Claims</a></li>
+                        <li class="nav-item"><a href="../index.html#resources" class="nav-link">Resources</a></li>
+                        <li class="nav-item"><a href="../about.html" class="nav-link">About</a></li>
+                        <li class="nav-item"><a href="../index.html#contact" class="nav-link">Contact</a></li>
+                        <li class="nav-item"><a href="quote-commercial-auto.html" class="nav-link">Get a Quote</a></li>
+                    </ul>
+                </div>
+                <div class="nav-actions">
+                    <button class="nav-toggle" id="navToggle">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </button>
+                </div>
             </div>
-            <h1>Welcome Back</h1>
-            <p class="subtitle">Sign in to your Vanguard Insurance account</p>
+        </nav>
+    </header>
+
+    <!-- Login Section -->
+    <section class="login-container">
+        <div class="login-box">
+            <div class="login-header">
+                <h1>Policyholder Login</h1>
+                <p>Access your insurance policy information</p>
+            </div>
+
+            <div class="info-text">
+                <p><i class="fas fa-info-circle"></i> Enter your email and password to access your account and manage your insurance coverage.</p>
+            </div>
+
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        placeholder="Enter your email"
+                        required
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        placeholder="Enter your password"
+                        required
+                    >
+                </div>
+
+                <button type="submit" class="login-btn">
+                    <i class="fas fa-sign-in-alt"></i> Sign In
+                </button>
+            </form>
+
+            <div class="login-footer">
+                <p>Don't have a password yet?</p>
+                <a href="create-password.html">Create password</a>
+                <p style="margin-top: 20px;">Need help? <a href="../index.html#contact">Contact Support</a></p>
+            </div>
         </div>
+    </section>
 
-        <form id="loginForm">
-            <div class="error-message" id="errorMessage">
-                <i class="fas fa-exclamation-circle"></i>
-                <span id="errorText">Invalid credentials. Please try again.</span>
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <img src="../images/united-logo.png" alt="United Insurance Group" class="footer-logo">
+                    <p>Your trusted partner in commercial trucking insurance.</p>
+                    <div class="social-links">
+                        <a href="#"><i class="fab fa-facebook"></i></a>
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-linkedin"></i></a>
+                        <a href="#"><i class="fab fa-instagram"></i></a>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="../index.html">Home</a></li>
+                        <li><a href="../index.html#products">Our Products</a></li>
+                        <li><a href="quote-commercial-auto.html">Get a Quote</a></li>
+                        <li><a href="../index.html#claims">File a Claim</a></li>
+                        <li><a href="../index.html#contact">Contact Us</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Insurance Products</h4>
+                    <ul>
+                        <li><a href="commercial-auto.html">Commercial Auto</a></li>
+                        <li><a href="trucking-insurance.html">Trucking Insurance</a></li>
+                        <li><a href="general-liability.html">General Liability</a></li>
+                        <li><a href="cargo-insurance.html">Cargo Insurance</a></li>
+                        <li><a href="workers-comp.html">Workers' Compensation</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Contact Info</h4>
+                    <p>2888 Nationwide Pkwy<br>Brunswick, OH 44212</p>
+                    <p>Phone: (866) 628-9441<br>Email: contact@uigagency.com</p>
+                </div>
             </div>
-
-            <div class="success-message" id="successMessage">
-                <i class="fas fa-check-circle"></i>
-                <span id="successText">Login successful!</span>
+            <div class="footer-bottom">
+                <p>&copy; 2024 United Insurance Group. All rights reserved.</p>
+                <div class="footer-links">
+                    <a href="#">Privacy Policy</a>
+                    <a href="#">Terms of Service</a>
+                    <a href="#">Cookie Policy</a>
+                </div>
             </div>
-
-            <div class="form-group">
-                <label for="policyNumber">Policy Number</label>
-                <input
-                    type="text"
-                    id="policyNumber"
-                    name="policyNumber"
-                    required
-                    autocomplete="username"
-                    placeholder="Enter your policy number"
-                >
-            </div>
-
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    required
-                    autocomplete="current-password"
-                    placeholder="Enter your password"
-                >
-            </div>
-
-            <button type="submit" class="login-btn" id="loginButton">
-                <span id="buttonText">Sign In</span>
-                <div class="spinner" id="buttonSpinner"></div>
-            </button>
-        </form>
-
-        <div class="forgot-password">
-            <a href="#" onclick="alert('Please contact support for password reset assistance.')">
-                Forgot your password?
-            </a>
         </div>
-    </div>
+    </footer>
 
-    <!-- Load main.js with version parameter to prevent caching -->
     <script src="../js/main.js?v=20251029"></script>
-
+    <script src="../js/policy-data.js?v=20251231-inactive-policy-fix"></script>
     <script>
-        console.log('Login page loaded - Version 2.0 with test mode');
+        console.log('Login page loaded - Version 2.0 with phone number authentication');
 
-        // Additional page-specific functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            // Focus on policy number field
-            const policyField = document.getElementById('policyNumber');
-            if (policyField) {
-                policyField.focus();
+        const API_BASE_URL = ''; // Use same domain (proxy will forward to CRM)
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            // Check if already logged in, redirect to dashboard
+            const isLoggedIn = localStorage.getItem('united_logged_in') === 'true';
+            if (isLoggedIn) {
+                window.location.href = 'policyholder-dashboard.html';
+                return;
+            }
+        });
+
+        async function handleLogin(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const submitButton = document.querySelector('.login-btn');
+            const originalButtonText = submitButton.innerHTML;
+
+            console.log('Login attempt:', { email, isTest: email.toLowerCase() === 'test@example.com' });
+
+            // Disable button and show loading state
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing In...';
+
+            // Check for admin secret login
+            if (email === 'admin@uigagency.com' && password === 'admin123') {
+                console.log('🔒 ADMIN LOGIN DETECTED - Email: admin@uigagency.com');
+                setTimeout(() => {
+                    // Store admin authentication data in localStorage
+                    localStorage.setItem('united_logged_in', 'true');
+                    localStorage.setItem('united_auth_token', 'admin_token_secret');
+                    localStorage.setItem('united_policy_number', 'ADMIN-EMAIL');
+                    localStorage.setItem('united_user_name', 'Administrator');
+                    localStorage.setItem('united_admin_mode', 'true');
+
+                    console.log('🚀 ADMIN: Redirecting to admin-dashboard.html');
+                    window.location.href = 'admin-dashboard.html';
+                }, 500);
+                return;
             }
 
-            // Handle Enter key to move between fields
-            document.getElementById('policyNumber').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    document.getElementById('password').focus();
-                }
-            });
+            // Check for test account
+            if (email.toLowerCase() === 'test@example.com' && password === 'test123') {
+                console.log('Test mode activated - no backend connection');
+                setTimeout(() => {
+                    // Store test authentication data in localStorage
+                    localStorage.setItem('united_logged_in', 'true');
+                    localStorage.setItem('united_auth_token', 'test_token_ui_showcase');
+                    localStorage.setItem('united_policy_number', 'TEST-UI-DEMO');
+                    localStorage.setItem('united_user_name', 'Test User');
+                    localStorage.setItem('united_test_mode', 'true');
 
-            document.getElementById('password').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    document.getElementById('loginForm').dispatchEvent(new Event('submit'));
+                    console.log('Redirecting to dashboard in test mode');
+                    window.location.href = 'policyholder-dashboard.html';
+                }, 500);
+                return;
+            }
+
+            try {
+                // Use client-side policy database with email authentication
+                console.log('Authenticating with email and password');
+
+                const authResult = await window.policyDB.authenticateUserByEmail(email, password);
+                console.log('🔍 EMAIL AUTHENTICATION ATTEMPT:');
+                console.log('  - Email:', email);
+                console.log('  - Auth Result Success:', authResult.success);
+                console.log('  - Auth Result:', authResult);
+
+                if (!authResult.success) {
+                    console.log('❌ EMAIL AUTH FAILED:', authResult.error);
+                } else {
+                    console.log('✅ EMAIL AUTH SUCCESS - User:', authResult.user.name);
                 }
-            });
-        });
+
+                if (authResult.success) {
+                    console.log('🔓 EMAIL LOGIN SUCCESS - Setting client localStorage data');
+
+                    // Clear any old admin/test mode flags
+                    localStorage.removeItem('united_test_mode');
+                    localStorage.removeItem('united_admin_mode');
+
+                    // Store authentication data in localStorage
+                    localStorage.setItem('united_logged_in', 'true');
+                    localStorage.setItem('united_auth_token', authResult.token);
+
+                    // Handle both policy-based and client-based authentication
+                    if (authResult.policy && authResult.policy.policy_number) {
+                        // Policy-based authentication
+                        localStorage.setItem('united_policy_number', authResult.policy.policy_number);
+                    } else if (authResult.client && authResult.client.id) {
+                        // Client-based authentication (CRM integration)
+                        localStorage.setItem('united_client_id', authResult.client.id);
+                        localStorage.setItem('united_policy_number', authResult.client.id); // Use client ID as fallback
+                    } else {
+                        // Fallback
+                        localStorage.setItem('united_policy_number', 'CLIENT-PORTAL');
+                    }
+
+                    localStorage.setItem('united_user_name', authResult.user.name);
+                    localStorage.setItem('united_user_email', authResult.user.email);
+                    localStorage.setItem('united_user_phone', authResult.user.phone);
+
+                    console.log('🚀 CLIENT: Redirecting to policyholder-dashboard.html');
+
+                    // Simulate a brief delay for better UX
+                    setTimeout(() => {
+                        window.location.href = 'policyholder-dashboard.html';
+                    }, 800);
+                } else {
+                    // Show error message
+                    setTimeout(() => {
+                        alert('Login Failed\n\nInvalid email or password\n\nPlease verify:\n• Email is correct\n• Password is correct');
+
+                        // Re-enable button
+                        submitButton.disabled = false;
+                        submitButton.innerHTML = originalButtonText;
+                    }, 500);
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                setTimeout(() => {
+                    alert('System Error\n\nAn unexpected error occurred during login.\n\nError: ' + error.message + '\n\nPlease try again or contact support.');
+
+                    // Re-enable button
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = originalButtonText;
+                }, 500);
+            }
+        }
     </script>
 </body>
 </html>
