@@ -35631,26 +35631,68 @@ window.submitCRMCOIModal = async function() {
         // First, try to get the COI document for this policy
         let coiDocument = null;
 
-        console.log('🔍 Looking for COI document for policy:', policyId);
+        // Collect all IDs this policy might be stored under
+        const fullPolicyId = currentPolicy?.id || '';
+        const policyNumber = currentPolicy?.policyNumber || policyId;
+        const coiSearchIds = [policyId, fullPolicyId, policyNumber].filter(Boolean);
+        console.log('🔍 Looking for COI document for policy:', policyId, '| search IDs:', coiSearchIds);
 
-        // Check localStorage for COI documents
+        // 1. Check insurance_policies localStorage — filter to the actual policy
         const storedPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
         for (const policy of storedPolicies) {
-            if (policy.coiDocuments && Array.isArray(policy.coiDocuments) && policy.coiDocuments.length > 0) {
-                console.log('📋 Found COI documents for policy:', policy.policyNumber || policy.id);
-                coiDocument = policy.coiDocuments[0]; // Use the first COI document
+            const matches = coiSearchIds.some(id =>
+                id && (policy.policyNumber === id || policy.id === id ||
+                       (policy.policyNumber && policy.policyNumber.trim() === id.trim()) ||
+                       (policy.id && policy.id.trim() === id.trim()))
+            );
+            if (matches && policy.coiDocuments && Array.isArray(policy.coiDocuments) && policy.coiDocuments.length > 0) {
+                console.log('📋 Found COI in insurance_policies for:', policy.policyNumber || policy.id);
+                coiDocument = policy.coiDocuments[policy.coiDocuments.length - 1]; // Use latest
                 break;
             }
         }
 
-        // If no COI found in localStorage, try API
+        // 2. Check legacy policy_coi_documents localStorage
+        if (!coiDocument) {
+            const legacyCOIs = JSON.parse(localStorage.getItem('policy_coi_documents') || '[]');
+            const match = legacyCOIs.find(doc => coiSearchIds.some(id => id && doc.policyId === id));
+            if (match) {
+                console.log('📋 Found COI in policy_coi_documents for policy:', match.policyId);
+                coiDocument = match;
+            }
+        }
+
+        // 3. Try to capture the current ACORD canvas directly (works even if Save wasn't clicked)
         if (!coiDocument) {
             try {
-                console.log('🔍 Fetching COI document from API for policy:', policyId);
-                const coiResponse = await fetch(`https://162-220-14-239.nip.io/api/coi/${policyId}`);
-                if (coiResponse.ok) {
-                    coiDocument = await coiResponse.json();
-                    console.log('✅ Found COI document via API:', coiDocument.name || 'unnamed');
+                const canvas = document.getElementById('realPdfCanvas') ||
+                               document.querySelector('#acordViewerContainer canvas') ||
+                               document.querySelector('.pdf-canvas-container canvas');
+                if (canvas && canvas.width > 100) {
+                    console.log('📸 Capturing current ACORD canvas for attachment...');
+                    const dataUrl = canvas.toDataURL('image/png', 0.95);
+                    if (dataUrl && dataUrl.length > 1000) {
+                        coiDocument = { dataUrl, name: `COI_${policyId}.png`, type: 'image/png' };
+                        console.log('✅ Captured COI from live canvas, size:', dataUrl.length);
+                    }
+                }
+            } catch (canvasErr) {
+                console.log('⚠️ Canvas capture failed:', canvasErr.message);
+            }
+        }
+
+        // 4. Fall back to API
+        if (!coiDocument) {
+            try {
+                // Try both the policy number and full ID
+                for (const searchId of coiSearchIds) {
+                    console.log('🔍 Fetching COI document from API for:', searchId);
+                    const coiResponse = await fetch(`https://162-220-14-239.nip.io/api/coi/${encodeURIComponent(searchId)}`);
+                    if (coiResponse.ok) {
+                        coiDocument = await coiResponse.json();
+                        console.log('✅ Found COI document via API:', coiDocument.name || 'unnamed');
+                        break;
+                    }
                 }
             } catch (error) {
                 console.log('⚠️ Could not fetch COI from API:', error.message);
