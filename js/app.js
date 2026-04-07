@@ -797,7 +797,11 @@ function loadPolicyList() {
                         let clientName = 'N/A';
 
                         // PRIORITY 1: Check Named Insured tab data first (most accurate)
-                        if (policy.insured?.['Name/Business Name']) {
+                        if (policy.insured?.['Business Name']) {
+                            clientName = policy.insured['Business Name'];
+                        } else if (policy.contact?.['Business Name']) {
+                            clientName = policy.contact['Business Name'];
+                        } else if (policy.insured?.['Name/Business Name']) {
                             clientName = policy.insured['Name/Business Name'];
                         } else if (policy.insured?.['Primary Named Insured']) {
                             clientName = policy.insured['Primary Named Insured'];
@@ -20927,7 +20931,9 @@ function generateViewTabContent(tabId, policy) {
                         </div>
                         ${(() => {
                             // Get business name from Named Insured tab first, then fallback to clientName
-                            const businessName = policy.insured?.['Name/Business Name'] ||
+                            const businessName = policy.insured?.['Business Name'] ||
+                                                policy.contact?.['Business Name'] ||
+                                                policy.insured?.['Name/Business Name'] ||
                                                 policy.insured?.['Primary Named Insured'] ||
                                                 policy.namedInsured?.name ||
                                                 policy.clientName;
@@ -21505,18 +21511,21 @@ async function generatePolicyRows() {
     console.log('🚨 GENERATEPOLICYROWS - Syncing with server first...');
 
     // ALWAYS sync with server first to get latest data
+    let freshServerPolicies = null;
     if (window.loadPoliciesFromServer) {
         try {
-            const serverPolicies = await window.loadPoliciesFromServer();
-            console.log(`🔄 Policy server sync: Retrieved ${serverPolicies ? serverPolicies.length : 0} policies from API`);
+            freshServerPolicies = await window.loadPoliciesFromServer();
+            console.log(`🔄 Policy server sync: Retrieved ${freshServerPolicies ? freshServerPolicies.length : 0} policies from API`);
         } catch (error) {
             console.error('⚠️ Policy server sync failed, proceeding with localStorage:', error);
         }
     }
 
-    // Now load from localStorage (which should now have fresh data)
-    let policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    console.log(`✅ Loaded ${policies.length} policies from localStorage (post-server-sync)`);
+    // Use server data directly if available (avoids stale localStorage cache), otherwise fall back to localStorage
+    let policies = (freshServerPolicies && freshServerPolicies.length > 0)
+        ? freshServerPolicies
+        : JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    console.log(`✅ Loaded ${policies.length} policies (source: ${freshServerPolicies ? 'server' : 'localStorage'})`);
 
     // Get current user and check if they are admin
     const sessionData = sessionStorage.getItem('vanguard_user');
@@ -21565,6 +21574,10 @@ async function generatePolicyRows() {
     
     // Generate rows for actual saved policies
     return policies.map(policy => {
+        // Normalize top-level fields using overview as fallback (server stores data in overview sub-object)
+        if (!policy.effectiveDate && policy.overview?.['Effective Date']) policy.effectiveDate = policy.overview['Effective Date'];
+        if (!policy.expirationDate && policy.overview?.['Expiration Date']) policy.expirationDate = policy.overview['Expiration Date'];
+
         // Ensure policy type is available - check multiple possible locations
         const policyType = policy.policyType || policy.type || (policy.overview && policy.overview['Policy Type'] ?
             policy.overview['Policy Type'].toLowerCase().replace(/\s+/g, '-') : 'unknown');
@@ -21602,7 +21615,11 @@ async function generatePolicyRows() {
         let clientName = 'N/A';
 
         // PRIORITY 1: Check Named Insured tab data first (most accurate)
-        if (policy.insured?.['Name/Business Name']) {
+        if (policy.insured?.['Business Name']) {
+            clientName = policy.insured['Business Name'];
+        } else if (policy.contact?.['Business Name']) {
+            clientName = policy.contact['Business Name'];
+        } else if (policy.insured?.['Name/Business Name']) {
             clientName = policy.insured['Name/Business Name'];
         } else if (policy.insured?.['Primary Named Insured']) {
             clientName = policy.insured['Primary Named Insured'];
@@ -21639,7 +21656,7 @@ async function generatePolicyRows() {
                 <td class="policy-number" style="padding-left: 20px;">${policy.policyNumber}</td>
                 <td><span class="policy-type-badge ${badgeClass}">${typeLabel}</span></td>
                 <td>${clientName}</td>
-                <td>${policy.carrier}</td>
+                <td>${policy.carrier && policy.carrier !== 'Unknown' ? policy.carrier : (policy.overview?.Carrier || policy.carrier || 'N/A')}</td>
                 <td>${formatDate(policy.effectiveDate)}</td>
                 <td>${formatDate(policy.expirationDate)}</td>
                 <td>${premium}/yr</td>

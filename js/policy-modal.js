@@ -797,7 +797,6 @@ function generateTabContent(tabId, policyType) {
                                     <option value="">Select Limit</option>
                                     <option value="0">No Coverage</option>
                                     <option value="1000">$1,000</option>
-                                    <option value="2000">$2,000</option>
                                     <option value="2500">$2,500</option>
                                     <option value="5000">$5,000</option>
                                     <option value="10000">$10,000</option>
@@ -1676,9 +1675,11 @@ async function savePolicy() {
         
         // Collect vehicle and trailer data
         policyData.vehicles = [];
-        
+
         // Collect vehicles
         const vehicleEntries = document.querySelectorAll('.vehicle-entry');
+        // If vehicles tab was never opened, the DOM has no entries — preserve existing data
+        const vehiclesTabRendered = !!document.getElementById('vehiclesList');
         vehicleEntries.forEach(entry => {
             const vehicle = {};
             const inputs = entry.querySelectorAll('input, select');
@@ -1711,12 +1712,12 @@ async function savePolicy() {
         trailerEntries.forEach(entry => {
             const trailer = {};
             const inputs = entry.querySelectorAll('input');
-            
+
             inputs.forEach(field => {
                 if (field.value) {
                     // Map placeholders to proper field names
                     let fieldName = field.placeholder || '';
-                    
+
                     if (fieldName.includes('Year')) fieldName = 'Year';
                     else if (fieldName.includes('Make')) fieldName = 'Make';
                     else if (fieldName.includes('Type')) fieldName = 'Trailer Type';
@@ -1724,17 +1725,23 @@ async function savePolicy() {
                     else if (fieldName.includes('Length')) fieldName = 'Length';
                     else if (fieldName.includes('Value')) fieldName = 'Value';
                     else if (fieldName.includes('Deductible')) fieldName = 'Deductible';
-                    
+
                     trailer[fieldName] = field.value;
                 }
             });
-            
+
             if (Object.keys(trailer).length > 0) {
                 trailer.Type = 'Trailer';
                 policyData.vehicles.push(trailer);
             }
         });
-        
+
+        // If the vehicles tab was never opened (no DOM entries), preserve existing vehicle/trailer data
+        if (!vehiclesTabRendered && policyData.vehicles.length === 0 && currentPolicyData.vehicles?.length > 0) {
+            policyData.vehicles = currentPolicyData.vehicles;
+            console.log('Vehicles tab not opened — preserving existing vehicles:', policyData.vehicles.length);
+        }
+
         // Collect drivers data
         policyData.drivers = [];
         const driverEntries = document.querySelectorAll('.driver-entry');
@@ -1750,7 +1757,13 @@ async function savePolicy() {
                 policyData.drivers.push(driver);
             }
         });
-        
+
+        // If drivers tab was never opened, preserve existing driver data
+        if (!document.getElementById('driversList') && policyData.drivers.length === 0 && currentPolicyData.drivers?.length > 0) {
+            policyData.drivers = currentPolicyData.drivers;
+            console.log('Drivers tab not opened — preserving existing drivers:', policyData.drivers.length);
+        }
+
         // Collect Additional Coverages checkboxes (they're in .checkbox-group, not .form-group)
         const additionalCoverageMap = {
             'coverage-hired': 'Hired Auto Physical Damage',
@@ -2274,6 +2287,13 @@ function populatePolicyForm(policyData) {
                     resolvedTabData[canonical] = resolvedTabData[alias];
                 }
             });
+
+            // Alias: if 'General Liability' (MTGL) is missing but 'General Liability BI' (GLCBI) exists,
+            // use the BI value to populate the coverage-general-aggregate dropdown
+            if (!resolvedTabData['General Liability'] && resolvedTabData['General Liability BI']) {
+                const glBiRaw = String(resolvedTabData['General Liability BI']).replace(/[$,\s]/g, '');
+                resolvedTabData['General Liability'] = glBiRaw;
+            }
         }
 
         // Populate regular input fields
