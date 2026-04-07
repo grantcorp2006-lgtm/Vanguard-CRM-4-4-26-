@@ -35685,6 +35685,10 @@ window.submitCRMCOIModal = async function() {
         // Set sender email
         formData.append('from', 'contact@vigagency.com');
 
+        // Pass agent so backend can pick the correct sender address
+        const policyAgent = currentPolicy?.agent || '';
+        formData.append('agent', policyAgent);
+
         // Set recipient emails (all emails from the array)
         formData.append('to', emails.join(', '));
 

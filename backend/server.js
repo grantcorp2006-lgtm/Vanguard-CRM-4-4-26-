@@ -5740,7 +5740,7 @@ app.post('/api/coi/send-request', (req, res, next) => {
     console.log('   Body fields:', Object.keys(req.body));
     console.log('   Files:', req.files ? req.files.length : 0);
 
-    const { from, to, subject, policyId } = req.body;
+    const { from, to, subject, policyId, agent } = req.body;
 
     // Fix email formatting - remove bare CR characters that cause SMTP errors
     const message = req.body.message ? req.body.message.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : '';
@@ -5784,14 +5784,22 @@ app.post('/api/coi/send-request', (req, res, next) => {
         // Use nodemailer to send email
         const nodemailer = require('nodemailer');
 
+        // Pick sender based on agent — Maureen's policies send from UIG
+        const isUIG = agent && agent.toLowerCase() === 'maureen';
+        const senderEmail = isUIG ? 'contact@uigagency.com' : 'contact@vigagency.com';
+        const senderName  = isUIG ? 'UIG Agency'            : 'VIG Agency';
+        const senderPass  = isUIG ? '@Jacob2007'            : (process.env.GODADDY_PASSWORD || '25nickc124!');
+
+        console.log(`📧 COI sender: ${senderEmail} (agent: ${agent || 'none'})`);
+
         // Create transporter using GoDaddy SMTP settings
         const transporter = nodemailer.createTransport({
             host: 'smtpout.secureserver.net',
             port: 465,
             secure: true,
             auth: {
-                user: 'contact@vigagency.com',
-                pass: process.env.GODADDY_PASSWORD || '25nickc124!'
+                user: senderEmail,
+                pass: senderPass
             }
         });
 
@@ -5889,15 +5897,17 @@ app.post('/api/coi/send-request', (req, res, next) => {
         }
 
         // Send email with attachments
+        const agencyDisplayName = isUIG ? 'United Insurance Group' : 'Vanguard Insurance Agency';
+
         const info = await transporter.sendMail({
-            from: '"VIG Agency" <contact@vigagency.com>',
+            from: `"${senderName}" <${senderEmail}>`,
             to: to,
             subject: subject,
             text: message,
             html: `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                     <div style="background: linear-gradient(135deg, #0066cc 0%, #004499 100%); color: white; padding: 20px; text-align: center;">
-                        <h1 style="margin: 0; font-size: 24px;">Vanguard Insurance Agency</h1>
+                        <h1 style="margin: 0; font-size: 24px;">${agencyDisplayName}</h1>
                         <p style="margin: 5px 0 0 0; opacity: 0.9;">Documentation Request</p>
                     </div>
 
@@ -5919,8 +5929,8 @@ app.post('/api/coi/send-request', (req, res, next) => {
                     </div>
 
                     <div style="background: #374151; color: white; padding: 20px; text-align: center; font-size: 14px;">
-                        <p style="margin: 0;">Best regards,<br><strong>Vanguard Insurance Agency</strong></p>
-                        <p style="margin: 10px 0 0 0; opacity: 0.8;">contact@vigagency.com</p>
+                        <p style="margin: 0;">Best regards,<br><strong>${agencyDisplayName}</strong></p>
+                        <p style="margin: 10px 0 0 0; opacity: 0.8;">${senderEmail}</p>
                     </div>
                 </div>
             `,
