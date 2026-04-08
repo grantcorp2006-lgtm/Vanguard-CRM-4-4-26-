@@ -21373,11 +21373,31 @@ function getPolicyTypeLabel(policyType) {
 }
 
 
-function editPolicy(policyId) {
-    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+async function editPolicy(policyId) {
     const idStr = String(policyId);
-    const policy = policies.find(p => String(p.id) === idStr || p.policyNumber === idStr);
-    
+
+    // Always fetch fresh data from server so IVANS-imported fields are present
+    let policy = null;
+    try {
+        const resp = await fetch(`/api/policies/${encodeURIComponent(idStr)}`);
+        if (resp.ok) {
+            const data = await resp.json();
+            // Server returns the policy object directly (not wrapped)
+            if (data && typeof data === 'object' && !Array.isArray(data) && (data.id || data.policyNumber)) {
+                policy = data;
+                console.log('✅ editPolicy: loaded from server, vehicles:', policy.vehicles?.length || 0, 'drivers:', policy.drivers?.length || 0);
+            }
+        }
+    } catch (e) {
+        console.warn('Server fetch failed, falling back to localStorage:', e);
+    }
+
+    // Fallback to localStorage if server fetch failed or returned invalid data
+    if (!policy || typeof policy !== 'object' || (!policy.id && !policy.policyNumber)) {
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        policy = policies.find(p => String(p.id) === idStr || p.policyNumber === idStr);
+    }
+
     if (policy) {
         // Open the policy modal in edit mode with the existing policy data
         if (typeof showPolicyModal === 'function') {

@@ -2201,7 +2201,14 @@ if (!document.getElementById('policy-modal-styles')) {
 // Function to populate form fields when editing
 function populatePolicyForm(policyData) {
     console.log('Populating form with policy data:', policyData);
-    
+
+    // Convert MM/DD/YYYY → YYYY-MM-DD for <input type="date">
+    function toISODate(str) {
+        if (!str) return '';
+        const m = String(str).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        return m ? `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}` : String(str);
+    }
+
     // Helper function to find field value from various possible keys
     function findFieldValue(data, possibleKeys) {
         for (const key of possibleKeys) {
@@ -2337,70 +2344,85 @@ function populatePolicyForm(policyData) {
     if (policyData.vehicles && Array.isArray(policyData.vehicles)) {
         const vehiclesList = document.getElementById('vehiclesList');
         const trailersList = document.getElementById('trailersList');
-        
-        // Separate vehicles and trailers
-        const vehicles = policyData.vehicles.filter(v => v.Type !== 'Trailer');
-        const trailers = policyData.vehicles.filter(v => v.Type === 'Trailer');
-        
+
+        // Separate vehicles and trailers — check both capitalized and lowercase type keys
+        const isTrailer = v => (v.Type === 'Trailer' || v.type === 'Trailer' || v.type === 'trailer');
+        const vehicles = policyData.vehicles.filter(v => !isTrailer(v));
+        const trailers = policyData.vehicles.filter(v => isTrailer(v));
+
         // Populate vehicles
         if (vehiclesList && vehicles.length > 0) {
             vehiclesList.innerHTML = ''; // Clear existing
-            vehicles.forEach((vehicle, index) => {
+            vehicles.forEach((vehicle) => {
                 addVehicle();
-                // Populate the newly added vehicle fields
                 const vehicleEntry = vehiclesList.lastElementChild;
-                const inputs = vehicleEntry.querySelectorAll('input, select');
-                
-                // Map fields based on their placeholder
-                inputs.forEach((input) => {
-                    const placeholder = input.placeholder || '';
-                    
-                    if (placeholder.includes('Year') && vehicle.Year) {
-                        input.value = vehicle.Year;
-                    } else if (placeholder.includes('Make') && vehicle.Make) {
-                        input.value = vehicle.Make;
-                    } else if (placeholder.includes('Model') && vehicle.Model) {
-                        input.value = vehicle.Model;
-                    } else if (placeholder.includes('VIN') && vehicle.VIN) {
-                        input.value = vehicle.VIN;
-                    } else if (placeholder.includes('Value') && vehicle.Value) {
-                        input.value = vehicle.Value;
-                    } else if (placeholder.includes('Deductible') && vehicle.Deductible) {
-                        input.value = vehicle.Deductible;
-                    } else if (input.tagName === 'SELECT' && vehicle.Coverage) {
-                        input.value = vehicle.Coverage;
-                    }
-                });
+
+                // Get values from both capitalized (manual) and lowercase (IVANS) keys
+                const vYear  = vehicle.Year  || vehicle.year  || vehicle.modelYear  || '';
+                const vMake  = vehicle.Make  || vehicle.make  || '';
+                const vModel = vehicle.Model || vehicle.model || '';
+                const vVIN   = vehicle.VIN   || vehicle.vin   || vehicle.Vin || '';
+                const vValue = vehicle.Value || vehicle.value || '';
+                const vRadius = vehicle.Radius || vehicle.radius || vehicle.MileRadius || '';
+
+                // Prefer CSS class selectors (reliable across both addPolicyVehicle versions)
+                const yearEl   = vehicleEntry.querySelector('.vehicle-year');
+                const makeEl   = vehicleEntry.querySelector('.vehicle-make');
+                const modelEl  = vehicleEntry.querySelector('.vehicle-model');
+                const vinEl    = vehicleEntry.querySelector('.vehicle-vin');
+                const valueEl  = vehicleEntry.querySelector('.vehicle-value');
+                const radiusEl = vehicleEntry.querySelector('.vehicle-radius');
+
+                if (yearEl   && vYear)   yearEl.value   = vYear;
+                if (makeEl   && vMake)   makeEl.value   = vMake;
+                if (modelEl  && vModel)  modelEl.value  = vModel;
+                if (vinEl    && vVIN)    vinEl.value    = vVIN;
+                if (valueEl  && vValue)  valueEl.value  = vValue;
+                if (radiusEl && vRadius) radiusEl.value = vRadius;
+
+                // Fallback: placeholder-based matching for any remaining inputs
+                if (!yearEl || !makeEl || !modelEl || !vinEl) {
+                    vehicleEntry.querySelectorAll('input, select').forEach(input => {
+                        const ph = input.placeholder || '';
+                        if (!yearEl   && ph.includes('Year'))  { if (vYear)   input.value = vYear; }
+                        if (!makeEl   && ph.includes('Make'))  { if (vMake)   input.value = vMake; }
+                        if (!modelEl  && ph.includes('Model')) { if (vModel)  input.value = vModel; }
+                        if (!vinEl    && ph.includes('VIN'))   { if (vVIN)    input.value = vVIN; }
+                        if (!valueEl  && ph.includes('Value')) { if (vValue)  input.value = vValue; }
+                    });
+                }
             });
         }
-        
+
         // Populate trailers
         if (trailersList && trailers.length > 0) {
             trailersList.innerHTML = ''; // Clear existing
-            trailers.forEach((trailer, index) => {
+            trailers.forEach((trailer) => {
                 addTrailer();
-                // Populate the newly added trailer fields
                 const trailerEntry = trailersList.lastElementChild;
-                const inputs = trailerEntry.querySelectorAll('input');
-                
-                // Map fields based on their placeholder
+                const inputs = trailerEntry.querySelectorAll('input, select');
+
+                const tYear  = trailer.Year  || trailer.year  || '';
+                const tMake  = trailer.Make  || trailer.make  || '';
+                const tType  = trailer['Trailer Type'] || trailer.trailerType || trailer.type || trailer.Type || '';
+                const tVIN   = trailer.VIN   || trailer.vin   || '';
+                const tLen   = trailer.Length || trailer.length || '';
+                const tVal   = trailer.Value  || trailer.value  || '';
+
                 inputs.forEach((input) => {
                     const placeholder = input.placeholder || '';
-                    
-                    if (placeholder.includes('Year') && trailer.Year) {
-                        input.value = trailer.Year;
-                    } else if (placeholder.includes('Make') && trailer.Make) {
-                        input.value = trailer.Make;
-                    } else if (placeholder.includes('Type') && trailer['Trailer Type']) {
-                        input.value = trailer['Trailer Type'];
-                    } else if (placeholder.includes('VIN') && trailer.VIN) {
-                        input.value = trailer.VIN;
-                    } else if (placeholder.includes('Length') && trailer.Length) {
-                        input.value = trailer.Length;
-                    } else if (placeholder.includes('Value') && trailer.Value) {
-                        input.value = trailer.Value;
-                    } else if (placeholder.includes('Deductible') && trailer.Deductible) {
-                        input.value = trailer.Deductible;
+                    if (placeholder.includes('Year')) {
+                        if (tYear) input.value = tYear;
+                    } else if (placeholder.includes('Make')) {
+                        if (tMake) input.value = tMake;
+                    } else if (input.classList.contains('trailer-type') && tType) {
+                        input.value = tType;
+                    } else if (placeholder.includes('VIN')) {
+                        if (tVIN) input.value = tVIN;
+                    } else if (placeholder.includes('Length')) {
+                        if (tLen) input.value = tLen;
+                    } else if (placeholder.includes('Value')) {
+                        if (tVal) input.value = tVal;
                     }
                 });
             });
@@ -2419,12 +2441,32 @@ function populatePolicyForm(policyData) {
                 const inputs = driverEntry.querySelectorAll('input, select');
                 
                 // Map driver data to fields
-                if (inputs[0]) inputs[0].value = driver.name || driver['Full Name'] || driver.fullName || '';
-                if (inputs[1]) inputs[1].value = driver.dob || driver['Date of Birth'] || driver.dateOfBirth || '';
-                if (inputs[2]) inputs[2].value = driver.license || driver['License Number'] || driver.licenseNumber || '';
-                if (inputs[3]) inputs[3].value = driver.type || driver.driverType || driver['Driver Type'] || '';
-                if (inputs[4]) inputs[4].value = driver.experience || driver.yearsExperience || driver['Years Experience'] || '';
-                if (inputs[5]) inputs[5].value = driver.violations || driver.movingViolations || '';
+                const driverName = driver.name || driver['Full Name'] || driver.fullName || '';
+                const driverDOB  = toISODate(driver.dob || driver['Date of Birth'] || driver.dateOfBirth || '');
+                const driverLic  = driver.license || driver['License Number'] || driver.licenseNumber || '';
+                const driverType = driver.type || driver.driverType || driver['Driver Type'] || '';
+                const driverExp  = driver.experience || driver.yearsExperience || driver['Years Experience'] || '';
+                const driverViol = driver.violations || driver.movingViolations || '';
+
+                // Use placeholder matching (works regardless of which addPolicyDriver version created the entry)
+                let nameSet = false, dobSet = false, licSet = false, typeSet = false;
+                inputs.forEach(input => {
+                    if (input.type === 'checkbox') return;
+                    const ph = (input.placeholder || '').toLowerCase();
+                    if (!nameSet && (ph.includes('full name') || ph.includes('name'))) {
+                        input.value = driverName; nameSet = true;
+                    } else if (!dobSet && (input.type === 'date' || ph.includes('birth') || ph.includes('dob'))) {
+                        input.value = driverDOB; dobSet = true;
+                    } else if (!licSet && ph.includes('license')) {
+                        input.value = driverLic; licSet = true;
+                    } else if (!typeSet && input.tagName === 'SELECT') {
+                        if (driverType) input.value = driverType; typeSet = true;
+                    } else if (ph.includes('experience') || ph.includes('years')) {
+                        input.value = driverExp;
+                    } else if (ph.includes('violation')) {
+                        input.value = driverViol;
+                    }
+                });
                 
                 // Handle CDL fields if present
                 const cdlCheckbox = driverEntry.querySelector('input[type="checkbox"][id*="cdl"]');
@@ -2513,8 +2555,18 @@ function populatePolicyForm(policyData) {
                          policyData.policyType ? policyData.policyType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
         document.getElementById('overview-policy-type').value = typeLabel;
     }
-    if (document.getElementById('overview-carrier')) {
-        document.getElementById('overview-carrier').value = policyData.carrier || '';
+    const carrierSelect = document.getElementById('overview-carrier');
+    if (carrierSelect) {
+        const carrierVal = policyData.carrier || '';
+        carrierSelect.value = carrierVal;
+        if (carrierVal && carrierSelect.value !== carrierVal) {
+            // Carrier not in dropdown — inject a new option so it can be selected
+            const opt = document.createElement('option');
+            opt.value = carrierVal;
+            opt.textContent = carrierVal;
+            carrierSelect.appendChild(opt);
+            carrierSelect.value = carrierVal;
+        }
     }
     if (document.getElementById('overview-status')) {
         const statusValue = policyData.policyStatus || policyData.status || 'Active';
@@ -2523,10 +2575,10 @@ function populatePolicyForm(policyData) {
         document.getElementById('overview-status').value = formattedStatus;
     }
     if (document.getElementById('overview-effective-date')) {
-        document.getElementById('overview-effective-date').value = policyData.effectiveDate || '';
+        document.getElementById('overview-effective-date').value = toISODate(policyData.effectiveDate || '');
     }
     if (document.getElementById('overview-expiration-date')) {
-        document.getElementById('overview-expiration-date').value = policyData.expirationDate || '';
+        document.getElementById('overview-expiration-date').value = toISODate(policyData.expirationDate || '');
     }
     if (document.getElementById('overview-premium')) {
         console.log('Setting premium field to:', policyData.premium);
@@ -2590,6 +2642,92 @@ function populatePolicyForm(policyData) {
     }
     
     console.log('Form population complete');
+
+    // Deferred re-apply: re-set overview fields 500ms later to handle any race conditions
+    // (e.g., other scripts that might clear fields after initial population)
+    const _pd = policyData;
+    setTimeout(() => {
+        const pnEl = document.getElementById('overview-policy-number');
+        if (pnEl && _pd.policyNumber) pnEl.value = _pd.policyNumber;
+
+        const carrierEl = document.getElementById('overview-carrier');
+        if (carrierEl && _pd.carrier) {
+            carrierEl.value = _pd.carrier;
+            if (carrierEl.value !== _pd.carrier) {
+                const opt = document.createElement('option');
+                opt.value = _pd.carrier; opt.textContent = _pd.carrier;
+                carrierEl.appendChild(opt);
+                carrierEl.value = _pd.carrier;
+            }
+        }
+
+        const statusEl = document.getElementById('overview-status');
+        if (statusEl && (_pd.policyStatus || _pd.status)) {
+            const sv = (_pd.policyStatus || _pd.status || '').replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase());
+            statusEl.value = sv;
+        }
+
+        const effEl = document.getElementById('overview-effective-date');
+        if (effEl && _pd.effectiveDate) effEl.value = toISODate(_pd.effectiveDate);
+
+        const expEl = document.getElementById('overview-expiration-date');
+        if (expEl && _pd.expirationDate) expEl.value = toISODate(_pd.expirationDate);
+
+        const premEl = document.getElementById('overview-premium');
+        if (premEl && (_pd.premium || _pd.monthlyPremium)) premEl.value = _pd.premium || _pd.monthlyPremium;
+
+        const dotEl = document.getElementById('overview-dot-number');
+        if (dotEl && (_pd.dotNumber || _pd['DOT Number'])) dotEl.value = _pd.dotNumber || _pd['DOT Number'];
+
+        const mcEl = document.getElementById('overview-mc-number');
+        if (mcEl && (_pd.mcNumber || _pd['MC Number'])) mcEl.value = _pd.mcNumber || _pd['MC Number'];
+
+        // Re-apply vehicle values using CSS class selectors
+        if (_pd.vehicles && Array.isArray(_pd.vehicles)) {
+            const vList = document.getElementById('vehiclesList');
+            if (vList) {
+                const entries = vList.querySelectorAll('.vehicle-entry');
+                const nonTrailers = _pd.vehicles.filter(v => !(v.Type === 'Trailer' || v.type === 'Trailer' || v.type === 'trailer'));
+                entries.forEach((entry, i) => {
+                    const v = nonTrailers[i];
+                    if (!v) return;
+                    const yr = v.Year || v.year || '';
+                    const mk = v.Make || v.make || '';
+                    const mo = v.Model || v.model || '';
+                    const vi = v.VIN || v.vin || '';
+                    const el = n => entry.querySelector(n);
+                    if (yr && el('.vehicle-year'))  el('.vehicle-year').value  = yr;
+                    if (mk && el('.vehicle-make'))  el('.vehicle-make').value  = mk;
+                    if (mo && el('.vehicle-model')) el('.vehicle-model').value = mo;
+                    if (vi && el('.vehicle-vin'))   el('.vehicle-vin').value   = vi;
+                });
+            }
+        }
+
+        // Re-apply driver values
+        if (_pd.drivers && Array.isArray(_pd.drivers)) {
+            const dList = document.getElementById('driversList');
+            if (dList) {
+                const entries = dList.querySelectorAll('.driver-entry');
+                entries.forEach((entry, i) => {
+                    const d = _pd.drivers[i];
+                    if (!d) return;
+                    const dn = d.name || d['Full Name'] || d.fullName || '';
+                    const dd = toISODate(d.dob || d['Date of Birth'] || d.dateOfBirth || '');
+                    const dl = d.license || d['License Number'] || d.licenseNumber || '';
+                    entry.querySelectorAll('input, select').forEach(input => {
+                        if (input.type === 'checkbox') return;
+                        const ph = (input.placeholder || '').toLowerCase();
+                        if (dn && (ph.includes('full name') || ph.includes('name'))) input.value = dn;
+                        else if (dd && (input.type === 'date' || ph.includes('birth'))) input.value = dd;
+                        else if (dl && ph.includes('license')) input.value = dl;
+                    });
+                });
+            }
+        }
+
+        console.log('✅ Deferred re-apply complete');
+    }, 500);
 }
 
 // Export policy-specific functions to global scope
