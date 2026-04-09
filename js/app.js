@@ -12393,167 +12393,104 @@ function renderTasksTab() {
 }
 
 function renderSubmissionsTab() {
-    // Get saved submissions from localStorage
-    const savedSubmissions = JSON.parse(localStorage.getItem('renewalSubmissions') || '[]');
-    
+    const currentPolicyId = getCurrentPolicyId();
+    const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const rawPolicy = allPolicies.find(p => p.id === currentPolicyId) || {};
+    const clientId = rawPolicy.clientId || rawPolicy._clientId || currentPolicyId;
+
+    // Load saved quote premiums for this policy
+    const savedQuotes = JSON.parse(localStorage.getItem(`renewalQuotes_${currentPolicyId}`) || '{}');
+    const progressivePremium = savedQuotes.progressive || '';
+    const geicoPremium = savedQuotes.geico || '';
+
     return `
-        <div class="submissions-tab">
-            <div id="submissionsList">
-                <div class="submissions-header">
-                    <h3>Quote Submissions</h3>
-                    <button class="btn-primary" onclick="showAddSubmissionForm()">
-                        <i class="fas fa-plus"></i> Add New Quote
+        <div class="submissions-tab" style="padding: 5px 0;">
+
+            <!-- Quote Submissions -->
+            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #e5e7eb;">
+                <h3 style="margin: 0 0 15px 0; color: #111827; font-size: 15px; font-weight: 600;">
+                    <i class="fas fa-file-alt" style="color: #0066cc; margin-right: 6px;"></i> Quote Submissions
+                </h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #e5e7eb;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <div style="width: 32px; height: 32px; background: #0066cc; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                <i class="fas fa-car" style="color: white; font-size: 13px;"></i>
+                            </div>
+                            <span style="font-weight: 600; color: #111827; font-size: 14px;">Progressive</span>
+                        </div>
+                        <label style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Annual Premium</label>
+                        <input type="text" id="quote-progressive-${currentPolicyId}"
+                               value="${progressivePremium}"
+                               placeholder="$0.00"
+                               style="width: 100%; margin-top: 5px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
+                               onblur="saveRenewalQuote('${currentPolicyId}', 'progressive', this.value)">
+                    </div>
+                    <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #e5e7eb;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <div style="width: 32px; height: 32px; background: #00a651; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                <i class="fas fa-shield-alt" style="color: white; font-size: 13px;"></i>
+                            </div>
+                            <span style="font-weight: 600; color: #111827; font-size: 14px;">GEICO</span>
+                        </div>
+                        <label style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Annual Premium</label>
+                        <input type="text" id="quote-geico-${currentPolicyId}"
+                               value="${geicoPremium}"
+                               placeholder="$0.00"
+                               style="width: 100%; margin-top: 5px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
+                               onblur="saveRenewalQuote('${currentPolicyId}', 'geico', this.value)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Application Submissions -->
+            <div style="background: #f0f9f0; padding: 20px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #d1fae5;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: #111827;">
+                        <i class="fas fa-file-signature" style="margin-right: 6px;"></i> Application Submissions
+                    </h3>
+                    <button style="background: #10b981; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px;"
+                            onclick="createQuoteApplicationForPolicy('${currentPolicyId}')">
+                        <i class="fas fa-file-alt"></i> Quote Application
                     </button>
                 </div>
-                
-                ${savedSubmissions.length > 0 ? `
-                    <div class="submissions-list">
-                        ${savedSubmissions.map((submission, index) => `
-                            <div class="submission-item">
-                                <div class="submission-info">
-                                    <h4>${submission.carrier} - ${submission.type}</h4>
-                                    <div class="submission-details-row">
-                                        <span><strong>Quote #:</strong> ${submission.quoteNumber}</span>
-                                        <span><strong>Premium:</strong> $${submission.premium}/yr</span>
-                                        <span><strong>Deductible:</strong> $${submission.deductible}</span>
-                                        <span><strong>Coverage:</strong> ${submission.coverage}</span>
-                                    </div>
-                                    <div class="submission-meta">
-                                        <span><i class="fas fa-calendar"></i> Submitted: ${new Date().toLocaleDateString()}</span>
-                                        <span class="quote-status received">Quote Received</span>
-                                    </div>
-                                </div>
-                                <div class="submission-actions">
-                                    <button class="btn-icon" title="View Quote"><i class="fas fa-eye"></i></button>
-                                    <button class="btn-icon" title="Download"><i class="fas fa-download"></i></button>
-                                    <button class="btn-icon" onclick="removeSubmission(${index})" title="Delete"><i class="fas fa-trash"></i></button>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                ` : `
-                    <div class="empty-submissions">
-                        <i class="fas fa-file-invoice" style="font-size: 48px; color: #ccc; margin-bottom: 15px;"></i>
-                        <p style="color: #666;">No quote submissions yet</p>
-                        <p style="color: #999; font-size: 14px;">Click "Add New Quote" to create your first submission</p>
-                    </div>
-                `}
-                
-                <div class="comparison-section">
-                    <h4>Quote Comparison</h4>
-                    ${savedSubmissions.length > 0 ? `
-                        <table class="comparison-table">
-                            <thead>
-                                <tr>
-                                    <th>Carrier</th>
-                                    <th>Policy Type</th>
-                                    <th>Premium</th>
-                                    <th>Deductible</th>
-                                    <th>Coverage</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${savedSubmissions.map((submission, index) => `
-                                    <tr>
-                                        <td><strong>${submission.carrier}</strong></td>
-                                        <td>${submission.type}</td>
-                                        <td class="premium-cell">$${submission.premium}</td>
-                                        <td>$${submission.deductible}</td>
-                                        <td>${submission.coverage}</td>
-                                        <td><button class="btn-small ${index === 0 ? 'btn-success' : ''}" onclick="selectQuote(${index})">Select</button></td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : `
-                        <p style="text-align: center; color: #666; padding: 20px;">Add multiple quotes to compare them side by side</p>
-                    `}
+                <div id="application-submissions-container-${clientId}" data-loading="false">
+                    <p style="color: #9ca3af; text-align: center; padding: 20px; margin: 0;">No applications submitted yet</p>
                 </div>
             </div>
-            
-            <div id="submissionForm" class="submission-form" style="display: none;">
-                <div class="form-card">
-                    <div class="form-header">
-                        <button class="back-btn" onclick="hideAddSubmissionForm()" title="Back to Submissions">
-                            <i class="fas fa-arrow-left"></i>
+
+            <!-- Loss Runs & Documentation -->
+            <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #fde68a;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: #111827;">
+                        <i class="fas fa-file-pdf" style="margin-right: 6px;"></i> Loss Runs and Other Documentation
+                    </h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="checkFilesAndOpenEmail('${clientId}')"
+                                style="background: #0066cc; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                            <i class="fas fa-envelope"></i> Email Documentation
                         </button>
-                        <h4>Add New Quote Submission</h4>
-                    </div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label>Insurance Company</label>
-                            <select class="form-control" id="submissionCarrier">
-                                <option value="">Select Carrier</option>
-                                <option value="Progressive">Progressive</option>
-                                <option value="State Farm">State Farm</option>
-                                <option value="Hartford">Hartford</option>
-                                <option value="Travelers">Travelers</option>
-                                <option value="Liberty Mutual">Liberty Mutual</option>
-                                <option value="Nationwide">Nationwide</option>
-                                <option value="Allstate">Allstate</option>
-                                <option value="GEICO">GEICO</option>
-                                <option value="Farmers">Farmers</option>
-                                <option value="USAA">USAA</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Policy Type</label>
-                            <select class="form-control" id="submissionType">
-                                <option value="">Select Type</option>
-                                <option value="Commercial Auto">Commercial Auto</option>
-                                <option value="General Liability">General Liability</option>
-                                <option value="Workers Comp">Workers Compensation</option>
-                                <option value="Property">Commercial Property</option>
-                                <option value="Umbrella">Commercial Umbrella</option>
-                                <option value="Professional">Professional Liability</option>
-                                <option value="Cyber">Cyber Liability</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Annual Premium <span style="color: red;">*</span></label>
-                            <input type="text" class="form-control" id="submissionPremium" placeholder="$0.00" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Deductible</label>
-                            <input type="text" class="form-control" id="submissionDeductible" placeholder="$0.00">
-                        </div>
-                        <div class="form-group">
-                            <label>Coverage Limit</label>
-                            <input type="text" class="form-control" id="submissionLimit" placeholder="e.g., $1M/$2M">
-                        </div>
-                        <div class="form-group">
-                            <label>Quote Number</label>
-                            <input type="text" class="form-control" id="submissionQuoteNum" placeholder="Quote #">
-                        </div>
-                    </div>
-                    
-                    <div class="upload-section">
-                        <label>Upload Quote Document</label>
-                        <div class="upload-area" onclick="document.getElementById('quoteFile').click()">
-                            <i class="fas fa-cloud-upload-alt"></i>
-                            <p>Click to upload or drag and drop</p>
-                            <span>PDF, DOC, DOCX (Max 10MB)</span>
-                            <input type="file" id="quoteFile" style="display: none;" accept=".pdf,.doc,.docx" onchange="handleQuoteUpload(this)">
-                        </div>
-                        <div id="uploadedFile" class="uploaded-file" style="display: none;">
-                            <i class="fas fa-file-pdf"></i>
-                            <span id="fileName"></span>
-                            <button onclick="removeUploadedFile()" class="remove-file">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="form-actions">
-                        <button class="btn-secondary" onclick="hideAddSubmissionForm()">Cancel</button>
-                        <button class="btn-primary" onclick="saveSubmission()">Save Quote</button>
+                        <button onclick="openLossRunsUpload('${clientId}')"
+                                style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                            <i class="fas fa-upload"></i> Upload Documentation
+                        </button>
                     </div>
                 </div>
+                <div id="loss-runs-container-${clientId}">
+                    <p style="color: #9ca3af; text-align: center; padding: 20px; margin: 0;">No loss runs uploaded yet</p>
+                </div>
             </div>
+
         </div>
     `;
 }
+
+window.saveRenewalQuote = function(policyId, carrier, value) {
+    const storageKey = `renewalQuotes_${policyId}`;
+    const quotes = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    quotes[carrier] = value;
+    localStorage.setItem(storageKey, JSON.stringify(quotes));
+};
 
 function switchRenewalView(view) {
     currentRenewalView = view;
