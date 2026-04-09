@@ -12220,6 +12220,8 @@ function showRenewalProfile(policyId) {
     // Show profile and adjust layout
     listContainer.style.width = '40%';
     renewalProfile.style.display = 'block';
+    const renewalStats = document.querySelector('.renewal-stats');
+    if (renewalStats) renewalStats.style.display = 'none';
     renewalProfile.innerHTML = `
         <div class="profile-header">
             <h2>Renewal Profile</h2>
@@ -12483,7 +12485,9 @@ function closeRenewalProfile() {
     if (renewalProfile) {
         renewalProfile.style.display = 'none';
         listContainer.style.width = '100%';
-        
+        const renewalStats = document.querySelector('.renewal-stats');
+        if (renewalStats) renewalStats.style.display = '';
+
         // Clear selection
         selectedRenewalPolicyId = null;
         document.querySelectorAll('.renewal-card.selected, .mini-policy.selected').forEach(card => {
