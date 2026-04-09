@@ -12228,49 +12228,8 @@ function showRenewalProfile(policyId) {
             </button>
         </div>
         
-        <div class="profile-layout">
-            <div class="policy-info-panel">
-                <h3>Policy Information</h3>
-                <div class="info-group">
-                    <label>Client:</label>
-                    <span>${policy.client}</span>
-                </div>
-                <div class="info-group">
-                    <label>Policy #:</label>
-                    <span>${policy.policyNumber}</span>
-                </div>
-                <div class="info-group">
-                    <label>Type:</label>
-                    <span>${policy.type}</span>
-                </div>
-                <div class="info-group">
-                    <label>Carrier:</label>
-                    <span>${policy.carrier}</span>
-                </div>
-                <div class="info-group">
-                    <label>Premium:</label>
-                    <span>$${policy.premium.toLocaleString()}/yr</span>
-                </div>
-                <div class="info-group">
-                    <label>Effective:</label>
-                    <span>${formatDate(policy.effectiveDate)}</span>
-                </div>
-                <div class="info-group">
-                    <label>Expiration:</label>
-                    <span>${formatDate(policy.expirationDate)}</span>
-                </div>
-                <div class="info-group">
-                    <label>Agent:</label>
-                    <span>${policy.agent}</span>
-                </div>
-                <div class="info-group">
-                    <label>Contact:</label>
-                    <span>${policy.phone}</span>
-                    <span>${policy.email}</span>
-                </div>
-            </div>
-            
-            <div class="profile-main-content">
+        <div class="profile-layout" style="display: block;">
+            <div class="profile-main-content" style="width: 100%;">
                 <div class="profile-tabs">
                     <button class="profile-tab active" onclick="switchProfileTab('tasks')">
                         <i class="fas fa-tasks"></i> Tasks
