@@ -19875,21 +19875,48 @@ function parseIvansFixed(content) {
             NOTRL: 'Non-Trucking Liability',
         };
         // MTC/MTRTK are handled separately below (split into Cargo Limit + Cargo Deductible)
-        const CVG_SKIP = new Set(['EFTD','POLFE','HODIS','MCAR','AQD','LFREE','PPLSD','MULTI','SNGL','FILFE']);
+        // ADDIN/AINxx are fee/add-on codes; CARGO is a duplicate of MTC/MTRTK split
+        const CVG_SKIP = new Set(['EFTD','POLFE','HODIS','MCAR','AQD','LFREE','PPLSD','MULTI','SNGL','FILFE','ADDIN','CARGO','WVSUB','ROAD']);
         for (const b of (by['5CVG'] || [])) {
             const code = b.substring(30, 35).trim();
-            if (CVG_SKIP.has(code)) continue;
+            if (CVG_SKIP.has(code) || /^AIN\d+$/.test(code)) continue;
             const body = b.substring(35);
             const limNums = (body.match(/0\d{9}/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x < 1000000000);
-            if (!limNums.length) continue;
-            // MTC / MTRTK: split into separate Cargo Limit and Cargo Deductible keys (matches form fields)
-            if (code === 'MTC' || code === 'MTRTK') {
-                if (!coverages['Cargo Limit'])      coverages['Cargo Limit']      = String(limNums[0]);
-                if (!coverages['Cargo Deductible'] && limNums[1]) coverages['Cargo Deductible'] = String(limNums[1]);
-                continue;
-            }
             const desc = CVG_LABELS[code] || code;
             if (!desc || coverages[desc]) continue;
+            // COMP/COLL deductibles are encoded as 8-digit zero-padded numbers (e.g. 00002500 = $2,500)
+            // not the 10-digit limit format — check these before the limNums guard
+            if (code === 'COMP' || code === 'COLL') {
+                const dedNums = (body.match(/(?<!\d)0\d{7}(?!\d)/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x < 100000000);
+                if (dedNums.length > 0) { coverages[desc] = String(dedNums[0]); continue; }
+            }
+            // MEDPM (Medical Payments): small values ($1k–$10k) stored as 8-digit like deductibles.
+            // The 10-digit regex picks up premiums instead of limits — use 8-digit and cap at 10000.
+            if (code === 'MEDPM') {
+                const medNums = (body.match(/(?<!\d)0\d{7}(?!\d)/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x <= 10000);
+                if (medNums.length > 0) { coverages[desc] = String(medNums[0]); continue; }
+                // fallback: take smallest 10-digit match that is a plausible medical payments limit
+                const medFallback = limNums.filter(n => n <= 10000);
+                if (medFallback.length > 0) { coverages[desc] = String(Math.min(...medFallback)); continue; }
+                continue; // skip if nothing reasonable found
+            }
+            if (!limNums.length) continue;
+            // MTC / MTRTK: split into Cargo Limit + Cargo Deductible
+            // Limit is 10-digit (e.g. 0001000000 = $100,000); deductible is 8-digit (e.g. 00001000 = $1,000)
+            if (code === 'MTC' || code === 'MTRTK') {
+                if (!coverages['Cargo Limit']) coverages['Cargo Limit'] = String(limNums[0]);
+                if (!coverages['Cargo Deductible']) {
+                    const dedNums8 = (body.match(/(?<!\d)0\d{7}(?!\d)/g) || []).map(x => parseInt(x)).filter(x => x > 0 && x < 100000000);
+                    if (dedNums8.length > 0) coverages['Cargo Deductible'] = String(dedNums8[0]);
+                }
+                continue;
+            }
+            // MTGL (General Liability): values must be >= $100,000 to be actual limits (not premiums)
+            if (code === 'MTGL') {
+                const glNums = limNums.filter(n => n >= 100000);
+                if (glNums.length > 0) coverages[desc] = glNums.length >= 2 ? `${glNums[0]}/${glNums[1]}` : String(glNums[0]);
+                continue;
+            }
             // Store plain numeric values (dropdown-compatible)
             coverages[desc] = limNums.length >= 2 ? `${limNums[0]}/${limNums[1]}` : String(limNums[0]);
         }
@@ -20739,7 +20766,7 @@ function showPolicyDetailsModal(policy) {
                 <!-- Tab Contents -->
                 <div class="tab-contents" style="padding: 35px; background: #ffffff; border: 2px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);">
                     ${tabs.map((tab, index) => `
-                        <div id="${tab.id}-view-content" class="tab-content ${index === 0 ? 'active' : ''}" style="padding: 15px;">
+                        <div id="${tab.id}-view-content" class="tab-content ${index === 0 ? 'active' : ''}" style="padding: 15px; display: ${index === 0 ? 'block' : 'none'};">
                             ${generateViewTabContent(tab.id, policy)}
                         </div>
                     `).join('')}
@@ -21159,11 +21186,35 @@ function generateViewTabContent(tabId, policy) {
             // Form-save entries have human-label keys (NOT in COVERAGE_DISPLAY_LABELS) and plain numeric values (e.g. "1000000").
             // IVANS entries have code keys (IN COVERAGE_DISPLAY_LABELS) and formatted display strings (e.g. "$1,000,000").
             // Always prefer form-save entries — they are what the edit form and COI generation rely on.
+            // Raw IVANS codes already normalized to human labels — hide them as raw keys
+            const CVG_DISPLAY_SKIP = new Set([
+                'ADDIN','CARGO','WVSUB','ROAD','MTC','MTRTK','MTGL','CSL','COMP','COLL','MEDPM',
+                'UNCSL','UMCSL','UMAUTO','UMBI','UMPD',
+                'GLCBI','GLCPD','PRDCO','PIADV','FIRDM','MDEXP','NOTRL',
+                ...Array.from({length: 15}, (_, i) => `AIN${String(i+1).padStart(2,'0')}`),
+                ...Array.from({length: 15}, (_, i) => `AIN${i+1}`),
+            ]);
+            // Canonical display order for coverage fields
+            const CVG_ORDER = ['Liability Limits','Uninsured/Underinsured Motorist','Medical Payments',
+                'Comprehensive Deductible','Collision Deductible','General Liability',
+                'Cargo Limit','Cargo Deductible','Trailer Interchange','Non-Trucking Liability',
+                'Reefer Breakdown','General Liability BI','General Liability PD',
+                'Products/Completed Ops','Personal Injury/Advertising','Fire Damage Liability',
+                'Medical Expense','UM Property Damage'];
             const _deduped = new Map();
             Object.entries(coverageData).forEach(([key, value]) => {
                 if (key === 'additionalCoverages') return;
+                // Skip raw IVANS codes that are already normalized, and fee/add-on codes
+                if (CVG_DISPLAY_SKIP.has(key) || /^AIN\d+$/.test(key)) return;
+                // Skip old-format IVANS strings that embed premium info (e.g. "$1,000 ($100/yr)")
+                if (typeof value === 'string' && value.includes('($')) return;
                 const displayLabel = COVERAGE_DISPLAY_LABELS[key] || key;
                 const isFormSave = !COVERAGE_DISPLAY_LABELS[key]; // key not in map = saved by form with human label
+                // For General Liability, skip if all parsed values are < $100,000 (those are premiums, not limits)
+                if (displayLabel === 'General Liability') {
+                    const glParts = String(value).replace(/[$,]/g,'').split('/');
+                    if (glParts.every(p => !isNaN(parseFloat(p)) && parseFloat(p) < 100000)) return;
+                }
                 const existing = _deduped.get(displayLabel);
                 if (!existing) {
                     _deduped.set(displayLabel, { value, isFormSave });
@@ -21176,18 +21227,33 @@ function generateViewTabContent(tabId, policy) {
                 }
             });
             // Format a plain numeric value for display (e.g. "1000000" → "$1,000,000")
-            const _fmtCovVal = (val) => {
+            // For deductible labels with slash-format (stated_value/deductible), show only the deductible part
+            const _fmtCovVal = (val, label) => {
                 if (!val) return val;
                 const s = String(val).trim();
-                if (s.includes('$') || s.includes('/') && s.includes('$')) return s;
+                if (label && label.toLowerCase().includes('deductible') && s.includes('/') && !s.includes('$')) {
+                    const parts = s.split('/');
+                    if (parts.every(p => /^\d+(\.\d+)?$/.test(p.trim()))) {
+                        return '$' + parseFloat(parts[parts.length - 1].trim()).toLocaleString();
+                    }
+                }
+                if (s.includes('$') || (s.includes('/') && s.includes('$'))) return s;
                 const parts = s.split('/');
                 if (parts.every(p => /^\d+(\.\d+)?$/.test(p.trim()))) {
                     return parts.map(p => '$' + parseFloat(p.trim()).toLocaleString()).join('/');
                 }
                 return s;
             };
-            // Filter out entries with no real value
-            const coverageEntries = [..._deduped.entries()].filter(([, entry]) => entry.value && String(entry.value).trim() !== '' && String(entry.value).trim().toLowerCase() !== 'n/a');
+            // Filter out entries with no real value, then sort by canonical order
+            const coverageEntries = [..._deduped.entries()]
+                .filter(([, entry]) => entry.value && String(entry.value).trim() !== '' && String(entry.value).trim().toLowerCase() !== 'n/a')
+                .sort(([a], [b]) => {
+                    const ai = CVG_ORDER.indexOf(a), bi = CVG_ORDER.indexOf(b);
+                    if (ai === -1 && bi === -1) return a.localeCompare(b);
+                    if (ai === -1) return 1;
+                    if (bi === -1) return -1;
+                    return ai - bi;
+                });
             return `
                 <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
                     <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Coverage Details</h3>
@@ -21195,7 +21261,7 @@ function generateViewTabContent(tabId, policy) {
                         ${coverageEntries.map(([label, entry]) => `
                             <div class="view-item">
                                 <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${label}</label>
-                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${entry.isFormSave ? _fmtCovVal(entry.value) : entry.value}</p>
+                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${entry.isFormSave ? _fmtCovVal(entry.value, label) : entry.value}</p>
                             </div>
                         `).join('')}
                         ${coverageEntries.length === 0 ? '<p style="color: #6b7280;">No coverage information available</p>' : ''}
@@ -35380,8 +35446,10 @@ window.addCRMCOIEmailRecipientWithOptions = function() {
 
     // Add agent email if checkbox is checked
     if (addAgentCheck.checked) {
-        // Try to get agent email from policy or use default
-        const agentEmail = currentPolicy.agentEmail || 'hunter@vigagency.com'; // Default agent email
+        // Try to get agent email from policy, then fall back to name→email map
+        const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen@vigagency.com', carson: 'Carson@vigagency.com' };
+        const _agentKey = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
+        const agentEmail = currentPolicy.agentEmail || _agentEmailMap[_agentKey] || '';
 
         addCRMCOIEmailRecipient();
         const newRows = document.querySelectorAll('.crm-coi-email-recipient-row');
@@ -35432,7 +35500,9 @@ window.handleCheckboxChange = function(type) {
                 alert('No email address found in Contact Information for this policy.');
             }
         } else if (type === 'agent') {
-            const agentEmail = currentPolicy.agentEmail || 'hunter@vigagency.com';
+            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen@vigagency.com', carson: 'Carson@vigagency.com' };
+            const _agentKey = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
+            const agentEmail = currentPolicy.agentEmail || _agentEmailMap[_agentKey] || '';
 
             addCRMCOIEmailRecipient();
             const newRows = document.querySelectorAll('.crm-coi-email-recipient-row');

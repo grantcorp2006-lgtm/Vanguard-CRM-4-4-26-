@@ -278,7 +278,15 @@ function showTabbedPolicyForm(isEditing = false) {
             }
             if (document.getElementById('overview-carrier')) {
                 console.log('Setting carrier to:', policyData.carrier);
-                document.getElementById('overview-carrier').value = policyData.carrier || '';
+                const _cs = document.getElementById('overview-carrier');
+                const _cv = policyData.carrier || '';
+                _cs.value = _cv;
+                if (_cv && _cs.value !== _cv) {
+                    // Case-insensitive match against existing options
+                    const _lc = _cv.toLowerCase();
+                    const _m = Array.from(_cs.options).find(o => o.value.toLowerCase() === _lc || o.text.toLowerCase() === _lc);
+                    if (_m) { _cs.value = _m.value; }
+                }
             }
             if (document.getElementById('overview-status')) {
                 // Handle case-insensitive status matching
@@ -2560,12 +2568,19 @@ function populatePolicyForm(policyData) {
         const carrierVal = policyData.carrier || '';
         carrierSelect.value = carrierVal;
         if (carrierVal && carrierSelect.value !== carrierVal) {
-            // Carrier not in dropdown — inject a new option so it can be selected
-            const opt = document.createElement('option');
-            opt.value = carrierVal;
-            opt.textContent = carrierVal;
-            carrierSelect.appendChild(opt);
-            carrierSelect.value = carrierVal;
+            // Try case-insensitive match against existing options first
+            const lc = carrierVal.toLowerCase();
+            const match = Array.from(carrierSelect.options).find(o => o.value.toLowerCase() === lc || o.text.toLowerCase() === lc);
+            if (match) {
+                carrierSelect.value = match.value;
+            } else {
+                // Carrier not in dropdown — inject a new option so it can be selected
+                const opt = document.createElement('option');
+                opt.value = carrierVal;
+                opt.textContent = carrierVal;
+                carrierSelect.appendChild(opt);
+                carrierSelect.value = carrierVal;
+            }
         }
     }
     if (document.getElementById('overview-status')) {

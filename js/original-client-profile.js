@@ -97,6 +97,16 @@ window.viewClientOriginal = async function(id) {
         totalPremium += numericPremium;
     });
 
+    // Resolve full name: prefer stored fields, then fall back to linked policy contact/driver data
+    const resolvedFullName = client.fullName || client.contactName || (() => {
+        for (const p of clientPolicies) {
+            const n = (p.contact && p.contact['Owner Name']) || p.clientName || p.insuredName ||
+                      (Array.isArray(p.drivers) && p.drivers[0] && p.drivers[0].name) || '';
+            if (n) return n;
+        }
+        return '';
+    })();
+
     const dashboardContent = document.querySelector('.dashboard-content');
     if (!dashboardContent) return;
 
@@ -199,7 +209,7 @@ window.viewClientOriginal = async function(id) {
                     <div style="display: grid; gap: 24px;">
                         <div style="padding: 16px; background: #f9fafb; border-radius: 8px; border-left: 4px solid #667eea;">
                             <label style="display: block; font-size: 11px; color: #6b7280; margin-bottom: 6px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Full Name</label>
-                            <p style="margin: 0; font-size: 16px; color: #1f2937; font-weight: 500;">${client.fullName || client.contactName || 'N/A'}</p>
+                            <p style="margin: 0; font-size: 16px; color: #1f2937; font-weight: 500;">${resolvedFullName || 'N/A'}</p>
                         </div>
 
                         <div style="padding: 16px; background: #f9fafb; border-radius: 8px; border-left: 4px solid #667eea;">
