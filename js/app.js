@@ -12274,9 +12274,11 @@ function renderTasksTab() {
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-        { id: 8, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-        { id: 9, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-        { id: 10, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
+        { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+        { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
+        { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
+        { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
     ];
     
     let tasks = savedTasks || defaultTasks;
@@ -12526,9 +12528,11 @@ function toggleTask(taskId, policyId) {
             { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
             { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
             { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-            { id: 8, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-            { id: 9, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-            { id: 10, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
+            { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+        { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
+        { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
+            { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
         ];
 
         const task = defaultTasks.find(t => t.id === taskId);
@@ -12800,9 +12804,11 @@ function saveTaskNote(taskId, note, policyId) {
             { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
             { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
             { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-            { id: 8, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-            { id: 9, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-            { id: 10, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
+            { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+        { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
+        { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
+            { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
         ];
     }
     
@@ -12840,9 +12846,11 @@ function addRenewalTask() {
                 { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
                 { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
                 { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-                { id: 8, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-                { id: 9, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-                { id: 10, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
+                { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+        { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
+        { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
+                { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+                { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
             ];
         }
         

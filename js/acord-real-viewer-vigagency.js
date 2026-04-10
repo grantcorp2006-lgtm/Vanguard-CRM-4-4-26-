@@ -694,6 +694,7 @@ function createRealFormFields(policyId, policyData) {
             const lc = raw.toLowerCase().replace(/\s+/g, '');
             if (lc.startsWith('geico')) return 'GEICO';
             if (lc.startsWith('progressive')) return 'Progressive';
+            if (lc.startsWith('northland')) return 'NORTHLAND INSURANCE COMPANY';
             return raw;
           })() },
         { id: 'insurerANaic', x: 707, y: 218, width: 60, height: 16,
@@ -701,6 +702,7 @@ function createRealFormFields(policyId, policyData) {
             const c = (policyData?.carrier || policyData?.overview?.['Carrier'] || '').toLowerCase().replace(/\s+/g, '');
             if (c.startsWith('progressive')) return '24260';
             if (c.startsWith('geico')) return '37923';
+            if (c.startsWith('northland')) return '524126';
             return '';
           })() },
 
