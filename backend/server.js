@@ -287,6 +287,13 @@ function initializeDatabase() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Renewal tasks table (tasks stored by policy ID)
+    db.run(`CREATE TABLE IF NOT EXISTS renewal_tasks (
+        policy_id TEXT PRIMARY KEY,
+        tasks TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     // COI Email tables
     db.run(`CREATE TABLE IF NOT EXISTS coi_emails (
         id TEXT PRIMARY KEY,
@@ -649,6 +656,58 @@ app.post('/api/clients', (req, res) => {
     );
 });
 
+// Get recently added clients (last 7 days) — MUST be before /api/clients/:id to avoid route shadowing
+app.get('/api/clients/recent', (req, res) => {
+    const daysBack = req.query.days || 7;
+    console.log(`📅 Fetching clients added in the last ${daysBack} days`);
+
+    const query = `
+        SELECT id, data, created_at, updated_at
+        FROM clients
+        WHERE date(created_at) >= date('now', '-${parseInt(daysBack)} days')
+        ORDER BY created_at DESC
+    `;
+
+    db.all(query, [], (err, rows) => {
+        if (err) {
+            console.error('❌ Error fetching recent clients:', err);
+            res.status(500).json({ error: err.message });
+            return;
+        }
+
+        console.log(`✅ Found ${rows.length} clients added in the last ${daysBack} days`);
+
+        const recentClients = rows.map(row => {
+            let clientData = {};
+            try {
+                clientData = JSON.parse(row.data);
+            } catch (e) {
+                console.warn('Error parsing client data for ID:', row.id);
+                clientData = { name: 'Unknown Client' };
+            }
+
+            const createdDate = new Date(row.created_at);
+            const now = new Date();
+            const diffTime = Math.abs(now - createdDate);
+            const daysAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+            return {
+                id: row.id,
+                clientName: clientData.businessName || clientData.name || clientData.fullName || 'Unknown Client',
+                clientType: clientData.businessType || 'Business',
+                createdAt: row.created_at,
+                daysAgo: daysAgo,
+                phone: clientData.phone || null,
+                email: clientData.email || null,
+                state: clientData.state || null,
+                giftSent: false
+            };
+        });
+
+        res.json(recentClients);
+    });
+});
+
 // Get single client by ID
 app.get('/api/clients/:id', (req, res) => {
     const id = req.params.id;
@@ -688,60 +747,6 @@ app.delete('/api/clients/:id', (req, res) => {
     });
 });
 
-// Get recently added clients (last 7 days) for new client gifts
-app.get('/api/clients/recent', (req, res) => {
-    const daysBack = req.query.days || 7;
-    console.log(`📅 Fetching clients added in the last ${daysBack} days`);
-
-    // Query for clients created in the last N days
-    const query = `
-        SELECT id, data, created_at, updated_at
-        FROM clients
-        WHERE date(created_at) >= date('now', '-${parseInt(daysBack)} days')
-        ORDER BY created_at DESC
-    `;
-
-    db.all(query, [], (err, rows) => {
-        if (err) {
-            console.error('❌ Error fetching recent clients:', err);
-            res.status(500).json({ error: err.message });
-            return;
-        }
-
-        console.log(`✅ Found ${rows.length} clients added in the last ${daysBack} days`);
-
-        // Transform the data for frontend
-        const recentClients = rows.map(row => {
-            let clientData = {};
-            try {
-                clientData = JSON.parse(row.data);
-            } catch (e) {
-                console.warn('Error parsing client data for ID:', row.id);
-                clientData = { name: 'Unknown Client' };
-            }
-
-            // Calculate days ago
-            const createdDate = new Date(row.created_at);
-            const now = new Date();
-            const diffTime = Math.abs(now - createdDate);
-            const daysAgo = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-            return {
-                id: row.id,
-                clientName: clientData.businessName || clientData.name || clientData.fullName || 'Unknown Client',
-                clientType: clientData.businessType || 'Business',
-                createdAt: row.created_at,
-                daysAgo: daysAgo,
-                phone: clientData.phone || null,
-                email: clientData.email || null,
-                state: clientData.state || null,
-                giftSent: false // Default - could be tracked in a separate table later
-            };
-        });
-
-        res.json(recentClients);
-    });
-});
 
 // Get agent/producer statistics based on actual client data
 app.get('/api/agents/stats', (req, res) => {
@@ -987,8 +992,8 @@ app.get('/api/policies/:id', (req, res) => {
                     policies = [data];
                 }
 
-                // Find matching policy
-                const policy = policies.find(p => p.id === policyId);
+                // Find matching policy by id or policyNumber
+                const policy = policies.find(p => p.id === policyId || p.policyNumber === policyId || String(p.id) === String(policyId));
                 if (policy) {
                     console.log(`✅ Found policy by ID: ${policyId} - ${policy.insured_name || policy.clientName}`);
                     res.json(policy);
@@ -5788,11 +5793,11 @@ app.post('/api/coi/send-request', (req, res, next) => {
         const isUIG = agent && agent.toLowerCase() === 'maureen';
         const senderEmail = isUIG ? 'contact@uigagency.com' : 'contact@vigagency.com';
         const senderName  = isUIG ? 'UIG Agency'            : 'VIG Agency';
-        const senderPass  = isUIG ? '@Jacob2007'            : (process.env.GODADDY_PASSWORD || '25nickc124!');
+        const senderPass  = isUIG ? '@Jacob2007'             : (process.env.GODADDY_PASSWORD || '25nickc124!');
 
         console.log(`📧 COI sender: ${senderEmail} (agent: ${agent || 'none'})`);
 
-        // Create transporter using GoDaddy SMTP settings
+        // Create transporter — both UIG and VIG use GoDaddy SMTP (secureserver.net)
         const transporter = nodemailer.createTransport({
             host: 'smtpout.secureserver.net',
             port: 465,
@@ -6281,6 +6286,27 @@ app.delete('/api/renewal-completions/:policyKey', (req, res) => {
         }
         res.json({ success: true, deleted: this.changes });
     });
+});
+
+// Renewal tasks endpoints (tasks stored by policy ID)
+app.get('/api/renewal-tasks/:policyId', (req, res) => {
+    db.get('SELECT tasks FROM renewal_tasks WHERE policy_id = ?', [req.params.policyId], (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ tasks: row ? JSON.parse(row.tasks) : null });
+    });
+});
+
+app.post('/api/renewal-tasks/:policyId', (req, res) => {
+    const { tasks } = req.body;
+    if (!tasks) return res.status(400).json({ error: 'tasks required' });
+    db.run(
+        `INSERT OR REPLACE INTO renewal_tasks (policy_id, tasks, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+        [req.params.policyId, JSON.stringify(tasks)],
+        (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
+        }
+    );
 });
 
 // Serve uploaded files
@@ -9987,6 +10013,130 @@ app.delete('/api/calendar-events/:id', (req, res) => {
     });
 
     stmt.finalize();
+});
+
+// ===== iCAL FEED FOR TITAN EMAIL CALENDAR SYNC =====
+// Subscribe via Titan Email → Add External Calendar → paste this URL:
+//   https://162-220-14-239.nip.io/api/calendar/feed.ics
+// Optional: filter by user with ?userId=Carson or ?userId=all (default: all)
+
+app.get('/api/calendar/feed.ics', (req, res) => {
+    const userId = req.query.userId || null; // null = all users
+
+    const escape = (s) => (s || '').replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+
+    const toIcsDate = (dateStr, timeStr) => {
+        // Returns YYYYMMDDTHHMMSS or YYYYMMDD
+        if (!dateStr) return null;
+        const d = dateStr.replace(/-/g, '');
+        if (timeStr) {
+            const t = timeStr.replace(/:/g, '').substring(0, 4) + '00';
+            return `${d}T${t}`;
+        }
+        return d;
+    };
+
+    const toIcsDateFromISO = (iso) => {
+        if (!iso) return null;
+        const dt = new Date(iso);
+        if (isNaN(dt)) return null;
+        const pad = n => String(n).padStart(2, '0');
+        return `${dt.getUTCFullYear()}${pad(dt.getUTCMonth()+1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}00Z`;
+    };
+
+    const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+    const calEvents = new Promise((resolve, reject) => {
+        const q = userId
+            ? 'SELECT * FROM calendar_events WHERE created_by = ? ORDER BY date ASC'
+            : 'SELECT * FROM calendar_events ORDER BY date ASC';
+        const params = userId ? [userId] : [];
+        db.all(q, params, (err, rows) => err ? reject(err) : resolve(rows || []));
+    });
+
+    const callbacks = new Promise((resolve, reject) => {
+        db.all('SELECT * FROM scheduled_callbacks WHERE completed = 0 ORDER BY date_time ASC', [], (err, rows) => err ? reject(err) : resolve(rows || []));
+    });
+
+    const todos = new Promise((resolve, reject) => {
+        const q = userId
+            ? 'SELECT * FROM tracked_todos WHERE completed = 0 AND user_id = ? ORDER BY target_date ASC'
+            : 'SELECT * FROM tracked_todos WHERE completed = 0 ORDER BY target_date ASC';
+        const params = userId ? [userId] : [];
+        db.all(q, params, (err, rows) => err ? reject(err) : resolve(rows || []));
+    });
+
+    Promise.all([calEvents, callbacks, todos]).then(([events, cbs, tdos]) => {
+        const lines = [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//Vanguard CRM//EN',
+            'CALSCALE:GREGORIAN',
+            'METHOD:PUBLISH',
+            'X-WR-CALNAME:Vanguard CRM',
+            'X-WR-TIMEZONE:America/New_York',
+        ];
+
+        // Calendar Events
+        events.forEach(ev => {
+            const dtStart = toIcsDate(ev.date, ev.time);
+            if (!dtStart) return;
+            const dtEnd = toIcsDate(ev.date, ev.time); // same time; all-day if no time
+            const isAllDay = !ev.time;
+            lines.push('BEGIN:VEVENT');
+            lines.push(`UID:crm-event-${ev.id}@vanguard`);
+            lines.push(`DTSTAMP:${now}`);
+            lines.push(isAllDay ? `DTSTART;VALUE=DATE:${dtStart}` : `DTSTART:${dtStart}`);
+            lines.push(isAllDay ? `DTEND;VALUE=DATE:${dtEnd}` : `DTEND:${dtEnd}`);
+            lines.push(`SUMMARY:${escape(ev.title)}`);
+            if (ev.description) lines.push(`DESCRIPTION:${escape(ev.description)}`);
+            lines.push(`CATEGORIES:CRM Event`);
+            lines.push(`CREATED:${toIcsDateFromISO(ev.created_at) || now}`);
+            lines.push('END:VEVENT');
+        });
+
+        // Scheduled Callbacks
+        cbs.forEach(cb => {
+            const dtStart = toIcsDateFromISO(cb.date_time);
+            if (!dtStart) return;
+            lines.push('BEGIN:VEVENT');
+            lines.push(`UID:crm-callback-${cb.id}@vanguard`);
+            lines.push(`DTSTAMP:${now}`);
+            lines.push(`DTSTART:${dtStart}`);
+            lines.push(`DTEND:${dtStart}`);
+            lines.push(`SUMMARY:📞 Callback${cb.notes ? ': ' + escape(cb.notes).substring(0, 60) : ''}`);
+            if (cb.notes) lines.push(`DESCRIPTION:${escape(cb.notes)}`);
+            lines.push(`CATEGORIES:Callback`);
+            lines.push('END:VEVENT');
+        });
+
+        // Tracked Todos with target dates
+        tdos.forEach(td => {
+            const dtStart = toIcsDateFromISO(td.target_date) || toIcsDate(td.target_date, null);
+            if (!dtStart) return;
+            const isAllDay = !dtStart.includes('T');
+            lines.push('BEGIN:VEVENT');
+            lines.push(`UID:crm-todo-${td.id}@vanguard`);
+            lines.push(`DTSTAMP:${now}`);
+            lines.push(isAllDay ? `DTSTART;VALUE=DATE:${dtStart}` : `DTSTART:${dtStart}`);
+            lines.push(isAllDay ? `DTEND;VALUE=DATE:${dtStart}` : `DTEND:${dtStart}`);
+            lines.push(`SUMMARY:✅ ${escape(td.text)}`);
+            lines.push(`CATEGORIES:Task`);
+            lines.push('END:VEVENT');
+        });
+
+        lines.push('END:VCALENDAR');
+
+        const icsBody = lines.join('\r\n') + '\r\n';
+        res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="vanguard-crm.ics"');
+        res.setHeader('Cache-Control', 'no-cache, no-store');
+        res.send(icsBody);
+        console.log(`📅 iCal feed served: ${events.length} events, ${cbs.length} callbacks, ${tdos.length} todos`);
+    }).catch(err => {
+        console.error('iCal feed error:', err);
+        res.status(500).json({ error: err.message });
+    });
 });
 
 // ===== TODO SYNC ENDPOINTS FOR NOTIFICATIONS =====

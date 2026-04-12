@@ -323,8 +323,38 @@ async function loadClientsFromServer(limit = 500) {
             const serverClientIds = new Set(serverClients.map(c => String(c.id)));
             const localOnlyClients = existingLocalClients.filter(c => c.id && !serverClientIds.has(String(c.id)));
             const mergedClients = [...serverClients, ...localOnlyClients];
-            localStorage.setItem('insurance_clients', JSON.stringify(mergedClients));
-            console.log(`💾 Stored ${mergedClients.length} clients in localStorage (${localOnlyClients.length} local-only preserved)`);
+
+            // === Suppress business-name-only duplicate records ===
+            // E.g. "CHRIS STEVENS TRUCKING LLC" is suppressed because person client
+            // "Christopher Stevens" already has businessName = "Chris Stevens Trucking LLC".
+            const _BIZ_RE   = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|ltd|limited|lp|l\.p|trucking|transport|transportation|logistics|hauling|construction|farms|enterprises|services|solutions|towing)\b/i;
+            const _isBizOnly = (c) => _BIZ_RE.test(c.name || '');
+            const _nb        = (s) => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+            const _np        = (ph) => (ph || '').replace(/\D/g, '');
+
+            const _pBizKeys = new Set();
+            const _pPhones  = new Set();
+            mergedClients.forEach(c => {
+                if (_isBizOnly(c)) return;
+                if (c.businessName) _pBizKeys.add(_nb(c.businessName));
+                const ph = _np(c.phone);
+                if (ph.length >= 10) _pPhones.add(ph);
+            });
+            const _toSuppress = new Set();
+            mergedClients.forEach(c => {
+                if (!_isBizOnly(c)) return;
+                const bk = _nb(c.name);
+                const ph = _np(c.phone);
+                if ((bk && _pBizKeys.has(bk)) || (ph.length >= 10 && _pPhones.has(ph))) {
+                    _toSuppress.add(String(c.id));
+                }
+            });
+            const dedupedClients = _toSuppress.size > 0
+                ? mergedClients.filter(c => !_toSuppress.has(String(c.id)))
+                : mergedClients;
+
+            localStorage.setItem('insurance_clients', JSON.stringify(dedupedClients));
+            console.log(`💾 Stored ${dedupedClients.length} clients in localStorage (${mergedClients.length - dedupedClients.length} biz-name dupes suppressed, ${localOnlyClients.length} local-only preserved)`);
 
             // Store pagination info for later use
             if (data.total) {
@@ -602,38 +632,25 @@ document.addEventListener('DOMContentLoaded', function() {
         startChatNotificationWatcher();
     }, 2000);
 
-    // Load dashboard immediately if on dashboard
-    if (!window.location.hash || window.location.hash === '' || window.location.hash === '#dashboard') {
-        console.log('Loading dashboard on page load');
-        loadContent('#dashboard');
+    const _initialHash = window.location.hash || '#dashboard';
+
+    // If not on dashboard, blank out the pre-rendered HTML immediately so
+    // the static dashboard stats don't flash before the real view loads.
+    if (_initialHash !== '#dashboard') {
+        const _dc = document.querySelector('.dashboard-content');
+        if (_dc) _dc.innerHTML = '';
     }
-    
-    // BASIC APPROACH - Let browser handle hash changes naturally without any click handlers
-    
-    // Handle initial hash
-    if (window.location.hash) {
-        console.log('Initial hash:', window.location.hash);
-        setTimeout(() => {
-            loadContent(window.location.hash);
-            updateActiveMenuItem(window.location.hash);
-        }, 100);
-    } else {
-        // Load dashboard by default - using loadFullDashboard through loadContent
-        setTimeout(() => {
-            loadContent('#dashboard');
-            updateActiveMenuItem('#dashboard');
-        }, 100);
-    }
+
+    // Load the correct view immediately — no delay needed
+    loadContent(_initialHash);
+    updateActiveMenuItem(_initialHash);
 });
 
-// Ensure To-Do box is added when page is fully loaded
+// Dashboard data refresh once all resources are loaded (images, etc.)
 window.addEventListener('load', function() {
-    setTimeout(() => {
-        const hash = window.location.hash || '#dashboard';
-        if (hash === '#dashboard' || hash === '') {
-            loadDashboardView();
-        }
-    }, 500);
+    if ((window.location.hash || '#dashboard') === '#dashboard') {
+        setTimeout(loadDashboardView, 500);
+    }
 });
 
 // COI Management View
@@ -4460,6 +4477,13 @@ function loadContent(section) {
     console.log('🔥 DEBUG: loadContent called with section:', section);
     console.log('🔥 DEBUG: Current location:', window.location.href);
 
+    // Increment navigation generation counter — async view loaders check this to abort stale renders
+    window._navGen = (window._navGen || 0) + 1;
+
+    // Remove the no-flash CSS injected early in index.html (if present)
+    const _dcHide = document.getElementById('_dcHide');
+    if (_dcHide) _dcHide.remove();
+
     // Get dashboard content area
     let dashboardContent = document.querySelector('.dashboard-content');
     console.log('🔥 DEBUG: Dashboard content element found:', !!dashboardContent);
@@ -4517,12 +4541,17 @@ function loadContent(section) {
                         console.error('🔥 ERROR: loadLeadsView() did not add any content!');
                     }
                 }, 100);
-                // Apply initial My Leads filter if active
+                // Sync toggle button UI state (filter already applied at render time)
                 setTimeout(() => {
-                    if (window.myLeadsOnlyActive && typeof window.toggleMyLeadsFilter === 'function') {
-                        window.toggleMyLeadsFilter(true);
+                    if (window.myLeadsOnlyActive && document.getElementById('myLeadsToggle')) {
+                        const btn = document.getElementById('myLeadsToggle');
+                        const icon = document.getElementById('myLeadsToggleIcon');
+                        btn.style.background = '#1e40af';
+                        btn.style.borderColor = '#3b82f6';
+                        btn.style.color = '#93c5fd';
+                        if (icon) icon.className = 'fas fa-eye-slash';
                     }
-                }, 400);
+                }, 50);
             }).catch(error => {
                 console.error('🔥 ERROR: loadLeadsView() failed:', error);
             });
@@ -7771,6 +7800,9 @@ window.generateLeadsReport = function() {
 async function loadLeadsView() {
     console.log('loadLeadsView called - loading leads view');
 
+    // Capture navigation generation so we can abort if user navigates away during async work
+    const _myNavGen = window._navGen || 0;
+
     // Clear any timeouts immediately
     if (window.leadsViewTimeout) {
         clearTimeout(window.leadsViewTimeout);
@@ -8166,6 +8198,7 @@ async function loadLeadsView() {
         }
 
         window.filteredLeads = leads;
+        window.currentActiveLeads = leads; // used by toggleMyLeadsFilter for re-render
 
         // Never generate sample data - only show real leads
         if (allLeads.length === 0) {
@@ -8723,13 +8756,10 @@ async function loadLeadsView() {
                     </thead>
                     <tbody id="leadsTableBody">
                         ${(() => {
-                            console.log(`🐛 DEBUGGING: About to generate table with ${leads.length} leads`);
-                            console.log(`🐛 Lead IDs being processed:`, leads.map(l => l.id).join(', '));
-                            if (leads.length === 1) {
-                                console.error(`❌ PROBLEM: Only 1 lead found! This is the bug!`);
-                                console.error(`❌ Single lead ID:`, leads[0].id, `Name:`, leads[0].name);
-                            }
-                            return generateSimpleLeadRowsWithDividers(leads);
+                            const _leadsForTable = (window.myLeadsOnlyActive && currentUser)
+                                ? leads.filter(l => (l.assignedTo || '').toLowerCase() === currentUser)
+                                : leads;
+                            return generateSimpleLeadRowsWithDividers(_leadsForTable);
                         })()}
                     </tbody>
                 </table>
@@ -8741,6 +8771,12 @@ async function loadLeadsView() {
         </div>
     `;
         
+        // Abort if user navigated away while we were loading
+        if (window._navGen !== _myNavGen) {
+            console.log('⚡ loadLeadsView: navigation changed during load, aborting render');
+            return;
+        }
+
         // Set the HTML
         dashboardContent.innerHTML = html;
 
@@ -8790,7 +8826,9 @@ async function loadLeadsView() {
         console.error('Error in loadLeadsView:', error);
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
-        dashboardContent.innerHTML = `<div class="error-message">Error loading leads view: ${error.message}</div>`;
+        if (window._navGen === _myNavGen) {
+            dashboardContent.innerHTML = `<div class="error-message">Error loading leads view: ${error.message}</div>`;
+        }
     }
     // Removed finally block and loading flags - no more blocking
 }
@@ -10822,7 +10860,60 @@ async function generateClientRows(page = 1) {
         }
     });
 
-    clients = uniqueClients;
+    // === Second pass: suppress business-name-only duplicate client records ===
+    // When IVANS auto-creates a client from a business name (e.g. "CHRIS STEVENS TRUCKING LLC"),
+    // a real person record also exists (e.g. "Christopher Stevens" with businessName = "Chris Stevens Trucking LLC").
+    // Suppress the business-name-only record so only the person record is shown.
+    const _BIZ_SUFFIX_RE = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|ltd|limited|lp|l\.p|trucking|transport|transportation|logistics|hauling|construction|farms|enterprises|services|solutions|towing)\b/i;
+    const _isBizNameOnly = (c) => _BIZ_SUFFIX_RE.test(c.name || '');
+    const _normPhone     = (ph) => (ph || '').replace(/\D/g, '');
+    const _normBiz       = (s)  => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+
+    // Collect business name keys and phones claimed by real person clients
+    const _personBizKeys  = new Set();
+    const _personPhones   = new Set();
+    uniqueClients.forEach(c => {
+        if (_isBizNameOnly(c)) return;
+        if (c.businessName) _personBizKeys.add(_normBiz(c.businessName));
+        const ph = _normPhone(c.phone);
+        if (ph.length >= 10) _personPhones.add(ph);
+    });
+
+    const _suppressedIds = new Set();
+    uniqueClients.forEach(c => {
+        if (!_isBizNameOnly(c)) return;
+        const myBizKey = _normBiz(c.name);
+        const myPhone  = _normPhone(c.phone);
+        // Suppress if a person client claims this business name OR shares the same phone
+        if ((myBizKey && _personBizKeys.has(myBizKey)) ||
+            (myPhone.length >= 10 && _personPhones.has(myPhone))) {
+            _suppressedIds.add(c.id);
+        }
+    });
+
+    // Also suppress duplicate person-name records sharing the same phone
+    // (e.g. "BRIGETTE LOREN EVANS" vs "BRIGETTE Evans") — keep mixed-case / oldest
+    const _personPhoneGroups = {};
+    uniqueClients.forEach(c => {
+        if (_isBizNameOnly(c) || _suppressedIds.has(c.id)) return;
+        const ph = _normPhone(c.phone);
+        if (ph.length >= 10) {
+            if (!_personPhoneGroups[ph]) _personPhoneGroups[ph] = [];
+            _personPhoneGroups[ph].push(c);
+        }
+    });
+    Object.values(_personPhoneGroups).forEach(group => {
+        if (group.length < 2) return;
+        const sorted = [...group].sort((a, b) => {
+            const aAllCaps = (a.name || '') === (a.name || '').toUpperCase();
+            const bAllCaps = (b.name || '') === (b.name || '').toUpperCase();
+            if (aAllCaps !== bAllCaps) return aAllCaps ? 1 : -1; // prefer mixed-case (manual entry)
+            return String(a.id) < String(b.id) ? -1 : 1;         // prefer older (first-created)
+        });
+        sorted.slice(1).forEach(c => _suppressedIds.add(c.id));
+    });
+
+    clients = uniqueClients.filter(c => !_suppressedIds.has(c.id));
     console.log('generateClientRows - Found unique clients:', clients.length);
     
     // If no clients, show a message
@@ -11395,6 +11486,21 @@ function loadPoliciesView() {
     let policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
     console.log('📊 Loading policies from localStorage:', policies.length);
 
+    // ── Filter by agent BEFORE computing stats — prevents total premium leaking to non-admins ──
+    if (currentUser && currentUser.toLowerCase() === 'maureen') {
+        policies = policies.filter(p => {
+            const a = (p.assignedTo || p.agent || p.assignedAgent || p.producer || 'Grant').toLowerCase();
+            return a === 'maureen';
+        });
+    } else if (!isAdmin && currentUser) {
+        const _cu = currentUser.toLowerCase();
+        policies = policies.filter(p => {
+            const a = (p.assignedTo || p.agent || p.assignedAgent || p.producer || 'Grant').toLowerCase();
+            return a === _cu;
+        });
+    }
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+
     // Update from server in background (non-blocking)
     if (window.loadPoliciesFromServer) {
         console.log('🔄 Updating policies from server in background...');
@@ -11874,6 +11980,9 @@ function loadRenewalsView() {
     
     // Add necessary styles
     addRenewalStyles();
+
+    // Restore green highlights for completed renewals
+    restoreRenewalHighlighting();
 }
 
 function getRealRenewalPolicies(policies, clients) {
@@ -12162,7 +12271,7 @@ function renderYearView(policies, isAdmin = false) {
     `;
 }
 
-function showRenewalProfile(policyId) {
+async function showRenewalProfile(policyId) {
     const renewalProfile = document.getElementById('renewalProfile');
     const listContainer = document.getElementById('renewalListContainer');
     
@@ -12229,7 +12338,7 @@ function showRenewalProfile(policyId) {
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        
+
         <div class="profile-layout" style="display: block;">
             <div class="profile-main-content" style="width: 100%;">
                 <div class="profile-tabs">
@@ -12241,11 +12350,18 @@ function showRenewalProfile(policyId) {
                     </button>
                 </div>
                 <div id="profileTabContent" class="tab-content">
-                    ${renderTasksTab()}
+                    <p style="padding:20px;color:#6b7280;"><i class="fas fa-spinner fa-spin"></i> Loading tasks...</p>
                 </div>
             </div>
         </div>
     `;
+
+    // Fetch tasks from server then render
+    await loadPolicyTasksFromServer(policyId);
+    const tabContent = document.getElementById('profileTabContent');
+    if (tabContent) {
+        tabContent.innerHTML = renderTasksTab();
+    }
 }
 
 function getCurrentPolicyId() {
@@ -12264,50 +12380,41 @@ function renderTasksTab() {
         return '<p>Error: No policy selected</p>';
     }
 
-    // Get saved tasks for THIS specific policy or use defaults
-    const savedTasks = JSON.parse(localStorage.getItem(`renewalTasks_${currentPolicyId}`) || 'null');
+    // Get saved tasks for THIS specific policy or use defaults (from server cache)
+    const savedTasks = (window.currentPolicyTasks && window.currentPolicyTasks[currentPolicyId]) || null;
     const defaultTasks = [
         { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
         { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
-        { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
+        { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
         { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
         { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
         { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
     ];
-    
+
     let tasks = savedTasks || defaultTasks;
 
-    // Check if current policy has completed renewal from server or localStorage
-    let isRenewalCompleted = false;
+    // Check if this policy is marked as completed (localStorage only — server state
+    // is reflected in task 12's completed flag once tasks are loaded)
+    const isRenewalCompleted = localStorage.getItem(`renewal_completed_${currentPolicyId}`) === 'true';
 
-    // Check server completions if available
-    const selectedRenewal = window.renewalsManager?.selectedRenewal;
-    if (selectedRenewal) {
-        const policyKey = `${selectedRenewal.policyNumber}_${selectedRenewal.expirationDate}`;
-        // Check if loaded in finalizedRenewals from server
-        if (window.finalizedRenewals && window.finalizedRenewals[policyKey]) {
-            isRenewalCompleted = true;
-        }
-    }
-
-    // Fall back to localStorage
-    if (!isRenewalCompleted) {
-        isRenewalCompleted = localStorage.getItem(`renewal_completed_${currentPolicyId}`) === 'true';
-    }
-
-    // Update task 10 (Finalize Renewal) based on completion status
-    const finalizeTaskIndex = tasks.findIndex(t => t.id === 10);
-    if (finalizeTaskIndex !== -1 && isRenewalCompleted) {
+    // Update task 12 (Finalize Renewal) based on completion status.
+    // Only apply server override when there are no saved tasks yet (first-time init).
+    // Once savedTasks exist they are authoritative — never override them or toggleTask
+    // can't flip task 12 off (the re-render would restore completed=true on every call).
+    const finalizeTaskIndex = tasks.findIndex(t => t.id === 12);
+    if (finalizeTaskIndex !== -1 && isRenewalCompleted && !savedTasks) {
         tasks[finalizeTaskIndex].completed = true;
         if (!tasks[finalizeTaskIndex].completedAt) {
             tasks[finalizeTaskIndex].completedAt = 'Previously completed';
         }
+        // Persist so that the next render (and toggleTask) reads the correct true state
+        savePolicyTasksToServer(currentPolicyId, tasks);
     }
 
     const htmlContent = `
@@ -12417,7 +12524,7 @@ function renderSubmissionsTab() {
                         <i class="fas fa-file-alt"></i> Quote Application
                     </button>
                 </div>
-                <div id="application-submissions-container-${clientId}" data-loading="false">
+                <div id="application-submissions-container-policy_${currentPolicyId}" data-loading="false">
                     <p style="color: #9ca3af; text-align: center; padding: 20px; margin: 0;">No applications submitted yet</p>
                 </div>
             </div>
@@ -12476,7 +12583,30 @@ function switchProfileTab(tab) {
     if (tab === 'tasks') {
         tabContent.innerHTML = renderTasksTab();
     } else if (tab === 'submissions') {
+        const currentPolicyId = getCurrentPolicyId();
+        // Set currentViewingLead so deleteQuoteApplication can refresh after delete
+        if (currentPolicyId) {
+            window.currentViewingLead = `policy_${currentPolicyId}`;
+        }
         tabContent.innerHTML = renderSubmissionsTab();
+        if (currentPolicyId) {
+            const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const rawPolicy = allPolicies.find(p => p.id === currentPolicyId) || {};
+            const clientId = rawPolicy.clientId || rawPolicy._clientId || currentPolicyId;
+            setTimeout(() => {
+                // Load quote application cards
+                const leadId = `policy_${currentPolicyId}`;
+                if (typeof protectedFunctions !== 'undefined' && protectedFunctions.loadQuoteApplications) {
+                    protectedFunctions.loadQuoteApplications(leadId);
+                } else if (window.showApplicationSubmissions) {
+                    window.showApplicationSubmissions(leadId);
+                }
+                // Load loss runs / documents
+                if (typeof protectedFunctions !== 'undefined' && protectedFunctions.loadLossRuns) {
+                    protectedFunctions.loadLossRuns(clientId);
+                }
+            }, 100);
+        }
     }
 }
 
@@ -12508,56 +12638,162 @@ function getDaysRemaining(date) {
     return `${days} days remaining`;
 }
 
+function getRenewalTasksApiUrl(policyId) {
+    const base = window.location.hostname === 'localhost'
+        ? 'http://localhost:3001'
+        : `http://${window.location.hostname}:3001`;
+    return `${base}/api/renewal-tasks/${policyId}`;
+}
+
+async function loadPolicyTasksFromServer(policyId) {
+    window.currentPolicyTasks = window.currentPolicyTasks || {};
+    try {
+        const response = await fetch(getRenewalTasksApiUrl(policyId));
+        if (response.ok) {
+            const data = await response.json();
+            if (data.tasks && data.tasks.length > 0) {
+                // Server has data — use it
+                window.currentPolicyTasks[policyId] = data.tasks;
+            } else {
+                // No server data yet — migrate from localStorage if available
+                const localRaw = localStorage.getItem(`renewalTasks_${policyId}`);
+                const localTasks = localRaw ? JSON.parse(localRaw) : null;
+                if (localTasks && localTasks.length > 0) {
+                    window.currentPolicyTasks[policyId] = localTasks;
+                    savePolicyTasksToServer(policyId, localTasks);
+                    localStorage.removeItem(`renewalTasks_${policyId}`);
+                } else {
+                    window.currentPolicyTasks[policyId] = null;
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error loading renewal tasks:', e);
+        // Fall back to localStorage on network error
+        const localRaw = localStorage.getItem(`renewalTasks_${policyId}`);
+        window.currentPolicyTasks[policyId] = localRaw ? JSON.parse(localRaw) : null;
+    }
+}
+
+function savePolicyTasksToServer(policyId, tasks) {
+    window.currentPolicyTasks = window.currentPolicyTasks || {};
+    window.currentPolicyTasks[policyId] = tasks;
+    fetch(getRenewalTasksApiUrl(policyId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks })
+    }).catch(e => console.error('Error saving renewal tasks:', e));
+}
+
+// Override checkFilesAndOpenEmail in renewals context to use policy data instead of lead data
+window.checkFilesAndOpenEmail = async function(clientId) {
+    // Use getCurrentPolicyId() — set when a renewal profile is open
+    const currentPolicyId = getCurrentPolicyId();
+    const isRenewalsContext = !!currentPolicyId;
+
+    if (!isRenewalsContext) {
+        // Use original lead-based behavior
+        if (typeof protectedFunctions !== 'undefined' && protectedFunctions.openEmailDocumentation) {
+            protectedFunctions.openEmailDocumentation(clientId);
+        }
+        return;
+    }
+
+    // Renewals context: build email from policy data
+    const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const policy = allPolicies.find(p => p.id === currentPolicyId);
+
+    if (!policy) {
+        alert('Policy not found');
+        return;
+    }
+
+    const companyName = policy.insured?.['Business Name'] ||
+                        policy.insured?.['Name/Business Name'] ||
+                        policy.insured?.['Primary Named Insured'] ||
+                        policy.insured?.['Full Name'] ||
+                        policy.insuredName || 'Unknown';
+    const dotNumber = policy.dotNumber || policy.dot_number || policy.insured?.['USDOT'] || 'NULL';
+    const rawRenewalDate = policy.expirationDate || policy.renewalDate || policy.expiryDate || 'NULL';
+    const renewalDate = rawRenewalDate !== 'NULL'
+        ? rawRenewalDate.replace(/\/\d{4}$/, '/2026').replace(/-\d{4}$/, '-2026')
+        : 'NULL';
+    const assignedTo = policy.agent || policy.assignedTo || '';
+    const subject = `Renewal: ${renewalDate} - USDOT: ${dotNumber} - ${companyName}`;
+
+    // Load files for this client from server
+    let allFiles = [];
+    try {
+        const response = await fetch(`/api/loss-runs-upload?leadId=${encodeURIComponent(clientId)}`);
+        const serverData = await response.json();
+        if (serverData.success && serverData.files && serverData.files.length > 0) {
+            serverData.files.forEach(f => {
+                const originalName = f.file_name ? f.file_name.replace(/^[a-f0-9]+_[0-9]+_/, '') : (f.filename || '');
+                const fileSize = f.file_size ? Math.round(f.file_size / 1024) + ' KB' : (f.size || '');
+                allFiles.push({
+                    filename: f.file_name || f.filename,
+                    originalname: originalName,
+                    originalName: originalName,
+                    size: fileSize,
+                    type: f.content_type || 'application/pdf',
+                    isServerFile: true,
+                    fileId: f.id
+                });
+            });
+        }
+    } catch (e) {
+        console.warn('Failed to load files for email:', e);
+    }
+
+    // Build pseudo-lead object matching what createEmailComposer expects
+    const policyAsLead = { id: clientId, name: companyName, dotNumber, renewalDate: rawRenewalDate, assignedTo };
+
+    if (typeof protectedFunctions !== 'undefined' && protectedFunctions.createEmailComposer) {
+        protectedFunctions.createEmailComposer(policyAsLead, subject, allFiles);
+    } else {
+        alert(`Email Documentation:\nTo: Grant@vigagency.com\nSubject: ${subject}\nAttachments: ${allFiles.length} file(s)`);
+    }
+};
+
 function toggleTask(taskId, policyId) {
     if (!policyId) {
         console.error('No policy ID provided for task toggle');
         return;
     }
 
-    const storageKey = `renewalTasks_${policyId}`;
-    const tasks = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    const taskIndex = tasks.findIndex(t => t.id === taskId);
-
-    if (taskIndex === -1) {
-        // If no saved tasks yet for this policy, get defaults and update
-        const defaultTasks = [
-            { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
-            { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
-            { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
-            { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
-            { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
-            { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
-            { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-            { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+    const defaultTasks = [
+        { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
+        { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
+        { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
+        { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
+        { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
+        { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
+        { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
         { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
         { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-            { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
-        ];
+        { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+    ];
 
-        const task = defaultTasks.find(t => t.id === taskId);
-        if (task) {
-            task.completed = !task.completed;
-            task.completedAt = task.completed ? new Date().toLocaleString() : '';
-            localStorage.setItem(storageKey, JSON.stringify(defaultTasks));
-        }
-    } else {
+    const cached = window.currentPolicyTasks && window.currentPolicyTasks[policyId];
+    const tasks = cached ? [...cached] : defaultTasks;
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+
+    if (taskIndex !== -1) {
         tasks[taskIndex].completed = !tasks[taskIndex].completed;
         tasks[taskIndex].completedAt = tasks[taskIndex].completed ? new Date().toLocaleString() : '';
-        localStorage.setItem(storageKey, JSON.stringify(tasks));
     }
 
-    // Check if "Finalize Renewal" task (ID 10) was completed
-    if (taskId === 10) {
-        const currentTasks = JSON.parse(localStorage.getItem(`renewalTasks_${policyId}`) || '[]');
-        const finalizeTask = currentTasks.find(t => t.id === 10);
+    savePolicyTasksToServer(policyId, tasks);
 
+    // Check if "Finalize Renewal" task (ID 12) was completed
+    if (taskId === 12) {
+        const finalizeTask = tasks.find(t => t.id === 12);
         if (finalizeTask && finalizeTask.completed) {
-            // Add green highlighting to the current policy
             highlightPolicyAsCompleted();
             showNotification('🎉 Renewal finalized! Policy highlighted in green.', 'success');
         } else {
-            // Remove green highlighting if unchecked
             removePolicyHighlight();
         }
     }
@@ -12618,38 +12854,20 @@ function highlightPolicyAsCompleted() {
         }
     });
 
-    // Store completion status to server
-    const selectedRenewal = window.renewalsManager?.selectedRenewal;
-    if (selectedRenewal) {
-        const policyKey = `${selectedRenewal.policyNumber}_${selectedRenewal.expirationDate}`;
-
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001/api/renewal-completions'
-            : `http://${window.location.hostname}:3001/api/renewal-completions`;
-        fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                policyKey,
-                policyNumber: selectedRenewal.policyNumber,
-                expirationDate: selectedRenewal.expirationDate,
-                completed: true
-            })
-        }).then(response => {
-            if (response.ok) {
-                console.log('✅ Saved renewal completion to server');
-            }
-        }).catch(error => {
-            console.error('Error saving completion:', error);
-            // Fall back to localStorage
-            localStorage.setItem(`renewal_completed_${currentPolicyId}`, 'true');
-        });
-    } else {
-        // Fall back to localStorage
+    // Store completion status to server using policyId as key
+    const completionApiUrl = window.location.hostname === 'localhost'
+        ? 'http://localhost:3001/api/renewal-completions'
+        : `http://${window.location.hostname}:3001/api/renewal-completions`;
+    fetch(completionApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policyKey: currentPolicyId, completed: true })
+    }).then(response => {
+        if (response.ok) console.log('✅ Saved renewal completion to server');
+    }).catch(error => {
+        console.error('Error saving completion:', error);
         localStorage.setItem(`renewal_completed_${currentPolicyId}`, 'true');
-    }
+    });
 }
 
 // Function to remove policy highlight
@@ -12683,25 +12901,13 @@ function removePolicyHighlight() {
         }
     });
 
-    // Remove completion status from server
-    const selectedRenewal = window.renewalsManager?.selectedRenewal;
-    if (selectedRenewal) {
-        const policyKey = `${selectedRenewal.policyNumber}_${selectedRenewal.expirationDate}`;
-
-        const apiUrl = window.location.hostname === 'localhost'
-            ? `http://localhost:3001/api/renewal-completions/${policyKey}`
-            : `http://${window.location.hostname}:3001/api/renewal-completions/${policyKey}`;
-        fetch(apiUrl, {
-            method: 'DELETE'
-        }).then(response => {
-            if (response.ok) {
-                console.log('✅ Removed renewal completion from server');
-            }
-        }).catch(error => {
-            console.error('Error removing completion:', error);
-        });
-    }
-    // Also remove from localStorage
+    // Remove completion status from server using policyId as key
+    const completionDeleteUrl = window.location.hostname === 'localhost'
+        ? `http://localhost:3001/api/renewal-completions/${currentPolicyId}`
+        : `http://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
+    fetch(completionDeleteUrl, { method: 'DELETE' })
+        .then(r => { if (r.ok) console.log('✅ Removed renewal completion from server'); })
+        .catch(e => console.error('Error removing completion:', e));
     localStorage.removeItem(`renewal_completed_${currentPolicyId}`);
 }
 
@@ -12730,25 +12936,32 @@ async function restoreRenewalHighlighting() {
         let isCompleted = false;
 
         // Try to find in server completions
-        for (const key in completions) {
-            if (key.includes(policyId)) {
+        // Server now uses policyId directly as the key
+        isCompleted = !!completions[policyId];
+
+        // Fall back to localStorage (legacy) and migrate to server if found
+        if (!isCompleted) {
+            const localFlag = localStorage.getItem(`renewal_completed_${policyId}`);
+            if (localFlag === 'true') {
                 isCompleted = true;
-                break;
+                // Migrate to server so localStorage is no longer needed
+                const migrateUrl = window.location.hostname === 'localhost'
+                    ? 'http://localhost:3001/api/renewal-completions'
+                    : `http://${window.location.hostname}:3001/api/renewal-completions`;
+                fetch(migrateUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ policyKey: policyId, completed: true })
+                }).then(() => localStorage.removeItem(`renewal_completed_${policyId}`))
+                  .catch(() => {});
             }
         }
 
-        // Fall back to localStorage if not found
-        if (!isCompleted) {
-            isCompleted = localStorage.getItem(`renewal_completed_${policyId}`) === 'true';
-        }
-
         if (isCompleted) {
-            // Apply green highlighting
             card.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
             card.style.borderLeft = '4px solid #10b981';
             card.style.boxShadow = '0 2px 4px rgba(16, 185, 129, 0.1)';
 
-            // Add completion badge if not already present
             if (!card.querySelector('.renewal-completed-badge')) {
                 const cardHeader = card.querySelector('.card-header');
                 if (cardHeader) {
@@ -12781,8 +12994,7 @@ async function restoreRenewalHighlighting() {
             const match = onclickStr.match(/showRenewalProfile\('([^']+)'\)/);
             if (match) {
                 const policyId = match[1];
-                const isCompleted = localStorage.getItem(`renewal_completed_${policyId}`);
-                if (isCompleted === 'true') {
+                if (completions[policyId] || localStorage.getItem(`renewal_completed_${policyId}`) === 'true') {
                     card.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
                     card.style.borderColor = '#10b981';
                 }
@@ -12792,37 +13004,40 @@ async function restoreRenewalHighlighting() {
 }
 
 function saveTaskNote(taskId, note, policyId) {
-    let tasks = JSON.parse(localStorage.getItem(`renewalTasks_${policyId}`) || '[]');
-    
-    if (tasks.length === 0) {
-        // Initialize with defaults if no saved tasks
-        tasks = [
-            { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
-            { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
-            { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
-            { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
-            { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
-            { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
-            { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-            { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+    const defaultTasks = [
+        { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
+        { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
+        { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
+        { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
+        { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
+        { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
+        { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
         { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
         { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-            { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
-        ];
-    }
-    
+        { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+    ];
+    const cached = window.currentPolicyTasks && window.currentPolicyTasks[policyId];
+    const tasks = cached ? [...cached] : defaultTasks;
     const taskIndex = tasks.findIndex(t => t.id === taskId);
     if (taskIndex !== -1) {
         tasks[taskIndex].notes = note;
-        localStorage.setItem(`renewalTasks_${policyId}`, JSON.stringify(tasks));
+        savePolicyTasksToServer(policyId, tasks);
     }
 }
 
 function clearAllTasks() {
     if (confirm('Are you sure you want to reset all tasks? This will clear all checkmarks and timestamps.')) {
         const currentPolicyId = getCurrentPolicyId();
-        localStorage.removeItem(`renewalTasks_${currentPolicyId}`);
+        window.currentPolicyTasks = window.currentPolicyTasks || {};
+        window.currentPolicyTasks[currentPolicyId] = null;
+        // Delete from server by saving null (server will return null = use defaults on next load)
+        fetch(getRenewalTasksApiUrl(currentPolicyId), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tasks: [] })
+        }).catch(e => console.error('Error clearing tasks:', e));
         const tabContent = document.getElementById('profileTabContent');
         if (tabContent) {
             tabContent.innerHTML = renderTasksTab();
@@ -12834,37 +13049,27 @@ function addRenewalTask() {
     const taskName = prompt('Enter the new task name:');
     if (taskName && taskName.trim()) {
         const currentPolicyId = getCurrentPolicyId();
-        let tasks = JSON.parse(localStorage.getItem(`renewalTasks_${currentPolicyId}`) || '[]');
-        
-        if (tasks.length === 0) {
-            // Initialize with defaults if empty
-            tasks = [
-                { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
-                { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
-                { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
-                { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
-                { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: 'Make sure he fills out a supplemental' },
-                { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
-                { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
-                { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
-        { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
-        { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
-                { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-                { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: 'Accounting / Send Thank You Card / Finance' }
-            ];
-        }
-        
+        const cached = window.currentPolicyTasks && window.currentPolicyTasks[currentPolicyId];
+        const tasks = cached ? [...cached] : [
+            { id: 1, task: 'Request Updates from Client', completed: false, completedAt: '', notes: '' },
+            { id: 2, task: 'Updates Received', completed: false, completedAt: '', notes: '' },
+            { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
+            { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
+            { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+            { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
+            { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
+            { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
+            { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
+            { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
+            { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
+            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+        ];
+
         const newId = Math.max(...tasks.map(t => t.id || 0)) + 1;
-        tasks.push({
-            id: newId,
-            task: taskName.trim(),
-            completed: false,
-            completedAt: '',
-            notes: ''
-        });
-        
-        localStorage.setItem(`renewalTasks_${currentPolicyId}`, JSON.stringify(tasks));
-        
+        tasks.push({ id: newId, task: taskName.trim(), completed: false, completedAt: '', notes: '' });
+
+        savePolicyTasksToServer(currentPolicyId, tasks);
+
         const tabContent = document.getElementById('profileTabContent');
         if (tabContent) {
             tabContent.innerHTML = renderTasksTab();
@@ -18968,7 +19173,7 @@ async function viewClient(id) {
     let client = null;
 
     try {
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io';
+        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
         console.log('📡 Fetching clients from:', `${API_URL}/api/clients`);
         const response = await fetch(`${API_URL}/api/clients`, {
             headers: {
@@ -19028,9 +19233,23 @@ async function viewClient(id) {
         console.log('✅ CLIENT FOUND! Proceeding to show profile for:', client.name);
     }
     
-    // Get all policies for this client from insurance_policies storage
-    const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    
+    // Get all policies for this client - fetch from API first, fallback to localStorage
+    let allPolicies = [];
+    try {
+        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const polRes = await fetch(`${API_URL}/api/policies?includeInactive=true`, {
+            headers: { 'Cache-Control': 'no-cache', 'Bypass-Tunnel-Reminder': 'true' }
+        });
+        if (polRes.ok) {
+            allPolicies = await polRes.json();
+        }
+    } catch(e) {
+        console.warn('Policy API fetch failed, using localStorage:', e);
+    }
+    if (!allPolicies.length) {
+        allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    }
+
     // Filter policies that belong to this client
     // Check by client ID, client name, or insured name
     const clientPolicies = allPolicies.filter(policy => {
@@ -35408,8 +35627,9 @@ window.handleCheckboxChange = function(type) {
                 alert('No email address found in Contact Information for this policy.');
             }
         } else if (type === 'agent') {
-            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen@vigagency.com', carson: 'Carson@vigagency.com' };
-            const _agentKey = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
+            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'grant@vigagency.com', maureen: 'maureen.corp@uigagency.com', carson: 'carson@vigagency.com' };
+            const _agentRaw = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
+            const _agentKey = Object.keys(_agentEmailMap).find(k => _agentRaw.includes(k)) || _agentRaw;
             const agentEmail = currentPolicy.agentEmail || _agentEmailMap[_agentKey] || '';
 
             addCRMCOIEmailRecipient();

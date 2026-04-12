@@ -28,16 +28,20 @@ window.toggleMyLeadsFilter = function(enabled) {
     }
 
     // Re-render the table using the cached leads — no server round-trip needed
-    if (window.currentActiveLeads && typeof window.generateSimpleLeadRowsWithDividers === 'function') {
+    // Fall back to localStorage if currentActiveLeads hasn't been set yet
+    const allLeads = window.currentActiveLeads ||
+        JSON.parse(localStorage.getItem('insurance_leads') || '[]').filter(l => !l.archived);
+
+    if (allLeads.length > 0 && typeof window.generateSimpleLeadRowsWithDividers === 'function') {
         if (!enabled || !currentUser) {
             // Filter OFF: show all leads
-            tableBody.innerHTML = window.generateSimpleLeadRowsWithDividers(window.currentActiveLeads);
+            tableBody.innerHTML = window.generateSimpleLeadRowsWithDividers(allLeads);
         } else {
-            // Filter ON: only this user's leads (including their closed leads)
-            const myLeads = window.currentActiveLeads.filter(lead =>
+            // Filter ON: only this user's leads
+            const myLeads = allLeads.filter(lead =>
                 (lead.assignedTo || '').toLowerCase() === currentUser
             );
-            console.log(`👤 Showing ${myLeads.length} of ${window.currentActiveLeads.length} leads for "${currentUser}"`);
+            console.log(`👤 Showing ${myLeads.length} of ${allLeads.length} leads for "${currentUser}"`);
             tableBody.innerHTML = window.generateSimpleLeadRowsWithDividers(myLeads);
         }
 
