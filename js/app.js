@@ -12341,12 +12341,17 @@ async function showRenewalProfile(policyId) {
 
         <div class="profile-layout" style="display: block;">
             <div class="profile-main-content" style="width: 100%;">
-                <div class="profile-tabs">
-                    <button class="profile-tab active" onclick="switchProfileTab('tasks')">
-                        <i class="fas fa-tasks"></i> Tasks
-                    </button>
-                    <button class="profile-tab" onclick="switchProfileTab('submissions')">
-                        <i class="fas fa-file-alt"></i> Submissions
+                <div class="profile-tabs" style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex;">
+                        <button class="profile-tab active" onclick="switchProfileTab('tasks')">
+                            <i class="fas fa-tasks"></i> Tasks
+                        </button>
+                        <button class="profile-tab" onclick="switchProfileTab('submissions')">
+                            <i class="fas fa-file-alt"></i> Submissions
+                        </button>
+                    </div>
+                    <button onclick="viewPolicy('${policyId}')" style="background: #0066cc; color: white; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; margin-right: 8px; transition: 0.2s; white-space: nowrap;">
+                        <i class="fas fa-external-link-alt"></i> View Policy
                     </button>
                 </div>
                 <div id="profileTabContent" class="tab-content">
@@ -12536,8 +12541,8 @@ function renderSubmissionsTab() {
                         <i class="fas fa-file-pdf" style="margin-right: 6px;"></i> Loss Runs and Other Documentation
                     </h3>
                     <div style="display: flex; gap: 8px;">
-                        <button onclick="checkFilesAndOpenEmail('${clientId}')"
-                                style="background: #0066cc; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        <button onclick="emailRenewalDocumentation('${currentPolicyId}', '${clientId}')"
+                                style="background: #0066cc; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: 0.2s;">
                             <i class="fas fa-envelope"></i> Email Documentation
                         </button>
                         <button onclick="openLossRunsUpload('${clientId}')"
@@ -12685,26 +12690,17 @@ function savePolicyTasksToServer(policyId, tasks) {
     }).catch(e => console.error('Error saving renewal tasks:', e));
 }
 
-// Override checkFilesAndOpenEmail in renewals context to use policy data instead of lead data
-window.checkFilesAndOpenEmail = async function(clientId) {
-    // Use getCurrentPolicyId() — set when a renewal profile is open
-    const currentPolicyId = getCurrentPolicyId();
-    const isRenewalsContext = !!currentPolicyId;
+// Dedicated renewal email function — receives policyId and clientId directly,
+// no dependency on selectedRenewalPolicyId global state.
+window.emailRenewalDocumentation = async function(policyId, clientId) {
+    console.log('📧 emailRenewalDocumentation called — policyId:', policyId, 'clientId:', clientId);
 
-    if (!isRenewalsContext) {
-        // Use original lead-based behavior
-        if (typeof protectedFunctions !== 'undefined' && protectedFunctions.openEmailDocumentation) {
-            protectedFunctions.openEmailDocumentation(clientId);
-        }
-        return;
-    }
-
-    // Renewals context: build email from policy data
     const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    const policy = allPolicies.find(p => p.id === currentPolicyId);
+    const policy = allPolicies.find(p => p.id === policyId);
 
     if (!policy) {
-        alert('Policy not found');
+        showNotification('Policy not found', 'error');
+        console.error('emailRenewalDocumentation: policy not found for id:', policyId);
         return;
     }
 
@@ -12721,7 +12717,7 @@ window.checkFilesAndOpenEmail = async function(clientId) {
     const assignedTo = policy.agent || policy.assignedTo || '';
     const subject = `Renewal: ${renewalDate} - USDOT: ${dotNumber} - ${companyName}`;
 
-    // Load files for this client from server
+    // Load uploaded files for this client from server
     let allFiles = [];
     try {
         const response = await fetch(`/api/loss-runs-upload?leadId=${encodeURIComponent(clientId)}`);
@@ -12742,17 +12738,35 @@ window.checkFilesAndOpenEmail = async function(clientId) {
             });
         }
     } catch (e) {
-        console.warn('Failed to load files for email:', e);
+        console.warn('emailRenewalDocumentation: failed to load server files:', e);
     }
 
-    // Build pseudo-lead object matching what createEmailComposer expects
+    // Build pseudo-lead object that createEmailComposer expects
     const policyAsLead = { id: clientId, name: companyName, dotNumber, renewalDate: rawRenewalDate, assignedTo };
 
     if (typeof protectedFunctions !== 'undefined' && protectedFunctions.createEmailComposer) {
         protectedFunctions.createEmailComposer(policyAsLead, subject, allFiles);
     } else {
-        alert(`Email Documentation:\nTo: Grant@vigagency.com\nSubject: ${subject}\nAttachments: ${allFiles.length} file(s)`);
+        alert(`Email Documentation:\nSubject: ${subject}\nAttachments: ${allFiles.length} file(s)`);
     }
+};
+
+// Override checkFilesAndOpenEmail in renewals context to use policy data instead of lead data
+window.checkFilesAndOpenEmail = async function(clientId) {
+    // Use getCurrentPolicyId() — set when a renewal profile is open
+    const currentPolicyId = getCurrentPolicyId();
+    const isRenewalsContext = !!currentPolicyId;
+
+    if (!isRenewalsContext) {
+        // Use original lead-based behavior
+        if (typeof protectedFunctions !== 'undefined' && protectedFunctions.openEmailDocumentation) {
+            protectedFunctions.openEmailDocumentation(clientId);
+        }
+        return;
+    }
+
+    // Delegate to the dedicated renewal email function
+    window.emailRenewalDocumentation(currentPolicyId, clientId);
 };
 
 function toggleTask(taskId, policyId) {
@@ -13537,7 +13551,7 @@ function addRenewalStyles() {
             color: #333;
         }
         
-        .tab-content {
+        .profile-main-content > #profileTabContent {
             flex: 1;
             padding: 20px;
             overflow-y: auto;
@@ -13545,7 +13559,7 @@ function addRenewalStyles() {
             display: block !important;
             visibility: visible !important;
         }
-        
+
         .tasks-tab, .submissions-tab {
             display: block !important;
             visibility: visible !important;
@@ -20923,22 +20937,90 @@ function showPolicyDetailsModal(policy) {
         }
     }, 100);
 
-    // Initialize application submissions display for this policy
+    // Load application submissions and loss runs into modal-specific containers.
+    // We use unique IDs (policymodal-*) to avoid getElementById collisions with
+    // the renewals sidebar containers that share the same ID scheme.
     setTimeout(() => {
         const leadId = `policy_${policy.id}`;
-        console.log('🔄 Auto-loading application submissions for policy:', policy.id, 'leadId:', leadId);
+        const clientId = policy.clientId || policy._clientId || policy.id;
 
-        if (window.showApplicationSubmissions) {
-            try {
-                window.showApplicationSubmissions(leadId);
-                console.log('✅ Successfully triggered application submissions load');
-            } catch (error) {
-                console.error('❌ Error loading application submissions:', error);
-            }
-        } else {
-            console.log('⚠️ showApplicationSubmissions function not available');
+        // --- Application Submissions ---
+        const appContainer = document.getElementById(`policymodal-app-submissions-${policy.id}`);
+        if (appContainer) {
+            fetch(`/api/quote-applications?leadId=${encodeURIComponent(leadId)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!appContainer.isConnected) return;
+                    if (data.success && data.applications && data.applications.length > 0) {
+                        appContainer.innerHTML = '';
+                        data.applications.forEach(app => {
+                            const el = document.createElement('div');
+                            el.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:12px;background:white;box-shadow:0 1px 3px rgba(0,0,0,0.1);';
+                            el.innerHTML = `
+                                <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px;">
+                                    <h4 style="margin:0 0 5px 0;color:#374151;font-size:14px;">
+                                        <i class="fas fa-file-signature" style="color:#10b981;margin-right:8px;"></i>
+                                        Quote Application #${app.id}
+                                    </h4>
+                                    <div style="display:flex;gap:5px;">
+                                        <button onclick="viewQuoteApplication('${app.id}')" style="background:#3b82f6;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px;"><i class="fas fa-eye"></i> View</button>
+                                        <button onclick="downloadQuoteApplication('${app.id}')" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px;"><i class="fas fa-download"></i> Download</button>
+                                        <button onclick="deleteQuoteApplication('${app.id}')" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px;"><i class="fas fa-trash"></i> Delete</button>
+                                    </div>
+                                </div>
+                                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;font-size:12px;color:#6b7280;">
+                                    <div><strong style="color:#374151;">Commodities:</strong> ${app.formData?.commodities?.length || app.commodities?.length || 0}</div>
+                                    <div><strong style="color:#374151;">Drivers:</strong> ${app.formData?.drivers?.length || app.drivers?.length || 0}</div>
+                                    <div><strong style="color:#374151;">Trucks:</strong> ${app.formData?.trucks?.length || app.trucks?.length || 0}</div>
+                                    <div><strong style="color:#374151;">Trailers:</strong> ${app.formData?.trailers?.length || app.trailers?.length || 0}</div>
+                                </div>`;
+                            appContainer.appendChild(el);
+                        });
+                    } else {
+                        appContainer.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No applications submitted yet</p>';
+                    }
+                })
+                .catch(() => {
+                    if (appContainer.isConnected) appContainer.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No applications submitted yet</p>';
+                });
         }
-    }, 200);
+
+        // --- Loss Runs ---
+        const lossContainer = document.getElementById(`policymodal-loss-runs-${clientId}`);
+        if (lossContainer) {
+            fetch(`/api/loss-runs-upload?leadId=${encodeURIComponent(clientId)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!lossContainer.isConnected) return;
+                    if (data.success && data.files && data.files.length > 0) {
+                        lossContainer.innerHTML = data.files.map(f => {
+                            const uploadDate = new Date(f.uploaded_date).toLocaleDateString();
+                            const fileSize = Math.round(f.file_size / 1024) + ' KB';
+                            const origName = f.file_name.replace(/^[a-f0-9]+_[0-9]+_/, '');
+                            return `
+                                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:white;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:8px;">
+                                    <div>
+                                        <div style="display:flex;align-items:center;margin-bottom:4px;">
+                                            <i class="fas fa-file-pdf" style="color:#dc3545;margin-right:8px;"></i>
+                                            <strong style="font-size:14px;">${origName}</strong>
+                                            <span style="background:#10b981;color:white;font-size:10px;padding:2px 6px;border-radius:10px;margin-left:8px;">SERVER</span>
+                                        </div>
+                                        <div style="font-size:12px;color:#6b7280;">Uploaded: ${uploadDate} &bull; Size: ${fileSize}</div>
+                                    </div>
+                                    <div style="display:flex;gap:8px;">
+                                        <button onclick="viewLossRuns('${clientId}','${f.id}','${origName.replace(/'/g, "\\'")}')" style="background:#0066cc;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;"><i class="fas fa-eye"></i> View</button>
+                                    </div>
+                                </div>`;
+                        }).join('');
+                    } else {
+                        lossContainer.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No loss runs uploaded yet</p>';
+                    }
+                })
+                .catch(() => {
+                    if (lossContainer.isConnected) lossContainer.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No loss runs uploaded yet</p>';
+                });
+        }
+    }, 300);
 }
 
 function generateViewTabsForPolicyType(policyType) {
@@ -21493,14 +21575,24 @@ function generateViewTabContent(tabId, policy) {
                             <i class="fas fa-file-alt"></i> Quote Application
                         </button>
                     </div>
-                    <div id="application-submissions-container-policy_${policy.id}">
-                        ${window.renderPolicyApplicationSubmissions ? window.renderPolicyApplicationSubmissions(policy.id) : `
-                            <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
-                                <i class="fas fa-file-signature" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                                <p style="margin: 0; font-size: 16px;">No applications submitted yet</p>
-                                <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.7;">Click Quote Application to create one</p>
-                            </div>
-                        `}
+                    <div id="policymodal-app-submissions-${policy.id}">
+                        <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 16px; opacity: 0.4;"></i>
+                            <p style="margin: 0; font-size: 16px;">Loading applications...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loss Runs & Other Documentation Section -->
+                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb; margin-top: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                        <h3 style="margin: 0; color: #111827; font-size: 22px; font-weight: 600;">Loss Runs &amp; Other Documentation</h3>
+                    </div>
+                    <div id="policymodal-loss-runs-${policy.clientId || policy._clientId || policy.id}">
+                        <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 16px; opacity: 0.4;"></i>
+                            <p style="margin: 0; font-size: 16px;">Loading documents...</p>
+                        </div>
                     </div>
                 </div>
             `;
