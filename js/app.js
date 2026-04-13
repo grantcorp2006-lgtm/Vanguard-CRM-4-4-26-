@@ -4117,6 +4117,9 @@ window.setActiveTab = setActiveTab;
 
 // Add click handlers to navigation links
 document.addEventListener('DOMContentLoaded', function() {
+    // Start JenesisNow background auto-import
+    if (typeof jnStartAutoImport === 'function') jnStartAutoImport();
+
     console.log('🔥 Adding navigation click handlers...');
 
     // Handle all navigation links (main nav, sidebar nav)
@@ -4741,6 +4744,20 @@ function loadContent(section) {
             } catch (error) {
                 console.error('🔥 ERROR: loadSettingsView() threw an error:', error);
                 dashboardContent.innerHTML = '<div class="error-message"><h2>Error Loading Settings</h2><p>There was a problem loading the settings view. Please try refreshing the page.</p></div>';
+            }
+            break;
+        case '#downloads':
+            dashboardContent.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading Downloads...</div>';
+            try {
+                loadDownloadsView();
+                setTimeout(() => {
+                    if (dashboardContent.innerHTML.includes('loading-spinner')) {
+                        dashboardContent.innerHTML = '<div class="error-message"><h2>Error Loading Downloads</h2><p>There was a problem loading downloads. Please try refreshing.</p></div>';
+                    }
+                }, 500);
+            } catch (error) {
+                console.error('ERROR: loadDownloadsView() threw:', error);
+                dashboardContent.innerHTML = '<div class="error-message"><h2>Error Loading Downloads</h2><p>' + error.message + '</p></div>';
             }
             break;
         case '#analytics':
@@ -11110,8 +11127,8 @@ async function loadClientsView() {
                         <option value="Hunter">Hunter</option>
                         <option value="Maureen" style="color: #2563eb;">MAUREEN</option>`}
                     </select>` : ''}
-                    <button class="btn-filter">
-                        <i class="fas fa-filter"></i> More Filters
+                    <button class="btn-filter" id="missing-data-btn" onclick="toggleMissingDataFilter()" style="transition:0.2s;">
+                        <i class="fas fa-exclamation-triangle"></i> Missing Data
                     </button>
                 </div>
             </div>
@@ -11849,6 +11866,7 @@ function loadPoliciesView() {
                         <option value="active">Active</option>
                         <option value="pending">Pending</option>
                         <option value="cancelled">Cancelled</option>
+                        <option value="cancel-pending">Cancel Pending</option>
                         <option value="expired">Expired</option>
                     </select>
                     ${isAdmin ? `<select class="filter-select" id="policyAgentFilter" onchange="filterPolicies()">
@@ -18393,6 +18411,566 @@ function loadSettingsView() {
     }, 100);
 }
 
+// ─── JenesisNow Downloads View ────────────────────────────────────────────────
+async function loadDownloadsView() {
+    const dashboardContent = document.querySelector('.dashboard-content');
+    if (!dashboardContent) return;
+
+    const apiUrl = window.location.hostname === 'localhost'
+        ? 'http://localhost:3001'
+        : `http://${window.location.hostname}:3001`;
+
+    // Helper: parse HTML string and extract text of a selector
+    function parseText(html, sel) {
+        try {
+            const d = new DOMParser().parseFromString(html, 'text/html');
+            const el = sel ? d.querySelector(sel) : d.body;
+            return el ? el.textContent.trim() : '';
+        } catch { return ''; }
+    }
+
+    // Helper: extract status text and badge class from status cell HTML
+    function parseStatus(html) {
+        const d = new DOMParser().parseFromString(html, 'text/html');
+        const span = d.querySelector('span[id^="ImportJobStatus"] a, span[id^="ImportJobStatus"]');
+        const text = span ? span.textContent.trim() : d.body.textContent.replace(/^\(\d+\)\s*/, '').trim();
+        const map = { Processed: 'badge-processed', Pending: 'badge-pending', Incomplete: 'badge-incomplete', 'On Hold': 'badge-onhold', Duplicate: 'badge-duplicate', Error: 'badge-error' };
+        const cls = Object.keys(map).find(k => text.includes(k)) || '';
+        const label = cls ? cls.replace('badge-', '').charAt(0).toUpperCase() + cls.replace('badge-', '').slice(1) : text;
+        return { text: label, cls: map[cls] || 'badge-processed' };
+    }
+
+    // Helper: extract policies from status cell popover table
+    function parsePolicies(html) {
+        const d = new DOMParser().parseFromString(html, 'text/html');
+        const rows = d.querySelectorAll('tbody tr');
+        return Array.from(rows).map(r => {
+            const tds = r.querySelectorAll('td');
+            return { client: tds[0]?.textContent.trim(), type: tds[1]?.textContent.trim(), purpose: tds[2]?.textContent.trim(), polNo: tds[3]?.textContent.trim() };
+        }).filter(p => p.client || p.polNo);
+    }
+
+    // Helper: extract import job ID from action cell
+    function parseJobId(html) {
+        const m = html.match(/ImportJobAction(\d+)/);
+        return m ? m[1] : '';
+    }
+
+    // Helper: extract policy job info from policyInfoHTML table
+    function parsePolicyInfo(html) {
+        const d = new DOMParser().parseFromString(html, 'text/html');
+        const rows = d.querySelectorAll('tr');
+        const info = {};
+        rows.forEach(r => {
+            const tds = r.querySelectorAll('td');
+            if (tds.length >= 2) {
+                const key = tds[0].textContent.trim().replace(/\s+$/, '');
+                const val = tds[1].textContent.trim();
+                if (key === 'Client') info.client = val;
+                else if (key === 'Company') info.company = val;
+                else if (key === 'Pol No') info.polNo = val;
+                else if (key === 'Pol Type') info.polType = val;
+                else if (key === 'Purpose') info.purpose = val;
+                else if (key === 'Effective Date') info.effectiveDate = val;
+            }
+        });
+        return info;
+    }
+
+    // Helper: extract job transaction ID from action cell
+    function parseTransactionId(html) {
+        const m = html.match(/jobtransactionid="?(\d+)/);
+        return m ? m[1] : '';
+    }
+
+    // Render the shell immediately, fetch data async
+    dashboardContent.innerHTML = `
+        <div class="downloads-view">
+            <header class="content-header" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+                <h1 style="margin:0;"><i class="fas fa-download" style="margin-right:8px; color:var(--primary,#2563eb);"></i>JenesisNow Downloads</h1>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button id="jn-import-btn" onclick="jnImportFromJenesis()" style="padding:6px 16px; font-size:13px; display:flex; align-items:center; gap:6px; border:none; border-radius:6px; background:#2563eb; cursor:pointer; color:#fff; font-weight:600;">
+                        <i class="fas fa-cloud-download-alt"></i> Import Latest
+                    </button>
+                    <button onclick="loadDownloadsView()" class="btn-secondary" style="padding:6px 14px; font-size:13px; display:flex; align-items:center; gap:6px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer; color:#374151;">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </header>
+
+            <style>
+                .jn-card { background:#fff; border-radius:10px; border:1px solid #e5e7eb; margin-bottom:1.5rem; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+                .jn-card-header { padding:14px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; background:#f9fafb; }
+                .jn-card-header h2 { margin:0; font-size:15px; font-weight:600; color:#111827; }
+                .jn-card-body { padding:0; }
+                .jn-table { width:100%; border-collapse:collapse; font-size:13px; }
+                .jn-table th { padding:10px 14px; text-align:left; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; border-bottom:1px solid #e5e7eb; }
+                .jn-table td { padding:10px 14px; border-bottom:1px solid #f3f4f6; color:#374151; vertical-align:top; }
+                .jn-table tr:last-child td { border-bottom:none; }
+                .jn-table tr:hover td { background:#f9fafb; }
+                .badge { display:inline-block; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:600; }
+                .badge-processed { background:#d1fae5; color:#065f46; }
+                .badge-pending { background:#fef3c7; color:#92400e; }
+                .badge-incomplete { background:#fee2e2; color:#991b1b; }
+                .badge-onhold { background:#e0e7ff; color:#3730a3; }
+                .badge-duplicate { background:#f3f4f6; color:#374151; }
+                .badge-error { background:#fee2e2; color:#991b1b; }
+                .jn-link { color:#2563eb; text-decoration:none; font-size:12px; }
+                .jn-link:hover { text-decoration:underline; }
+                .jn-policies-list { font-size:12px; color:#6b7280; margin:0; padding:0; list-style:none; }
+                .jn-policies-list li { margin-top:2px; }
+                .jn-empty { padding:2.5rem; text-align:center; color:#9ca3af; font-size:14px; }
+                .jn-count-badge { background:#dbeafe; color:#1d4ed8; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; margin-left:8px; }
+                .jn-status-label { font-size:11px; color:#9ca3af; margin-left:6px; }
+                .jn-job-client { font-weight:600; color:#111827; font-size:13px; }
+                .jn-job-detail { font-size:12px; color:#6b7280; margin-top:1px; }
+                .jn-viewbtn { display:inline-block; padding:3px 10px; font-size:11px; border-radius:5px; background:#2563eb; color:#fff; text-decoration:none; }
+                .jn-viewbtn:hover { background:#1d4ed8; }
+            </style>
+
+            <div id="jn-downloads-section">
+                <div class="jn-card">
+                    <div class="jn-card-header">
+                        <h2><i class="fas fa-file-download" style="margin-right:6px; color:#2563eb;"></i>Download File List <span id="jn-dl-count" class="jn-count-badge">...</span></h2>
+                        <select id="jn-status-filter" onchange="jnApplyFilter()" style="font-size:12px; padding:4px 8px; border:1px solid #d1d5db; border-radius:5px; color:#374151; background:#fff;">
+                            <option value="">All (Hide Processed)</option>
+                            <option value="All">Show All</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Incomplete">Incomplete</option>
+                            <option value="On Hold">On Hold</option>
+                        </select>
+                    </div>
+                    <div class="jn-card-body">
+                        <div id="jn-downloads-table-wrap"><div class="jn-empty"><i class="fas fa-spinner fa-spin"></i> Loading downloads...</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="jn-jobs-section">
+                <div class="jn-card">
+                    <div class="jn-card-header">
+                        <h2><i class="fas fa-tasks" style="margin-right:6px; color:#f59e0b;"></i>Policy Job List <span id="jn-jobs-count" class="jn-count-badge" style="background:#fef3c7;color:#92400e;">...</span></h2>
+                        <span style="font-size:12px; color:#9ca3af;">Unmatched policies requiring manual processing</span>
+                    </div>
+                    <div class="jn-card-body">
+                        <div id="jn-jobs-table-wrap"><div class="jn-empty"><i class="fas fa-spinner fa-spin"></i> Loading policy jobs...</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Store all downloads for client-side filtering
+    window._jnAllDownloads = [];
+
+    // Render downloads table
+    window.jnRenderDownloads = function(rows, filterStatus) {
+        const filtered = filterStatus
+            ? rows.filter(r => r.statusText.toLowerCase().includes(filterStatus.toLowerCase()))
+            : rows.filter(r => r.statusText !== 'Processed');
+
+        const wrap = document.getElementById('jn-downloads-table-wrap');
+        if (!wrap) return;
+
+        if (filtered.length === 0) {
+            wrap.innerHTML = '<div class="jn-empty">No downloads match the current filter.</div>';
+            return;
+        }
+
+        wrap.innerHTML = `
+            <table class="jn-table">
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Status</th>
+                        <th>Method</th>
+                        <th>Type</th>
+                        <th>Date Downloaded</th>
+                        <th>Policies</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filtered.map(r => `
+                        <tr>
+                            <td style="font-weight:500;">${r.company}</td>
+                            <td><span class="badge ${r.statusCls}">${r.statusText}</span></td>
+                            <td>${r.method}</td>
+                            <td>${r.type}</td>
+                            <td style="white-space:nowrap; color:#6b7280;">${r.date}</td>
+                            <td>
+                                ${r.policies.length > 0 ? `<ul class="jn-policies-list">${r.policies.slice(0,3).map(p => `<li><span style="color:#374151;">${p.client || '—'}</span>${p.polNo ? ` <span style="color:#9ca3af;">#${p.polNo}</span>` : ''}${p.purpose ? ` <span style="color:#d1d5db;">· ${p.purpose}</span>` : ''}</li>`).join('')}${r.policies.length > 3 ? `<li style="color:#9ca3af;">+${r.policies.length - 3} more</li>` : ''}</ul>` : '<span style="color:#d1d5db;">—</span>'}
+                            </td>
+                            <td><a href="https://ww12.jenesisnow.net/download/view/${r.jobId}" target="_blank" class="jn-viewbtn">View</a></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    };
+
+    window.jnApplyFilter = function() {
+        const filter = document.getElementById('jn-status-filter')?.value || '';
+        jnRenderDownloads(window._jnAllDownloads, filter);
+    };
+
+    // Import Latest — fetch all processed Policy-type AL3 files and run through IVANS import flow
+    window.jnImportFromJenesis = async function() {
+        const btn = document.getElementById('jn-import-btn');
+        const resetBtn = () => {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Import Latest'; }
+        };
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fetching…'; }
+
+        try {
+            // Fetch all downloads (status=All) so we can find processed Policy entries
+            const listRes = await fetch(`${apiUrl}/api/jenesis/downloads?status=All`);
+            const listData = await listRes.json();
+            const allRows = (listData.data || []).map(row => ({
+                jobId: parseJobId(row[0]),
+                type: (row[4] || '').trim(),
+                statusText: parseStatus(row[2]).text,
+                date: (row[5] || '').replace(/<[^>]+>/g, '').trim(),
+            }));
+
+            const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
+
+            if (policyRows.length === 0) {
+                if (window.showNotification) showNotification('No processed Policy downloads found in JenesisNow', 'warning');
+                return resetBtn();
+            }
+
+            // Take the 10 most recent (list is already newest-first from JenesisNow)
+            const toFetch = policyRows.slice(0, 10);
+            let allPolicies = [];
+            let fileCount = 0;
+
+            for (let i = 0; i < toFetch.length; i++) {
+                const row = toFetch[i];
+                if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Fetching file ${i + 1}/${toFetch.length}…`;
+                try {
+                    const fileRes = await fetch(`${apiUrl}/api/jenesis/file/${row.jobId}`);
+                    const fileData = await fileRes.json();
+                    const fname = fileData.filename || `jenesis_${row.jobId}.al3`;
+                    // Backend returns structured { policies: [...] } — use directly
+                    if (fileData.policies && fileData.policies.length) {
+                        fileData.policies.forEach(p => { p._srcFile = fname; });
+                        allPolicies = allPolicies.concat(fileData.policies);
+                        fileCount++;
+                    } else if (fileData.error) {
+                        console.warn(`[JenesisNow] job ${row.jobId}: ${fileData.error}`);
+                    }
+                } catch (e) {
+                    console.warn(`[JenesisNow] failed to fetch job ${row.jobId}:`, e.message);
+                }
+            }
+
+            if (allPolicies.length === 0) {
+                if (window.showNotification) showNotification('No policies found in JenesisNow download files', 'warning');
+                return resetBtn();
+            }
+
+            // Deduplicate: same policy number + insured → keep first (newest file)
+            const seen = new Set();
+            const deduped = allPolicies.filter(p => {
+                const key = ((p.policyNumber || '').replace(/\s/g, '').toLowerCase()) + '|' + ((p.insuredName || '').toLowerCase().trim());
+                if (!key || key === '|') return true;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+
+            resetBtn();
+
+            // Open IVANS review modal with JenesisNow data
+            showIvansUpload();
+            setTimeout(() => {
+                const statusEl = document.getElementById('ivans-parse-status');
+                if (statusEl) statusEl.innerHTML = `
+                    <div style="color:#15803d;font-size:13px;font-weight:600;padding:8px 14px;background:#f0fdf4;border-radius:8px;border:1px solid #86efac;margin-bottom:8px;">
+                        <i class="fas fa-check-circle"></i> Found <strong>${deduped.length}</strong> polic${deduped.length !== 1 ? 'ies' : 'y'} from <strong>${fileCount}</strong> JenesisNow file${fileCount !== 1 ? 's' : ''}
+                    </div>`;
+                showIvansReview(deduped);
+            }, 150);
+
+        } catch (err) {
+            console.error('[JenesisNow] import error:', err);
+            if (window.showNotification) showNotification('JenesisNow import error: ' + err.message, 'error');
+            resetBtn();
+        }
+    };
+
+    // Fetch downloads
+    fetch(`${apiUrl}/api/jenesis/downloads?status=-1`)
+        .then(r => r.json())
+        .then(data => {
+            const rows = (data.data || []).map(row => {
+                const st = parseStatus(row[2]);
+                return {
+                    jobId: parseJobId(row[0]),
+                    company: parseText(row[1], null),
+                    statusText: st.text,
+                    statusCls: st.cls,
+                    method: row[3] || '',
+                    type: row[4] || '',
+                    date: row[5] || '',
+                    policies: parsePolicies(row[2])
+                };
+            });
+            window._jnAllDownloads = rows;
+            const countEl = document.getElementById('jn-dl-count');
+            if (countEl) countEl.textContent = data.recordsTotal || rows.length;
+            jnRenderDownloads(rows, '');
+        })
+        .catch(err => {
+            const wrap = document.getElementById('jn-downloads-table-wrap');
+            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">Error loading downloads: ${err.message}</div>`;
+        });
+
+    // Fetch policy jobs
+    fetch(`${apiUrl}/api/jenesis/policy-jobs`)
+        .then(r => r.json())
+        .then(data => {
+            const rows = (data.data || []).map(row => {
+                const info = parsePolicyInfo(row[1]);
+                const tid = parseTransactionId(row[0]);
+                return { tid, ...info, status: parseText(row[5], null), date: (row[6] || '').replace(/<[^>]+>/g, '').trim() };
+            });
+            const countEl = document.getElementById('jn-jobs-count');
+            if (countEl) {
+                countEl.textContent = rows.length;
+                if (rows.length > 0) countEl.style.cssText = 'background:#fee2e2;color:#991b1b;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:8px;';
+            }
+            const wrap = document.getElementById('jn-jobs-table-wrap');
+            if (!wrap) return;
+            if (rows.length === 0) {
+                wrap.innerHTML = '<div class="jn-empty"><i class="fas fa-check-circle" style="color:#10b981;"></i> No unmatched policy jobs.</div>';
+                return;
+            }
+            wrap.innerHTML = `
+                <table class="jn-table">
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Company</th>
+                            <th>Policy #</th>
+                            <th>Type</th>
+                            <th>Purpose</th>
+                            <th>Effective Date</th>
+                            <th>Status</th>
+                            <th>File Date</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(r => `
+                            <tr>
+                                <td class="jn-job-client">${r.client || '—'}</td>
+                                <td class="jn-job-detail">${r.company || '—'}</td>
+                                <td style="font-family:monospace; font-size:12px;">${r.polNo || '—'}</td>
+                                <td class="jn-job-detail">${r.polType || '—'}</td>
+                                <td class="jn-job-detail">${r.purpose || '—'}</td>
+                                <td style="white-space:nowrap; color:#6b7280;">${r.effectiveDate || '—'}</td>
+                                <td><span class="badge badge-incomplete">${r.status || 'Unknown'}</span></td>
+                                <td style="white-space:nowrap; color:#6b7280; font-size:12px;">${r.date}</td>
+                                <td><a href="https://ww12.jenesisnow.net/download" target="_blank" class="jn-viewbtn" style="background:#f59e0b;">Process</a></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        })
+        .catch(err => {
+            const wrap = document.getElementById('jn-jobs-table-wrap');
+            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">Error loading policy jobs: ${err.message}</div>`;
+        });
+}
+// ─── End JenesisNow Downloads View ───────────────────────────────────────────
+
+// ─── JenesisNow Auto-Import ───────────────────────────────────────────────────
+
+// Silently import parsed policies without a review modal — updates existing, creates new
+async function _jnSilentImport(parsedPolicies) {
+    let updated = 0, created = 0;
+    const storedPols = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+
+    for (const p of parsedPolicies) {
+        const pNum = (p.policyNumber || '').replace(/\s+/g, '').toLowerCase();
+        const matchIdx = pNum ? storedPols.findIndex(ep =>
+            (ep.policyNumber || '').replace(/\s+/g, '').toLowerCase() === pNum
+        ) : -1;
+
+        if (matchIdx >= 0) {
+            const ep = storedPols[matchIdx];
+            if (p.effectiveDate)  ep.effectiveDate  = p.effectiveDate;
+            if (p.expirationDate) ep.expirationDate = p.expirationDate;
+            if (p.carrier)        ep.carrier        = p.carrier;
+            if (p.lob) { ep.lob = p.lob; const pt = _ivansLobToType(p.lob); if (pt) ep.policyType = pt; }
+            if (p.premium) { const n = parseFloat(p.premium); if (!isNaN(n)) { ep.premium = `$${n.toLocaleString()}/yr`; if (!ep.financial) ep.financial = {}; ep.financial['Annual Premium'] = n; } }
+            if (p.insuredName && !ep.clientName) ep.clientName = p.insuredName;
+            if (p.phone && ep.contact && !ep.contact['Phone']) ep.contact['Phone'] = p.phone;
+            if (p.email && ep.contact && !ep.contact['Email']) ep.contact['Email'] = p.email;
+            ep.ivansUpdated = new Date().toISOString();
+            ep.source = ep.source || 'jenesis';
+            updated++;
+            await _ivansUpsertClient(ep);
+            try { await fetch(`/api/policies/${ep.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ep) }); } catch (e) {}
+        } else {
+            const newId = `POL-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+            const n = p.premium ? parseFloat(p.premium) : 0;
+            const conObj = {};
+            if (p.insuredName) conObj['Owner Name'] = p.insuredName;
+            if (p.phone) conObj['Phone'] = p.phone;
+            if (p.email) conObj['Email'] = p.email;
+            const newPol = {
+                id: newId,
+                policyNumber:   (p.policyNumber || '').replace(/\s+/g, ''),
+                policyType:     _ivansLobToType(p.lob),
+                insuredName:    p.insuredName || '',
+                clientName:     p.insuredName || '',
+                client:         p.insuredName || '',
+                carrier:        p.carrier || '',
+                effectiveDate:  p.effectiveDate || '',
+                expirationDate: p.expirationDate || '',
+                premium:        n ? `$${n.toLocaleString()}/yr` : '',
+                financial:      { 'Annual Premium': n || 0 },
+                lob:            p.lob || '',
+                policyStatus:   'active',
+                source:         'jenesis',
+                createdAt:      Date.now(),
+                ivansUpdated:   new Date().toISOString(),
+                contact:        conObj,
+            };
+            storedPols.push(newPol);
+            created++;
+            try { await fetch('/api/policies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPol) }); } catch (e) {}
+            await _ivansUpsertClient(newPol);
+        }
+    }
+
+    localStorage.setItem('insurance_policies', JSON.stringify(storedPols));
+    return { updated, created };
+}
+
+// Mark policies as Cancel Pending based on Message-type downloads
+async function _jnMarkCancelPending(parsedPolicies) {
+    let count = 0;
+    const storedPols = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    let changed = false;
+
+    for (const p of parsedPolicies) {
+        const pNum = (p.policyNumber || '').replace(/\s+/g, '').toLowerCase();
+        if (!pNum) continue;
+        const matchIdx = storedPols.findIndex(ep =>
+            (ep.policyNumber || '').replace(/\s+/g, '').toLowerCase() === pNum
+        );
+        if (matchIdx >= 0) {
+            const existing = storedPols[matchIdx];
+            const alreadyCancelled = ['cancelled', 'cancel pending', 'cancel-pending'].includes((existing.policyStatus || '').toLowerCase());
+            if (!alreadyCancelled) {
+                existing.policyStatus = 'Cancel Pending';
+                existing.ivansUpdated = new Date().toISOString();
+                count++;
+                changed = true;
+                try { await fetch(`/api/policies/${existing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existing) }); } catch (e) {}
+            }
+        }
+    }
+
+    if (changed) localStorage.setItem('insurance_policies', JSON.stringify(storedPols));
+    return count;
+}
+
+// Poll JenesisNow for new downloads and auto-process them
+async function _jnCheckNewDownloads() {
+    const apiUrl = window.location.hostname === 'localhost'
+        ? 'http://localhost:3001'
+        : `http://${window.location.hostname}:3001`;
+
+    try {
+        const seenJobs = new Set(JSON.parse(localStorage.getItem('jn_seen_jobs') || '[]'));
+
+        const res = await fetch(`${apiUrl}/api/jenesis/downloads?status=All`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.data) return;
+
+        // Inline helpers (no DOM dependency)
+        function _pid(html) { const m = html.match(/ImportJobAction(\d+)/); return m ? m[1] : ''; }
+        function _pstat(html) {
+            const d = new DOMParser().parseFromString(html, 'text/html');
+            const span = d.querySelector('span[id^="ImportJobStatus"] a, span[id^="ImportJobStatus"]');
+            const text = (span ? span.textContent : d.body.textContent.replace(/^\(\d+\)\s*/, '')).trim();
+            return ['Processed','Pending','Incomplete','On Hold','Duplicate','Error'].find(s => text.includes(s)) || text;
+        }
+
+        const rows = data.data.map(row => ({
+            jobId:  _pid(row[0]),
+            type:   (row[4] || '').trim(),
+            status: _pstat(row[2]),
+        }));
+
+        // Find new rows BEFORE marking them seen
+        const newPolicyRows = rows.filter(r => r.jobId && !seenJobs.has(r.jobId) && (r.type === 'Policy' || r.type === 'EDoc') && r.status === 'Processed');
+        const newMsgRows    = rows.filter(r => r.jobId && !seenJobs.has(r.jobId) && r.type === 'Message' && r.status === 'Processed');
+
+        // Mark all current rows as seen
+        rows.forEach(r => { if (r.jobId) seenJobs.add(r.jobId); });
+        const seenArr = Array.from(seenJobs);
+        if (seenArr.length > 2000) seenArr.splice(0, seenArr.length - 2000);
+        localStorage.setItem('jn_seen_jobs', JSON.stringify(seenArr));
+
+        if (!newPolicyRows.length && !newMsgRows.length) return;
+
+        let totalUpdated = 0, totalCreated = 0, totalCancels = 0;
+
+        for (const row of newPolicyRows) {
+            try {
+                const fr = await fetch(`${apiUrl}/api/jenesis/file/${row.jobId}`);
+                const fd = await fr.json();
+                // Backend returns { policies: [...] } structured data
+                if (fd.policies && fd.policies.length) {
+                    const { updated, created } = await _jnSilentImport(fd.policies);
+                    totalUpdated += updated; totalCreated += created;
+                } else if (fd.error) {
+                    console.warn(`[JenesisNow] Auto job ${row.jobId}: ${fd.error}`);
+                }
+            } catch (e) { console.warn(`[JenesisNow] Auto job ${row.jobId}:`, e.message); }
+        }
+
+        for (const row of newMsgRows) {
+            try {
+                const fr = await fetch(`${apiUrl}/api/jenesis/file/${row.jobId}`);
+                const fd = await fr.json();
+                if (fd.policies && fd.policies.length) {
+                    totalCancels += await _jnMarkCancelPending(fd.policies);
+                }
+            } catch (e) { console.warn(`[JenesisNow] Cancel job ${row.jobId}:`, e.message); }
+        }
+
+        // Notify if anything happened
+        const parts = [];
+        if (totalUpdated) parts.push(`${totalUpdated} polic${totalUpdated !== 1 ? 'ies' : 'y'} updated`);
+        if (totalCreated) parts.push(`${totalCreated} new polic${totalCreated !== 1 ? 'ies' : 'y'}`);
+        if (totalCancels) parts.push(`${totalCancels} set to Cancel Pending`);
+        if (parts.length && window.showNotification) {
+            showNotification(`JenesisNow: ${parts.join(', ')}`, 'success');
+        }
+        if (parts.length) console.log('[JenesisNow] Auto-import:', parts.join(', '));
+
+    } catch (e) {
+        console.warn('[JenesisNow] Auto-import check failed:', e.message);
+    }
+}
+
+// Start background polling — called on app load
+function jnStartAutoImport() {
+    setTimeout(_jnCheckNewDownloads, 4000);           // initial check after 4s
+    setInterval(_jnCheckNewDownloads, 5 * 60 * 1000); // then every 5 minutes
+}
+
+// ─── End JenesisNow Auto-Import ───────────────────────────────────────────────
+
 function loadRenewalsData() {
     console.log('Loading renewals data...');
     // This would load renewal-specific view
@@ -20869,6 +21447,19 @@ async function _ivansUpsertClient(policy) {
             return bizKey && _clientIdentityKey(cbiz, '') === bizKey;
         });
     }
+    // Last resort: match by phone or email — prevents duplicate client records for same person
+    if (!client) {
+        const polPhone = (policy.contact?.['Phone'] || '').replace(/\D/g, '');
+        const polEmail = (policy.contact?.['Email'] || '').toLowerCase().trim();
+        if (polPhone.length >= 10 || polEmail) {
+            client = clients.find(c => {
+                const cPhone = (c.phone || '').replace(/\D/g, '');
+                const cEmail = (c.email || '').toLowerCase().trim();
+                return (polPhone.length >= 10 && cPhone === polPhone) ||
+                       (polEmail && cEmail && cEmail === polEmail);
+            });
+        }
+    }
 
     if (client) {
         // Update missing fields
@@ -20969,11 +21560,172 @@ function importClients() {
     // Would open import wizard
 }
 
+function showMergeDuplicates() {
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+
+    // Group clients by normalized phone and email to find duplicates
+    const phoneMap = {}, emailMap = {};
+    clients.forEach(c => {
+        const ph = (c.phone || '').replace(/\D/g, '');
+        const em = (c.email || '').toLowerCase().trim();
+        if (ph.length >= 10) { if (!phoneMap[ph]) phoneMap[ph] = []; phoneMap[ph].push(c); }
+        if (em)              { if (!emailMap[em]) emailMap[em] = []; emailMap[em].push(c); }
+    });
+
+    // Collect duplicate groups (2+ clients sharing phone or email)
+    const seen = new Set();
+    const groups = [];
+    [...Object.values(phoneMap), ...Object.values(emailMap)].forEach(grp => {
+        if (grp.length < 2) return;
+        const key = grp.map(c => c.id).sort().join('|');
+        if (seen.has(key)) return;
+        seen.add(key);
+        // Dedupe within group (same client could appear via both phone+email)
+        const uniq = Object.values(Object.fromEntries(grp.map(c => [c.id, c])));
+        if (uniq.length >= 2) groups.push(uniq);
+    });
+
+    if (groups.length === 0) {
+        if (window.showNotification) showNotification('No duplicate clients found!', 'success');
+        return;
+    }
+
+    function polCount(cid) {
+        return policies.filter(p => String(p.clientId) === String(cid)).length;
+    }
+
+    const rows = groups.map((grp, gi) => {
+        // Suggest keeping the one with a person name (no BIZ_SUFFIX) or most policies
+        const BIZ = /\b(llc|inc|ltd|corp|trucking|transport|logistics|hauling|services|enterprises|towing|farms)\b/i;
+        grp.sort((a, b) => {
+            const aIsBiz = BIZ.test(a.name || '');
+            const bIsBiz = BIZ.test(b.name || '');
+            if (aIsBiz !== bIsBiz) return aIsBiz ? 1 : -1; // person first
+            return polCount(b.id) - polCount(a.id); // more policies first
+        });
+        const keepId = grp[0].id;
+        return `
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:12px;" data-group="${gi}">
+            <div style="font-size:12px;color:#6b7280;margin-bottom:10px;font-weight:600;">GROUP ${gi+1} — ${grp.length} clients share same phone/email</div>
+            ${grp.map((c, i) => `
+            <div style="display:flex;align-items:center;gap:12px;padding:8px;background:${c.id===keepId?'#ecfdf5':'white'};border:1px solid ${c.id===keepId?'#6ee7b7':'#e5e7eb'};border-radius:6px;margin-bottom:6px;">
+                <input type="radio" name="keep_${gi}" value="${c.id}" ${c.id===keepId?'checked':''} style="margin:0;">
+                <div style="flex:1;">
+                    <div style="font-weight:600;font-size:14px;color:#1f2937;">${c.name || '—'}</div>
+                    <div style="font-size:12px;color:#6b7280;">${c.businessName?'Biz: '+c.businessName+' · ':''} ${c.phone||'no phone'} · ${c.email||'no email'} · ${polCount(c.id)} polic${polCount(c.id)===1?'y':'ies'}</div>
+                </div>
+                <span style="font-size:11px;padding:2px 8px;border-radius:999px;background:${c.id===keepId?'#d1fae5':'#f3f4f6'};color:${c.id===keepId?'#065f46':'#6b7280'};">${c.id===keepId?'KEEP':'MERGE INTO KEEP'}</span>
+            </div>`).join('')}
+        </div>`;
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'merge-duplicates-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+        <div style="background:white;border-radius:16px;padding:32px;max-width:700px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <div>
+                    <h2 style="margin:0;font-size:20px;font-weight:700;color:#1f2937;"><i class="fas fa-compress-alt" style="color:#f59e0b;margin-right:10px;"></i>Merge Duplicates</h2>
+                    <p style="margin:6px 0 0;font-size:14px;color:#6b7280;">Found ${groups.length} group${groups.length>1?'s':''} of duplicate clients. Select which record to keep for each group — all policies will be re-linked to the kept record, and the others will be removed.</p>
+                </div>
+                <button onclick="document.getElementById('merge-duplicates-overlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;">&times;</button>
+            </div>
+            ${rows}
+            <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb;">
+                <button onclick="document.getElementById('merge-duplicates-overlay').remove()" style="padding:10px 20px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;">Cancel</button>
+                <button onclick="_executeMerge(${groups.length})" style="padding:10px 20px;background:#f59e0b;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:600;"><i class="fas fa-compress-alt"></i> Merge All</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+}
+
+async function _executeMerge(groupCount) {
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    let totalMerged = 0;
+
+    for (let gi = 0; gi < groupCount; gi++) {
+        const radios = document.querySelectorAll(`input[name="keep_${gi}"]`);
+        let keepId = null;
+        radios.forEach(r => { if (r.checked) keepId = r.value; });
+        if (!keepId) continue;
+
+        const groupIds = [...radios].map(r => r.value);
+        const removeIds = groupIds.filter(id => id !== keepId);
+
+        const keepClient = clients.find(c => String(c.id) === keepId);
+        if (!keepClient) continue;
+
+        // Merge fields from removed clients into kept client
+        removeIds.forEach(rid => {
+            const rc = clients.find(c => String(c.id) === rid);
+            if (!rc) return;
+            if (!keepClient.phone && rc.phone)           keepClient.phone = rc.phone;
+            if (!keepClient.email && rc.email)           keepClient.email = rc.email;
+            if (!keepClient.businessName && rc.businessName) keepClient.businessName = rc.businessName;
+            if (!keepClient.address && rc.address)       keepClient.address = rc.address;
+            if (!keepClient.dateOfBirth && rc.dateOfBirth) keepClient.dateOfBirth = rc.dateOfBirth;
+        });
+
+        // Re-link all policies from removed clients to kept client
+        policies.forEach(p => {
+            if (removeIds.includes(String(p.clientId))) {
+                p.clientId = keepId;
+                p.clientName = keepClient.name || keepClient.businessName || p.clientName;
+                fetch(`/api/policies/${p.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(p) }).catch(()=>{});
+            }
+        });
+
+        // Remove duplicate clients from array
+        const newClients = clients.filter(c => !removeIds.includes(String(c.id)));
+        clients.length = 0;
+        newClients.forEach(c => clients.push(c));
+
+        // Delete removed clients from server
+        for (const rid of removeIds) {
+            await fetch(`/api/clients/${rid}`, { method:'DELETE' }).catch(()=>{});
+            totalMerged++;
+        }
+
+        // Save kept client to server
+        await fetch('/api/clients', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(keepClient) }).catch(()=>{});
+    }
+
+    localStorage.setItem('insurance_clients', JSON.stringify(clients));
+    localStorage.setItem('insurance_policies', JSON.stringify(policies));
+    document.getElementById('merge-duplicates-overlay')?.remove();
+    if (window.showNotification) showNotification(`Merged ${totalMerged} duplicate client${totalMerged!==1?'s':''}`, 'success');
+    if (typeof loadClientsView === 'function') loadClientsView();
+}
+
+function toggleMissingDataFilter() {
+    window._missingDataFilterActive = !window._missingDataFilterActive;
+    const btn = document.getElementById('missing-data-btn');
+    if (btn) {
+        if (window._missingDataFilterActive) {
+            btn.style.cssText = 'background:#fef3c7;color:#92400e;border-color:#f59e0b;font-weight:700;transition:0.2s;';
+            btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Missing Data <i class="fas fa-times" style="margin-left:4px;opacity:0.7;font-size:11px;"></i>';
+        } else {
+            btn.style.cssText = 'transition:0.2s;';
+            btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Missing Data';
+        }
+    }
+    filterClients();
+}
+
 function filterClients() {
-    const searchValue = document.getElementById('clientSearch').value.toLowerCase();
+    const searchValue = (document.getElementById('clientSearch')?.value || '').toLowerCase();
     const agentFilter = document.getElementById('clientAgentFilter');
     const selectedAgent = agentFilter ? agentFilter.value : '';
-    const rows = document.querySelectorAll('#clientsTableBody tr');
+    const tbody = document.getElementById('clientsTableBody');
+    if (!tbody) return;
+
+    // Remove existing warning banner rows
+    tbody.querySelectorAll('.missing-data-warning-row').forEach(r => r.remove());
+
+    const rows = tbody.querySelectorAll('tr');
 
     // Check if Maureen is logged in
     const sessionData = sessionStorage.getItem('vanguard_user');
@@ -20982,48 +21734,55 @@ function filterClients() {
         try {
             const user = JSON.parse(sessionData);
             isMaureen = user.username && user.username.toLowerCase() === 'maureen';
-        } catch (error) {
-            console.error('Error checking user in filterClients:', error);
-        }
+        } catch (error) {}
     }
 
-    rows.forEach(row => {
-        // Skip rows that don't have the expected structure
-        if (row.cells.length < 6) {
-            row.style.display = 'none';
-            return;
-        }
+    const missingActive = !!window._missingDataFilterActive;
 
-        // Get text for search filtering
+    rows.forEach(row => {
+        if (row.cells.length < 6) { row.style.display = 'none'; return; }
+
         const text = row.textContent.toLowerCase();
         const matchesSearch = !searchValue || text.includes(searchValue);
 
-        // Get assigned agent for agent filtering (6th column, index 5)
-        const assignedAgentCell = row.cells[5]; // "Assigned to" column
-        const assignedAgent = assignedAgentCell ? assignedAgentCell.textContent.trim() : '';
+        const assignedAgent = row.cells[5] ? row.cells[5].textContent.trim() : '';
 
-        // Special filtering logic for Maureen
         let matchesAgent;
         if (isMaureen) {
-            // For Maureen: if no specific agent selected ("All My Clients"), still only show Maureen's clients
-            if (!selectedAgent) {
-                matchesAgent = assignedAgent === 'Maureen';
-                console.log(`🔍 Maureen "All My Clients" filter: ${assignedAgent === 'Maureen' ? 'SHOW' : 'HIDE'} client assigned to "${assignedAgent}"`);
-            } else {
-                matchesAgent = assignedAgent === selectedAgent;
-            }
+            matchesAgent = !selectedAgent ? assignedAgent === 'Maureen' : assignedAgent === selectedAgent;
         } else {
-            // For non-Maureen users: exclude Maureen clients when "All Agents" is selected
-            if (!selectedAgent) {
-                matchesAgent = assignedAgent !== 'Maureen';
-                console.log(`🔍 "All Agents" filter: ${matchesAgent ? 'SHOW' : 'HIDE'} client assigned to "${assignedAgent}"`);
-            } else {
-                matchesAgent = assignedAgent === selectedAgent;
-            }
+            matchesAgent = !selectedAgent ? assignedAgent !== 'Maureen' : assignedAgent === selectedAgent;
         }
 
-        // Show row only if it matches both search and agent filters
-        row.style.display = (matchesSearch && matchesAgent) ? '' : 'none';
+        // Detect missing data fields
+        const phone    = row.cells[1] ? row.cells[1].textContent.trim() : '';
+        const email    = row.cells[2] ? row.cells[2].textContent.trim() : '';
+        const policies = row.cells[3] ? row.cells[3].textContent.trim() : '';
+        const agent    = row.cells[5] ? row.cells[5].textContent.trim() : '';
+
+        const missing = [];
+        if (!phone || phone === '—' || phone === '-' || phone === 'N/A')            missing.push('phone number');
+        if (!email || email === '—' || email === '-' || email === 'N/A')            missing.push('email address');
+        if (!policies || policies === '0' || policies === '—' || policies === '-')  missing.push('policies');
+        if (!agent  || agent  === '—' || agent  === '-' || agent  === 'Unassigned') missing.push('assigned agent');
+
+        const hasMissing = missing.length > 0;
+        const matchesMissing = !missingActive || hasMissing;
+
+        const visible = matchesSearch && matchesAgent && matchesMissing;
+        row.style.display = visible ? '' : 'none';
+
+        // Insert yellow warning banner before this row when filter is active and row is visible
+        if (visible && missingActive && hasMissing) {
+            const banner = document.createElement('tr');
+            banner.className = 'missing-data-warning-row';
+            banner.innerHTML = `<td colspan="7" style="background:#fef9c3;padding:4px 16px;border-bottom:none;border-top:2px solid #fde047;">
+                <span style="color:#b91c1c;font-size:12px;font-weight:600;">
+                    <i class="fas fa-exclamation-circle" style="margin-right:5px;"></i>Missing: ${missing.join(' · ')}
+                </span>
+            </td>`;
+            row.parentNode.insertBefore(banner, row);
+        }
     });
 }
 
@@ -22236,17 +22995,19 @@ function getBadgeClass(type) {
 }
 
 function getStatusClass(status) {
-    if (!status) return 'active'; // Default to active if no status
-    const statusLower = status.toLowerCase();
-    if (statusLower === 'active' || statusLower === 'in-force') return 'active';
-    if (statusLower === 'pending') return 'pending';
-    if (statusLower === 'expired' || statusLower === 'cancelled' || statusLower === 'non-renewed') return 'pending'; // Use pending class for orange styling
+    if (!status) return 'active';
+    const s = status.toLowerCase();
+    if (s === 'active' || s === 'in-force' || s === 'in force') return 'active';
+    if (s === 'pending') return 'pending';
+    if (s === 'cancel-pending' || s === 'cancel pending') return 'pending';
+    if (s === 'expired' || s === 'cancelled' || s === 'non-renewed' || s === 'non renewed') return 'pending';
     return 'active';
 }
 
 function formatStatus(status) {
     if (!status) return 'Active';
-    return status.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase());
+    if (status.toLowerCase() === 'cancel-pending') return 'Cancel Pending';
+    return status.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 

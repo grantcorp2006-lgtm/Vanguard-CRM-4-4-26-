@@ -136,6 +136,7 @@ function showPolicyModal(existingPolicy = null) {
                                     <option value="pending">Pending</option>
                                     <option value="in-force">In Force</option>
                                     <option value="cancelled">Cancelled</option>
+                                    <option value="cancel-pending">Cancel Pending</option>
                                     <option value="non-renewed">Non-Renewed</option>
                                     <option value="expired">Expired</option>
                                 </select>
@@ -504,6 +505,7 @@ function generateTabContent(tabId, policyType) {
                                 <option value="Pending">Pending</option>
                                 <option value="In Force">In Force</option>
                                 <option value="Cancelled">Cancelled</option>
+                                <option value="Cancel Pending">Cancel Pending</option>
                                 <option value="Non-Renewed">Non-Renewed</option>
                                 <option value="Expired">Expired</option>
                             </select>
