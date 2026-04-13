@@ -11466,6 +11466,210 @@ function loadPoliciesView() {
     const dashboardContent = document.querySelector('.dashboard-content');
     if (!dashboardContent) return;
 
+    // Inject mobile-only styles (no effect on desktop)
+    if (!document.getElementById('policies-mobile-styles')) {
+        const style = document.createElement('style');
+        style.id = 'policies-mobile-styles';
+        style.textContent = `
+            @media (max-width: 768px) {
+                /* Hide full stats bar and header action buttons */
+                .policies-view .policy-stats { display: none !important; }
+                .policies-view .content-header .header-actions { display: none !important; }
+
+                /* Compact header: just the h1 */
+                .policies-view .content-header {
+                    padding: 12px 16px !important;
+                    margin-bottom: 0 !important;
+                    border-bottom: none !important;
+                }
+                .policies-view .content-header h1 {
+                    font-size: 18px !important;
+                    margin: 0 !important;
+                }
+
+                /* 2-stat mobile row below h1 */
+                .policies-mobile-stats {
+                    display: flex !important;
+                    gap: 10px;
+                    padding: 10px 16px 12px;
+                    background: #f9fafb;
+                    border-bottom: 1px solid #e5e7eb;
+                }
+                .policies-mobile-stats .mob-stat {
+                    flex: 1;
+                    background: white;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 8px;
+                    padding: 10px 12px;
+                    text-align: center;
+                }
+                .policies-mobile-stats .mob-stat-value {
+                    display: block;
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #111827;
+                    line-height: 1.2;
+                }
+                .policies-mobile-stats .mob-stat-label {
+                    display: block;
+                    font-size: 11px;
+                    color: #6b7280;
+                    margin-top: 2px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.03em;
+                }
+
+                /* ── Filters bar ── */
+                .policies-view .filters-bar {
+                    flex-direction: column !important;
+                    gap: 8px !important;
+                    padding: 10px 12px !important;
+                }
+
+                /* Search box: full width, compact */
+                .policies-view .filters-bar .search-box {
+                    width: 100% !important;
+                    min-width: unset !important;
+                }
+                .policies-view .filters-bar .search-box input {
+                    font-size: 13px !important;
+                    padding: 7px 8px 7px 30px !important;
+                    height: 34px !important;
+                }
+
+                /* Filter dropdowns: 2×2 grid */
+                .policies-view .filters-bar .filter-group {
+                    display: grid !important;
+                    grid-template-columns: 1fr 1fr !important;
+                    gap: 6px !important;
+                    width: 100% !important;
+                }
+                .policies-view .filters-bar .filter-select {
+                    width: 100% !important;
+                    font-size: 12px !important;
+                    padding: 6px 24px 6px 8px !important;
+                    height: 34px !important;
+                    min-width: unset !important;
+                    background-size: 10px !important;
+                }
+
+                /* ── Policy table → compact cards ── */
+                .policies-view .data-table-container { overflow-x: unset !important; }
+                .policies-view .data-table thead { display: none !important; }
+                .policies-view .data-table,
+                .policies-view .data-table tbody { display: block !important; }
+                .policies-view .data-table tbody {
+                    background: #f3f4f6 !important;
+                    padding: 8px 10px !important;
+                }
+
+                /* Card shell */
+                .policies-view .data-table tr {
+                    display: flex !important;
+                    flex-wrap: wrap !important;
+                    align-items: center !important;
+                    position: relative !important;
+                    background: white !important;
+                    border-radius: 10px !important;
+                    border: 1px solid #e5e7eb !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
+                    margin-bottom: 8px !important;
+                    padding: 9px 48px 9px 11px !important;
+                    row-gap: 3px !important;
+                    column-gap: 5px !important;
+                }
+
+                /* All cells hidden + stripped by default */
+                .policies-view .data-table td {
+                    display: none !important;
+                    padding: 0 !important;
+                    border: none !important;
+                    line-height: 1.3 !important;
+                    box-sizing: border-box !important;
+                }
+
+                /* ── Row 1: [type] [status] ········· [actions] ── */
+                .policies-view .data-table td:nth-child(2) {
+                    display: block !important; order: 1 !important; flex: 0 0 auto !important;
+                }
+                .policies-view .data-table td:nth-child(9) {
+                    display: block !important; order: 2 !important; flex: 0 0 auto !important;
+                }
+                /* Uniform badge size */
+                .policies-view .data-table td:nth-child(2) .policy-type-badge,
+                .policies-view .data-table td:nth-child(9) .status-badge {
+                    display: inline-block !important;
+                    font-size: 10px !important; font-weight: 600 !important;
+                    padding: 3px 8px !important; border-radius: 4px !important;
+                    line-height: 1.4 !important; letter-spacing: 0.02em !important;
+                    text-transform: uppercase !important; white-space: nowrap !important;
+                }
+                /* Actions — full-height strip on the right */
+                .policies-view .data-table td:nth-child(10) {
+                    display: flex !important;
+                    position: absolute !important; top: 0 !important; bottom: 0 !important; right: 0 !important;
+                    width: 42px !important;
+                    flex-direction: column !important; align-items: center !important; justify-content: center !important;
+                    border-left: 1px solid #e5e7eb !important;
+                    border-radius: 0 10px 10px 0 !important;
+                    background: #f9fafb !important;
+                    gap: 0 !important;
+                }
+                .policies-view .data-table td:nth-child(10) .action-buttons {
+                    display: flex !important; flex-direction: column !important; gap: 4px !important;
+                }
+                .policies-view .data-table td:nth-child(10) .btn-icon {
+                    width: 28px !important; height: 28px !important;
+                    padding: 0 !important; font-size: 12px !important;
+                    display: flex !important; align-items: center !important;
+                    justify-content: center !important; border-radius: 6px !important;
+                }
+
+                /* ── Row 2: client name (100% → forces new row) ── */
+                .policies-view .data-table td:nth-child(3) {
+                    display: block !important; order: 4 !important;
+                    flex: 0 0 100% !important;
+                    font-size: 14px !important; font-weight: 700 !important; color: #111827 !important;
+                    white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+                }
+
+                /* ── Row 3: carrier (grows) + premium ── */
+                .policies-view .data-table td:nth-child(4) {
+                    display: block !important; order: 5 !important;
+                    flex: 1 1 0 !important; min-width: 0 !important;
+                    font-size: 11px !important; color: #6b7280 !important;
+                    white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+                }
+                .policies-view .data-table td:nth-child(7) {
+                    display: block !important; order: 6 !important; flex: 0 0 auto !important;
+                    font-size: 12px !important; font-weight: 700 !important; color: #059669 !important;
+                }
+
+                /* ── Row 4: expiry (grows) + agent ── */
+                .policies-view .data-table td:nth-child(6) {
+                    display: block !important; order: 7 !important;
+                    flex: 1 1 0 !important; min-width: 0 !important;
+                    font-size: 11px !important; color: #6b7280 !important;
+                }
+                .policies-view .data-table td:nth-child(6)::before {
+                    content: "Exp: " !important; font-weight: 600 !important; color: #374151 !important;
+                }
+                .policies-view .data-table td:nth-child(8) {
+                    display: block !important; order: 8 !important; flex: 0 0 auto !important;
+                    font-size: 11px !important; color: #6b7280 !important;
+                }
+                .policies-view .data-table td:nth-child(8)::before {
+                    content: "@ " !important; font-weight: 600 !important; color: #374151 !important;
+                }
+            }
+            /* Hide mobile stats bar on desktop */
+            @media (min-width: 769px) {
+                .policies-mobile-stats { display: none !important; }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     // Get current user and check if they are admin
     const sessionData = sessionStorage.getItem('vanguard_user');
     let currentUser = null;
@@ -11584,7 +11788,19 @@ function loadPoliciesView() {
                     </button>
                 </div>
             </header>
-            
+
+            <!-- Mobile-only: compact 2-stat row (hidden on desktop via CSS) -->
+            <div class="policies-mobile-stats">
+                <div class="mob-stat">
+                    <span class="mob-stat-value">${totalPolicies}</span>
+                    <span class="mob-stat-label">Total Policies</span>
+                </div>
+                <div class="mob-stat">
+                    <span class="mob-stat-value">${formattedPremium}</span>
+                    <span class="mob-stat-label">Total Premium</span>
+                </div>
+            </div>
+
             <div class="policy-stats">
                 <div class="mini-stat">
                     <span class="mini-stat-value">${totalPolicies}</span>
@@ -36037,9 +36253,10 @@ window.submitCRMCOIModal = async function() {
         // Set sender email
         formData.append('from', 'contact@vigagency.com');
 
-        // Pass agent so backend can pick the correct sender address
+        // Pass agent and united flag so backend can pick the correct sender address
         const policyAgent = currentPolicy?.agent || '';
         formData.append('agent', policyAgent);
+        formData.append('united', currentPolicy?.united ? 'true' : 'false');
 
         // Set recipient emails (all emails from the array)
         formData.append('to', emails.join(', '));

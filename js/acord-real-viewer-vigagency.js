@@ -31,11 +31,18 @@ window.realPdfState = {
 };
 
 // Helper function to determine signature based on agent
-function getSignatureForAgent(agent) {
+function getSignatureForAgent(agent, united) {
     console.log('🖋️ DEBUGGING SIGNATURE SELECTION:');
     console.log('  - Raw agent value:', agent);
+    console.log('  - United flag:', united);
     console.log('  - Agent type:', typeof agent);
     console.log('  - Agent truthy?', !!agent);
+
+    // United policies always use Maureen's signature regardless of agent
+    if (united) {
+        console.log('✅ SIGNATURE: Using Maureen Corp signature (United policy)');
+        return 'Maureen Corp';
+    }
 
     if (agent) {
         const lowerAgent = agent.toLowerCase();
@@ -69,9 +76,10 @@ function getSignatureForAgency(agency) {
 }
 
 // Helper function to get company information based on agency
-function getCompanyInfoForAgency(agency, agent) {
-    console.log('🏢 Determining company info for agency:', agency, '| agent:', agent);
-    const isUIG = (agency && agency.toLowerCase().includes('united')) ||
+function getCompanyInfoForAgency(agency, agent, united) {
+    console.log('🏢 Determining company info for agency:', agency, '| agent:', agent, '| united:', united);
+    const isUIG = united ||
+                  (agency && agency.toLowerCase().includes('united')) ||
                   (agent && agent.toLowerCase() === 'maureen');
     if (isUIG) {
         console.log('🔄 Using United Insurance Group company info');
@@ -621,27 +629,27 @@ function createRealFormFields(policyId, policyData) {
 
         // === PRODUCER SECTION (top left) ===
         { id: 'producer', x: 29, y: 172, width: 364, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).producer },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).producer },
         { id: 'producerAddress1', x: 29, y: 187, width: 364, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).address1 },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).address1 },
         { id: 'producerAddress2', x: 29, y: 203, width: 364, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).address2 },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).address2 },
         { id: 'producerCity', x: 29, y: 218, width: 281, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).city },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).city },
         { id: 'producerState', x: 309, y: 218, width: 23, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).state },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).state },
         { id: 'producerZip', x: 333, y: 218, width: 60, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).zip },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).zip },
 
         // === CONTACT INFO (right side of producer) ===
         { id: 'contactName', x: 450, y: 156, width: 317, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).producer },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).producer },
         { id: 'phone', x: 459, y: 172, width: 164, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).phone },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).phone },
         { id: 'fax', x: 673, y: 172, width: 94, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).fax },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).fax },
         { id: 'email', x: 450, y: 187, width: 317, height: 16,
-          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent).email },
+          value: getCompanyInfoForAgency(policyData?.agency, policyData?.agent, policyData?.united).email },
 
         // === INSURED SECTION ===
         { id: 'insured', x: 94, y: 250, width: 299, height: 16,
@@ -1122,7 +1130,7 @@ function createRealFormFields(policyId, policyData) {
 
         // === AUTHORIZED REPRESENTATIVE (signature area) ===
         { id: 'authRep', x: 403, y: 936, width: 364, height: 31,
-          value: getSignatureForAgent(policyData?.agent), bold: true, size: 16, signature: true }
+          value: getSignatureForAgent(policyData?.agent, policyData?.united), bold: true, size: 16, signature: true }
     ];
 
     // Create each field

@@ -5745,7 +5745,7 @@ app.post('/api/coi/send-request', (req, res, next) => {
     console.log('   Body fields:', Object.keys(req.body));
     console.log('   Files:', req.files ? req.files.length : 0);
 
-    const { from, to, subject, policyId, agent } = req.body;
+    const { from, to, subject, policyId, agent, united } = req.body;
 
     // Fix email formatting - remove bare CR characters that cause SMTP errors
     const message = req.body.message ? req.body.message.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : '';
@@ -5789,13 +5789,14 @@ app.post('/api/coi/send-request', (req, res, next) => {
         // Use nodemailer to send email
         const nodemailer = require('nodemailer');
 
-        // Pick sender based on agent — Maureen's policies send from UIG
-        const isUIG = agent && agent.toLowerCase() === 'maureen';
+        // Pick sender based on united flag or agent — United badge policies and Maureen's policies send from UIG
+        const isUIG = (united === 'true' || united === true) ||
+                      (agent && agent.toLowerCase() === 'maureen');
         const senderEmail = isUIG ? 'contact@uigagency.com' : 'contact@vigagency.com';
         const senderName  = isUIG ? 'UIG Agency'            : 'VIG Agency';
         const senderPass  = isUIG ? '@Jacob2007'             : (process.env.GODADDY_PASSWORD || '25nickc124!');
 
-        console.log(`📧 COI sender: ${senderEmail} (agent: ${agent || 'none'})`);
+        console.log(`📧 COI sender: ${senderEmail} (agent: ${agent || 'none'}, united: ${united || 'false'})`);
 
         // Create transporter — both UIG and VIG use GoDaddy SMTP (secureserver.net)
         const transporter = nodemailer.createTransport({
@@ -11126,17 +11127,23 @@ app.post('/api/finance/transactions/bulk', (req, res) => {
     if (!Array.isArray(transactions) || !transactions.length) return res.status(400).json({ error: 'transactions array required' });
     const txOwner = owner || 'grant';
     let imported = 0, skipped = 0;
-    const stmt = db.prepare(
+    const checkStmt = db.prepare(
+        `SELECT id FROM financial_transactions WHERE date=? AND amount=? AND description=? LIMIT 1`
+    );
+    const insertStmt = db.prepare(
         `INSERT OR IGNORE INTO financial_transactions (id,date,description,amount,category,subcategory,vendor,client,source,owner)
          VALUES (?,?,?,?,?,?,?,?,?,?)`
     );
     for (const t of transactions) {
-        const id = `TXN-${txOwner}-${t.date}-${Math.abs(t.amount).toFixed(2)}-${(t.name||t.description||'').slice(0,20).replace(/\s/g,'')}`.replace(/[^a-zA-Z0-9\-_.]/g,'');
-        stmt.run([id, t.date, t.name||t.description||'Unknown', t.amount,
+        const desc = t.name || t.description || 'Unknown';
+        const existing = checkStmt.get([t.date, t.amount, desc]);
+        if (existing) { skipped++; continue; }
+        const id = `TXN-${txOwner}-${t.date}-${Math.abs(t.amount).toFixed(2)}-${desc.slice(0,20).replace(/\s/g,'')}`.replace(/[^a-zA-Z0-9\-_.]/g,'');
+        insertStmt.run([id, t.date, desc, t.amount,
                   t.category||'Uncategorized', t.subcategory||'', t.merchant_name||t.name||'', '', source||'csv', txOwner],
                  function(err) { if (!err && this.changes > 0) imported++; else skipped++; });
     }
-    stmt.finalize(() => res.json({ success: true, imported, skipped, total: transactions.length }));
+    insertStmt.finalize(() => res.json({ success: true, imported, skipped, total: transactions.length }));
 });
 
 // ---- P&L Statement ----
