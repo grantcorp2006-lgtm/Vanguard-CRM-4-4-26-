@@ -213,10 +213,10 @@ router.post('/sync', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'userId required' });
 
     try {
-        const [fromGoogle, toGoogle] = await Promise.all([
-            syncGoogleToCRM(userId),
-            syncCRMToGoogle(userId)
-        ]);
+        // Must run sequentially: pull deletions from Google first so we don't
+        // immediately re-push events the user just deleted in Google.
+        const fromGoogle = await syncGoogleToCRM(userId);
+        const toGoogle   = await syncCRMToGoogle(userId);
         res.json({
             success: true,
             message: `Imported ${fromGoogle} events from Google, pushed ${toGoogle} events to Google`
