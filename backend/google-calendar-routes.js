@@ -352,8 +352,10 @@ async function deleteCRMEventFromGoogle(userId, crmEventId, crmEventType) {
 }
 
 /**
- * Pull changes from Google Calendar → create/update/delete CRM events.
- * Uses incremental sync (syncToken) for efficiency.
+ * Pull ALL changes from Google Calendar → CRM (create / update / delete).
+ * Uses incremental syncToken so cancellations are always visible.
+ * On a full resync (first run or expired token) we reconcile the mapping
+ * table against what Google actually returned so deletions still propagate.
  */
 async function syncGoogleToCRM(userId) {
     userId = (userId || '').toLowerCase();
@@ -364,13 +366,17 @@ async function syncGoogleToCRM(userId) {
         const tokenRow = await getTokenForUser(userId);
         const params = { calendarId: 'primary', maxResults: 250, singleEvents: true };
 
+        let isFullSync = false;
+        let windowMin = null, windowMax = null;
+
         if (tokenRow.sync_token) {
             params.syncToken = tokenRow.sync_token;
         } else {
-            const timeMin = new Date(); timeMin.setDate(timeMin.getDate() - 30);
-            const timeMax = new Date(); timeMax.setFullYear(timeMax.getFullYear() + 1);
-            params.timeMin = timeMin.toISOString();
-            params.timeMax = timeMax.toISOString();
+            isFullSync = true;
+            windowMin = new Date(); windowMin.setDate(windowMin.getDate() - 30);
+            windowMax = new Date(); windowMax.setFullYear(windowMax.getFullYear() + 1);
+            params.timeMin = windowMin.toISOString();
+            params.timeMax = windowMax.toISOString();
         }
 
         let allItems = [];
@@ -384,13 +390,14 @@ async function syncGoogleToCRM(userId) {
                 resp = await calendar.events.list(params);
             } catch (err) {
                 if (err.code === 410) {
-                    // syncToken expired — full resync
+                    // syncToken expired — fall back to full resync
+                    isFullSync = true;
                     delete params.syncToken;
                     delete params.pageToken;
-                    const timeMin = new Date(); timeMin.setDate(timeMin.getDate() - 30);
-                    const timeMax = new Date(); timeMax.setFullYear(timeMax.getFullYear() + 1);
-                    params.timeMin = timeMin.toISOString();
-                    params.timeMax = timeMax.toISOString();
+                    windowMin = new Date(); windowMin.setDate(windowMin.getDate() - 30);
+                    windowMax = new Date(); windowMax.setFullYear(windowMax.getFullYear() + 1);
+                    params.timeMin = windowMin.toISOString();
+                    params.timeMax = windowMax.toISOString();
                     await clearMappingsBySource(userId, 'google_sourced');
                     resp = await calendar.events.list(params);
                 } else throw err;
@@ -401,22 +408,32 @@ async function syncGoogleToCRM(userId) {
             newSyncToken = resp.data.nextSyncToken;
         } while (nextPage);
 
+        // Await the token save so the next sync sees it immediately
         if (newSyncToken) {
-            db.run('UPDATE google_calendar_tokens SET sync_token = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-                [newSyncToken, userId]);
+            await new Promise(resolve => db.run(
+                'UPDATE google_calendar_tokens SET sync_token = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
+                [newSyncToken, userId], () => resolve()));
         }
 
         let imported = 0;
+        // Track every active Google event ID returned in this pass
+        const seenGoogleIds = new Set();
 
         for (const gEvent of allItems) {
-            // Skip events that originated from this CRM (prevent loop)
             const priv = gEvent.extendedProperties && gEvent.extendedProperties.private;
-            if (priv && priv.crmSource === 'vanguard') continue;
+            const isCRMSourced = priv && priv.crmSource === 'vanguard';
 
             if (gEvent.status === 'cancelled') {
+                // Incremental sync: explicit deletion signal — remove from CRM regardless of source
                 await deleteGoogleSourcedEventFromCRM(gEvent.id, userId);
                 continue;
             }
+
+            // Track active event (CRM-sourced or Google-sourced)
+            seenGoogleIds.add(gEvent.id);
+
+            // Don't re-import events that originated in this CRM
+            if (isCRMSourced) continue;
 
             const isAllDay = !gEvent.start.dateTime;
             const eventDate = isAllDay ? gEvent.start.date : gEvent.start.dateTime.substring(0, 10);
@@ -427,17 +444,38 @@ async function syncGoogleToCRM(userId) {
             const existing = await getMappingByGoogleId(gEvent.id, userId);
 
             if (existing) {
-                // Update CRM event
-                db.run(
-                    'UPDATE calendar_events SET title=?, date=?, time=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND created_by=?',
-                    [title, eventDate, eventTime, description, existing.crm_event_id, userId]
-                );
+                await new Promise(resolve => db.run(
+                    'UPDATE calendar_events SET title=?, date=?, time=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND LOWER(created_by)=?',
+                    [title, eventDate, eventTime, description, existing.crm_event_id, userId], () => resolve()));
             } else {
-                // Create new CRM event
                 const newId = await createCRMEvent({ title, date: eventDate, time: eventTime, description, userId });
                 if (newId) {
                     await saveMapping(newId, 'calendar_event', gEvent.id, userId, 'google_sourced');
                     imported++;
+                }
+            }
+        }
+
+        // ── Full-resync reconciliation ─────────────────────────────────────
+        // On a full resync Google only returns ACTIVE events — deleted events
+        // are simply absent.  Compare what we got against what's in the mapping
+        // table; anything missing was deleted in Google and must be removed from CRM.
+        if (isFullSync && windowMin && windowMax) {
+            const winMinStr = windowMin.toISOString().substring(0, 10);
+            const winMaxStr = windowMax.toISOString().substring(0, 10);
+
+            const mappings = await new Promise(resolve =>
+                db.all(`SELECT m.* FROM google_calendar_event_map m
+                        LEFT JOIN calendar_events e ON e.id = CAST(m.crm_event_id AS INTEGER)
+                        WHERE m.user_id = ?
+                          AND m.crm_event_type = 'calendar_event'
+                          AND (e.date IS NULL OR (e.date >= ? AND e.date <= ?))`,
+                    [userId, winMinStr, winMaxStr], (err, rows) => resolve(rows || [])));
+
+            for (const mapping of mappings) {
+                if (!seenGoogleIds.has(mapping.google_event_id)) {
+                    console.log(`[GCal] Reconcile: ${mapping.google_event_id} absent from Google, removing CRM event ${mapping.crm_event_id}`);
+                    await deleteGoogleSourcedEventFromCRM(mapping.google_event_id, userId);
                 }
             }
         }
@@ -452,49 +490,54 @@ async function syncGoogleToCRM(userId) {
 }
 
 /**
- * Push all CRM calendar events to Google (used on first connect or manual sync).
+ * Push CRM events to Google — SAFETY NET ONLY.
+ * Only pushes events that have no Google mapping yet (i.e. the create-hook
+ * may have failed).  Events that already have a mapping are NEVER re-pushed
+ * here; that would restore events the user intentionally deleted in Google.
+ * Real-time CRM→Google sync is handled by the per-event hooks in server.js.
  */
 async function syncCRMToGoogle(userId) {
     userId = (userId || '').toLowerCase();
-    let count = 0;
+    let pushed = 0, skipped = 0;
 
-    // Sync calendar_events
+    // calendar_events — only those with no existing Google mapping
     await new Promise((resolve) => {
-        db.all('SELECT * FROM calendar_events WHERE LOWER(created_by) = ?', [(userId||'').toLowerCase()], async (err, events) => {
+        db.all('SELECT * FROM calendar_events WHERE LOWER(created_by) = ?', [userId], async (err, events) => {
             if (!err) {
                 for (const ev of (events || [])) {
+                    const existing = await getMapping(ev.id, 'calendar_event', userId);
+                    if (existing) { skipped++; continue; }   // already synced or user deleted from Google
                     const r = await pushCRMEventToGoogle(userId, ev);
-                    if (r) count++;
+                    if (r) pushed++;
                 }
-                console.log(`📤 [GCal] CRM→Google: pushed ${events.length} calendar events for ${userId}`);
             }
             resolve();
         });
     });
 
-    // Sync all active callbacks (with lead name via JOIN)
+    // callbacks — only those with no existing Google mapping
     await new Promise((resolve) => {
-        db.all(`
-            SELECT sc.*,
-                   json_extract(l.data, '$.name') AS lead_name,
-                   json_extract(l.data, '$.assignedTo') AS assigned_agent
-            FROM scheduled_callbacks sc
-            LEFT JOIN leads l ON l.id = sc.lead_id
-            WHERE sc.completed = 0
-            ORDER BY sc.date_time ASC
-        `, [], async (err, callbacks) => {
+        db.all(`SELECT sc.*,
+                       json_extract(l.data, '$.name') AS lead_name,
+                       json_extract(l.data, '$.assignedTo') AS assigned_agent
+                FROM scheduled_callbacks sc
+                LEFT JOIN leads l ON l.id = sc.lead_id
+                WHERE sc.completed = 0
+                ORDER BY sc.date_time ASC`, [], async (err, callbacks) => {
             if (!err) {
                 for (const cb of (callbacks || [])) {
+                    const existing = await getMapping(cb.id, 'callback', userId);
+                    if (existing) { skipped++; continue; }
                     const r = await pushCallbackToGoogle(userId, cb, cb.lead_name);
-                    if (r) count++;
+                    if (r) pushed++;
                 }
-                console.log(`📤 [GCal] CRM→Google: pushed ${(callbacks||[]).length} callbacks for ${userId}`);
             }
             resolve();
         });
     });
 
-    return count;
+    console.log(`📤 [GCal] CRM→Google: pushed ${pushed} new events (${skipped} already mapped, skipped)`);
+    return pushed;
 }
 
 // ─── DB Helpers ───────────────────────────────────────────────────────────────
