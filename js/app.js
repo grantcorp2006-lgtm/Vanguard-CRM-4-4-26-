@@ -2755,6 +2755,25 @@ function openCalendar() {
                     </div>
                 </div>
 
+                <!-- Google Calendar Sync Bar -->
+                <div id="gcalSyncBar" style="display: flex; align-items: center; justify-content: space-between; background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 13px;">
+                    <div id="gcalStatus" style="display: flex; align-items: center; gap: 8px; color: #6b7280;">
+                        <i class="fab fa-google" style="font-size: 15px;"></i>
+                        <span id="gcalStatusText">Checking Google Calendar...</span>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        <button id="gcalConnectBtn" onclick="connectGoogleCalendar()" style="display:none; padding: 5px 10px; background: #4285f4; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 500;">
+                            Connect
+                        </button>
+                        <button id="gcalSyncBtn" onclick="syncGoogleCalendar()" style="display:none; padding: 5px 10px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 500;">
+                            <i class="fas fa-sync-alt"></i> Sync Now
+                        </button>
+                        <button id="gcalDisconnectBtn" onclick="disconnectGoogleCalendar()" style="display:none; padding: 5px 10px; background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer; font-size: 12px;">
+                            Disconnect
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Calendar Grid -->
                 <div id="calendarGrid" style="flex: 1; background: white; border-radius: 8px; border: 1px solid #e5e7eb; padding: 8px; overflow: auto;">
                     ${generateCalendarGrid(currentYear, currentMonth)}
@@ -2847,6 +2866,9 @@ function openCalendar() {
         const agencyViewBtn = document.getElementById('agencyViewBtn');
         if (agencyViewBtn) agencyViewBtn.style.display = 'none';
     }
+
+    // Check Google Calendar connection status
+    checkGoogleCalendarStatus();
 
     // Load server data and refresh calendar display
     Promise.all([
@@ -2961,7 +2983,7 @@ function generateCalendarGrid(year, month) {
                  onmouseover="this.style.background='#f3f4f6'"
                  onmouseout="this.style.background='${isToday ? '#eff6ff' : 'white'}'">
                 <div style="font-weight: ${isToday ? '700' : '500'}; color: ${isToday ? '#1e40af' : '#374151'}; font-size: 13px; line-height: 1;">${day}</div>
-                ${events.length > 0 ? `<div style="margin-top: 2px; flex: 1;">${events.map(e => `<div style="background: ${getEventColor(e.type)}; color: white; font-size: 8px; padding: 1px 2px; border-radius: 2px; margin-bottom: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;" title="${e.title}">${e.title}</div>`).join('')}</div>` : ''}
+                ${events.length > 0 ? `<div style="margin-top: 2px; flex: 1;">${events.map(e => `<div style="background: ${e.isServerCallback ? getAgentColor(e.assignedAgent) : getEventColor(e.type)}; color: white; font-size: 8px; padding: 1px 2px; border-radius: 2px; margin-bottom: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;" title="${e.title}">${e.title}</div>`).join('')}</div>` : ''}
             </div>
         `;
     }
@@ -2976,6 +2998,138 @@ function generateCalendarGrid(year, month) {
     html += `</div>`;
     return html;
 }
+
+// ─── Google Calendar Sync ────────────────────────────────────────────────────
+
+async function checkGoogleCalendarStatus() {
+    const userId = (typeof getCurrentUser === 'function') ? getCurrentUser() : (window.currentUser || localStorage.getItem('currentUser'));
+    if (!userId || userId === 'User') return;
+    try {
+        const resp = await fetch(`/api/google-calendar/status?userId=${encodeURIComponent(userId)}`);
+        const data = await resp.json();
+
+        const statusText = document.getElementById('gcalStatusText');
+        const connectBtn = document.getElementById('gcalConnectBtn');
+        const syncBtn    = document.getElementById('gcalSyncBtn');
+        const disconnBtn = document.getElementById('gcalDisconnectBtn');
+        if (!statusText) return;
+
+        if (!data.configured) {
+            statusText.innerHTML = '<span style="color:#9ca3af;">Google Calendar (not configured)</span>';
+            return;
+        }
+
+        if (data.connected) {
+            statusText.innerHTML = `<span style="color:#22c55e;font-weight:600;">● Synced</span> <span style="color:#6b7280;">${data.email || ''}</span>`;
+            if (connectBtn) connectBtn.style.display = 'none';
+            if (syncBtn)    syncBtn.style.display    = 'inline-block';
+            if (disconnBtn) disconnBtn.style.display = 'inline-block';
+        } else {
+            statusText.innerHTML = '<span style="color:#9ca3af;">Google Calendar not connected</span>';
+            if (connectBtn) connectBtn.style.display = 'inline-block';
+            if (syncBtn)    syncBtn.style.display    = 'none';
+            if (disconnBtn) disconnBtn.style.display = 'none';
+        }
+    } catch (e) {
+        const statusText = document.getElementById('gcalStatusText');
+        if (statusText) statusText.textContent = 'Google Calendar';
+    }
+}
+
+function connectGoogleCalendar() {
+    const userId = (typeof getCurrentUser === 'function') ? getCurrentUser() : (window.currentUser || localStorage.getItem('currentUser'));
+    if (!userId || userId === 'User') return alert('Please log in first.');
+    const w = window.open(
+        `/api/google-calendar/auth?userId=${encodeURIComponent(userId)}`,
+        'GoogleCalendarAuth',
+        'width=520,height=620,resizable=yes'
+    );
+    // Listen for the popup to report back
+    const handler = (event) => {
+        if (!event.data || event.data.type !== 'google-calendar-auth') return;
+        window.removeEventListener('message', handler);
+        if (event.data.success) {
+            showToast('Google Calendar connected! Syncing…', 'success');
+            checkGoogleCalendarStatus();
+            // Auto-run a full sync after connecting
+            setTimeout(() => syncGoogleCalendar(true), 1500);
+        } else {
+            showToast('Google Calendar connection failed: ' + (event.data.error || 'Unknown error'), 'error');
+        }
+    };
+    window.addEventListener('message', handler);
+}
+
+async function syncGoogleCalendar(silent) {
+    const userId = (typeof getCurrentUser === 'function') ? getCurrentUser() : (window.currentUser || localStorage.getItem('currentUser'));
+    if (!userId || userId === 'User') return;
+
+    const syncBtn = document.getElementById('gcalSyncBtn');
+    if (syncBtn) {
+        syncBtn.disabled = true;
+        syncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing…';
+    }
+
+    try {
+        const resp = await fetch(`/api/google-calendar/sync?userId=${encodeURIComponent(userId)}`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            if (!silent) showToast(data.message || 'Calendar synced!', 'success');
+            // Reload CRM calendar events to show anything pulled from Google
+            if (typeof loadServerCalendarEvents === 'function') await loadServerCalendarEvents();
+            if (typeof refreshCalendarDisplay === 'function') refreshCalendarDisplay();
+        } else {
+            if (!silent) showToast('Sync error: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (e) {
+        if (!silent) showToast('Sync failed: ' + e.message, 'error');
+    } finally {
+        if (syncBtn) {
+            syncBtn.disabled = false;
+            syncBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Sync Now';
+        }
+    }
+}
+
+async function disconnectGoogleCalendar() {
+    if (!confirm('Disconnect Google Calendar? Events already in the CRM will remain, but future sync will stop.')) return;
+    const userId = (typeof getCurrentUser === 'function') ? getCurrentUser() : (window.currentUser || localStorage.getItem('currentUser'));
+    if (!userId || userId === 'User') return;
+    try {
+        await fetch(`/api/google-calendar/disconnect?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        showToast('Google Calendar disconnected', 'info');
+        checkGoogleCalendarStatus();
+    } catch (e) {
+        showToast('Error disconnecting: ' + e.message, 'error');
+    }
+}
+
+// Helper: show toast notification (reuse existing if available, else fallback)
+function showToast(msg, type) {
+    if (typeof window.showNotification === 'function') {
+        window.showNotification(msg, type);
+        return;
+    }
+    const colors = { success: '#22c55e', error: '#ef4444', info: '#3b82f6' };
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;bottom:24px;right:24px;background:${colors[type]||'#374151'};color:white;padding:12px 20px;border-radius:8px;font-size:14px;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,0.2);max-width:360px;`;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
+
+// Auto-sync every 5 minutes when calendar is open
+(function startGCalAutoSync() {
+    setInterval(() => {
+        // Only sync if calendar modal is visible
+        const calModal = document.getElementById('calendarLeftPanel');
+        if (calModal && calModal.offsetParent !== null) {
+            syncGoogleCalendar(true); // silent = no toast
+        }
+    }, 5 * 60 * 1000);
+})();
+
+// ─── End Google Calendar Sync ─────────────────────────────────────────────────
 
 function changeMonth(direction) {
     if (!window.calendarState) return;
@@ -3393,7 +3547,7 @@ function generateTodaysEvents() {
             : '';
 
         return `
-        <div style="background: #f9fafb; border-left: 4px solid ${getEventColor(event.type)}; padding: 12px; margin-bottom: 8px; border-radius: 4px;">
+        <div style="background: #f9fafb; border-left: 4px solid ${event.isServerCallback ? getAgentColor(event.assignedAgent) : getEventColor(event.type)}; padding: 12px; margin-bottom: 8px; border-radius: 4px;">
             <div style="font-weight: 600; color: #111827; margin-bottom: 4px;">${event.title}</div>
             <div style="font-size: 12px; color: #6b7280;">
                 <i class="fas fa-clock"></i> ${formatTime(event.time)} •
@@ -3445,7 +3599,7 @@ function generateEventsForDate(year, month, day) {
                 : '';
 
             return `
-            <div style="background: #f9fafb; border-left: 4px solid ${getEventColor(event.type)}; padding: 12px; margin-bottom: 8px; border-radius: 4px;">
+            <div style="background: #f9fafb; border-left: 4px solid ${event.isServerCallback ? getAgentColor(event.assignedAgent) : getEventColor(event.type)}; padding: 12px; margin-bottom: 8px; border-radius: 4px;">
                 <div style="font-weight: 600; color: #111827; margin-bottom: 4px;">${event.title}</div>
                 <div style="font-size: 12px; color: #6b7280;">
                     <i class="fas fa-clock"></i> ${formatTime(event.time)} •
@@ -3493,6 +3647,15 @@ function getEventColor(type) {
         'todo': '#6b7280'       // Gray for todos
     };
     return colors[type] || '#6b7280';
+}
+
+function getAgentColor(agent) {
+    const a = (agent || '').toLowerCase();
+    if (a.includes('carson')) return '#3b82f6';   // blue
+    if (a.includes('grant'))  return '#10b981';   // green
+    if (a.includes('maureen')) return '#8b5cf6';  // purple
+    if (a.includes('hunter')) return '#eab308';   // yellow
+    return '#f97316'; // orange fallback
 }
 
 function formatTime(time) {

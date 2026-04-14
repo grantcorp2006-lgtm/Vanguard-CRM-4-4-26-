@@ -5025,6 +5025,11 @@ app.get('/api/all-data', (req, res) => {
 const gmailRoutes = require('./gmail-routes');
 app.use('/api/gmail', gmailRoutes);
 
+// Google Calendar bidirectional sync
+const googleCalendarModule = require('./google-calendar-routes');
+app.use('/api/google-calendar', googleCalendarModule.router);
+googleCalendarModule.startAutoSync(); // bidirectional sync — 5min (9am-6pm EST), 10min off-hours
+
 // Outlook routes for email
 const outlookRoutes = require('./outlook-routes');
 app.use('/api/outlook', outlookRoutes);
@@ -9901,7 +9906,7 @@ app.get('/api/calendar-events', (req, res) => {
 
     db.all(`
         SELECT * FROM calendar_events
-        WHERE created_by = ?
+        WHERE LOWER(created_by) = LOWER(?)
         ORDER BY date ASC, time ASC
     `, [userId], (err, events) => {
         if (err) {
@@ -9946,6 +9951,9 @@ app.post('/api/calendar-events', (req, res) => {
 
         console.log(`📅 Created calendar event: ${title} on ${date} for user ${userId}`);
         res.json(newEvent);
+        // Push to Google Calendar if user has it connected
+        googleCalendarModule.pushCRMEventToGoogle(userId, newEvent)
+            .catch(e => console.error('[GCal] push on create error:', e.message));
     });
 
     stmt.finalize();
@@ -9979,6 +9987,9 @@ app.put('/api/calendar-events/:id', (req, res) => {
 
         console.log(`📅 Updated calendar event ${eventId} for user ${userId}`);
         res.json({ success: true });
+        // Update in Google Calendar if connected
+        googleCalendarModule.pushCRMEventToGoogle(userId, { id: eventId, title, date, time, description })
+            .catch(e => console.error('[GCal] push on update error:', e.message));
     });
 
     stmt.finalize();
@@ -10011,6 +10022,9 @@ app.delete('/api/calendar-events/:id', (req, res) => {
 
         console.log(`📅 Deleted calendar event ${eventId} for user ${userId}`);
         res.json({ success: true });
+        // Remove from Google Calendar if connected
+        googleCalendarModule.deleteCRMEventFromGoogle(userId, eventId, 'calendar_event')
+            .catch(e => console.error('[GCal] delete sync error:', e.message));
     });
 
     stmt.finalize();
