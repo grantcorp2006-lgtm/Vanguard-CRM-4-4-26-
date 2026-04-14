@@ -251,8 +251,9 @@ async function pushCRMEventToGoogle(userId, crmEvent) {
                 if (isNotFound(err)) {
                     // Event was deleted in Google — respect the deletion, remove from CRM too
                     console.log(`[GCal] calendar_event ${crmEvent.id} deleted in Google, removing from CRM`);
-                    db.run('DELETE FROM calendar_events WHERE id=? AND LOWER(created_by)=?',
-                        [crmEvent.id, userId], () => {});
+                    await new Promise(resolve => db.run(
+                        'DELETE FROM calendar_events WHERE id=? AND LOWER(created_by)=?',
+                        [crmEvent.id, userId], () => resolve()));
                     await removeMapping(crmEvent.id, 'calendar_event', userId);
                     return null;
                 } else throw err;
@@ -304,8 +305,9 @@ async function pushCallbackToGoogle(userId, callback, leadName) {
                 if (isNotFound(err)) {
                     // Callback was deleted in Google — mark completed in CRM, don't re-push
                     console.log(`[GCal] callback ${callback.id} deleted in Google, marking completed`);
-                    db.run('UPDATE scheduled_callbacks SET completed=1, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                        [callback.id], () => {});
+                    await new Promise(resolve => db.run(
+                        'UPDATE scheduled_callbacks SET completed=1, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                        [callback.id], () => resolve()));
                     await removeMapping(callback.id, 'callback', userId);
                     return null;
                 } else throw err;
@@ -546,21 +548,20 @@ async function deleteGoogleSourcedEventFromCRM(googleEventId, userId) {
     const mapping = await getMappingByGoogleId(googleEventId, userId).catch(() => null);
     if (!mapping) return;
 
-    // Delete from CRM regardless of whether the event originated in Google or the CRM —
-    // a deletion in Google always wins.
+    // Fully await all DB writes so syncCRMToGoogle never sees a stale row
     if (mapping.crm_event_type === 'callback') {
-        // Mark callback as completed rather than hard-deleting, so lead history is preserved
-        db.run('UPDATE scheduled_callbacks SET completed=1, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-            [mapping.crm_event_id], () => {});
+        await new Promise(resolve => db.run(
+            'UPDATE scheduled_callbacks SET completed=1, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+            [mapping.crm_event_id], () => resolve()));
     } else {
-        db.run('DELETE FROM calendar_events WHERE id=? AND LOWER(created_by)=?',
-            [mapping.crm_event_id, userId], () => {});
+        await new Promise(resolve => db.run(
+            'DELETE FROM calendar_events WHERE id=? AND LOWER(created_by)=?',
+            [mapping.crm_event_id, userId], () => resolve()));
     }
 
-    return new Promise((resolve) => {
-        db.run('DELETE FROM google_calendar_event_map WHERE google_event_id=? AND user_id=?',
-            [googleEventId, userId], () => resolve());
-    });
+    await new Promise(resolve => db.run(
+        'DELETE FROM google_calendar_event_map WHERE google_event_id=? AND user_id=?',
+        [googleEventId, userId], () => resolve()));
 }
 
 // ─── Misc Helpers ─────────────────────────────────────────────────────────────
