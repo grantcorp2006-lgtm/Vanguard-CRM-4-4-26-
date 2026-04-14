@@ -3776,10 +3776,11 @@ async function deleteEvent(eventId) {
                     method: 'DELETE'
                 });
 
-                if (!response.ok) {
+                if (!response.ok && response.status !== 404) {
                     throw new Error(`Server error: ${response.status}`);
                 }
 
+                // 404 = already deleted (e.g. removed by Google Calendar sync) — treat as success
                 console.log('📅 Server event deleted successfully');
 
                 // Reload server events
