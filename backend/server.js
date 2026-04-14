@@ -9970,7 +9970,7 @@ app.put('/api/calendar-events/:id', (req, res) => {
     const stmt = db.prepare(`
         UPDATE calendar_events
         SET title = ?, date = ?, time = ?, description = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND created_by = ?
+        WHERE id = ? AND LOWER(created_by) = LOWER(?)
     `);
 
     stmt.run(title, date, time || null, description || null, eventId, userId, function(err) {
@@ -10005,7 +10005,7 @@ app.delete('/api/calendar-events/:id', (req, res) => {
 
     const stmt = db.prepare(`
         DELETE FROM calendar_events
-        WHERE id = ? AND created_by = ?
+        WHERE id = ? AND LOWER(created_by) = LOWER(?)
     `);
 
     stmt.run(eventId, userId, function(err) {
@@ -10063,7 +10063,7 @@ app.get('/api/calendar/feed.ics', (req, res) => {
 
     const calEvents = new Promise((resolve, reject) => {
         const q = userId
-            ? 'SELECT * FROM calendar_events WHERE created_by = ? ORDER BY date ASC'
+            ? 'SELECT * FROM calendar_events WHERE LOWER(created_by) = LOWER(?) ORDER BY date ASC'
             : 'SELECT * FROM calendar_events ORDER BY date ASC';
         const params = userId ? [userId] : [];
         db.all(q, params, (err, rows) => err ? reject(err) : resolve(rows || []));
