@@ -644,6 +644,25 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load the correct view immediately — no delay needed
     loadContent(_initialHash);
     updateActiveMenuItem(_initialHash);
+
+    // Deep-link support: ?clientId=XXX auto-opens the client profile
+    const _dlParams = new URLSearchParams(window.location.search);
+    const _dlClientId = _dlParams.get('clientId');
+    if (_dlClientId) {
+        // Navigate to clients view, then open the profile once data is loaded
+        if (_initialHash !== '#clients') {
+            window.location.hash = '#clients';
+        }
+        const _openDeepLinkedClient = () => {
+            if (typeof viewClient === 'function') {
+                viewClient(_dlClientId);
+                // Clean the URL without reloading
+                window.history.replaceState({}, '', window.location.origin + window.location.pathname + '#clients');
+            }
+        };
+        // Give clients view time to render before opening profile
+        setTimeout(_openDeepLinkedClient, 1500);
+    }
 });
 
 // Dashboard data refresh once all resources are loaded (images, etc.)
@@ -22527,6 +22546,7 @@ function generateViewTabContent(tabId, policy) {
                 'coverage-medical': 'Medical Payments',
                 'coverage-um-uim': 'Uninsured/Underinsured Motorist',
                 'coverage-trailer-interchange': 'Trailer Interchange',
+                'coverage-non-owned-trailer': 'Non-Owned Trailer',
                 'coverage-non-trucking': 'Non-Trucking Liability',
                 'coverage-reefer': 'Reefer Breakdown',
             };
@@ -22545,7 +22565,7 @@ function generateViewTabContent(tabId, policy) {
             // Canonical display order for coverage fields
             const CVG_ORDER = ['Liability Limits','Uninsured/Underinsured Motorist','Medical Payments',
                 'Comprehensive Deductible','Collision Deductible','General Liability',
-                'Cargo Limit','Cargo Deductible','Trailer Interchange','Non-Trucking Liability',
+                'Cargo Limit','Cargo Deductible','Trailer Interchange','Non-Owned Trailer','Non-Trucking Liability',
                 'Reefer Breakdown','General Liability BI','General Liability PD',
                 'Products/Completed Ops','Personal Injury/Advertising','Fire Damage Liability',
                 'Medical Expense','UM Property Damage'];
@@ -36551,6 +36571,9 @@ window.sendCOIForPolicy = function(policyId) {
 
     console.log('📋 Final policy object:', policy);
 
+    // Expose policy so handleCheckboxChange (Add Agent / Add Insured) can read it
+    window.currentCOIPolicy = policy;
+
     // Create comprehensive COI modal similar to client portal
     const modal = document.createElement('div');
     modal.className = 'modal-overlay active';  // Add 'active' class
@@ -36647,6 +36670,14 @@ window.sendCOIForPolicy = function(policyId) {
     `;
 
     document.body.appendChild(modal);
+
+    // Auto-check Add Agent and Add Insured by default (silent — no alert if not found)
+    setTimeout(() => {
+        const agentCb = document.getElementById('addAgentCheck');
+        const insuredCb = document.getElementById('addInsuredCheck');
+        if (agentCb) { agentCb.checked = true; handleCheckboxChange('agent', true); }
+        if (insuredCb) { insuredCb.checked = true; handleCheckboxChange('insured', true); }
+    }, 0);
 
     // Close modal when clicking outside - DISABLED per user request
     // modal.addEventListener('click', function(e) {
@@ -36807,7 +36838,7 @@ window.addCRMCOIEmailRecipientWithOptions = function() {
     // Add agent email if checkbox is checked
     if (addAgentCheck.checked) {
         // Try to get agent email from policy, then fall back to name→email map
-        const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen@vigagency.com', carson: 'Carson@vigagency.com' };
+        const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen.corp@vigagency.com', carson: 'Carson@vigagency.com' };
         const _agentKey = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
         const agentEmail = currentPolicy.agentEmail || _agentEmailMap[_agentKey] || '';
 
@@ -36827,15 +36858,14 @@ window.addCRMCOIEmailRecipientWithOptions = function() {
     }
 };
 
-window.handleCheckboxChange = function(type) {
+window.handleCheckboxChange = function(type, silent) {
     const checkbox = document.getElementById(type === 'insured' ? 'addInsuredCheck' : 'addAgentCheck');
+    const dataAttr = type === 'insured' ? 'insured' : 'agent';
 
     if (checkbox.checked) {
-        // Auto-trigger add recipient when checkbox is checked
-        const currentPolicy = window.currentPolicy || {};
+        const currentPolicy = window.currentCOIPolicy || window.currentPolicy || {};
 
         if (type === 'insured') {
-            // Extract email from Contact Information section
             const insuredEmail = currentPolicy.contact?.['Email Address'] ||
                                currentPolicy.contact?.Email ||
                                currentPolicy.contact?.['Email'] ||
@@ -36843,37 +36873,63 @@ window.handleCheckboxChange = function(type) {
                                currentPolicy.policies?.[0]?.contact?.['Email Address'] ||
                                currentPolicy.policies?.[0]?.contact?.Email || '';
 
-            console.log('🔍 Debug insured email extraction:', {
-                currentPolicy: currentPolicy,
-                contact: currentPolicy.contact,
-                extractedEmail: insuredEmail
-            });
-
             if (insuredEmail) {
                 addCRMCOIEmailRecipient();
                 const newRows = document.querySelectorAll('.crm-coi-email-recipient-row');
                 const lastRow = newRows[newRows.length - 1];
+                lastRow.dataset.addedBy = 'insured';
                 const emailInput = lastRow.querySelector('.crm-coi-email-recipient');
                 emailInput.value = insuredEmail;
                 emailInput.placeholder = `${currentPolicy.clientName || currentPolicy.insured_name || 'Insured'} (Insured)`;
             } else {
-                alert('No email address found in Contact Information for this policy.');
+                checkbox.checked = false;
+                if (!silent) alert('No email address found in Contact Information for this policy.');
             }
         } else if (type === 'agent') {
-            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'grant@vigagency.com', maureen: 'maureen.corp@uigagency.com', carson: 'carson@vigagency.com' };
-            const _agentRaw = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
-            const _agentKey = Object.keys(_agentEmailMap).find(k => _agentRaw.includes(k)) || _agentRaw;
-            const agentEmail = currentPolicy.agentEmail || _agentEmailMap[_agentKey] || '';
+            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen.corp@vigagency.com', carson: 'Carson@vigagency.com' };
+            // Primary: read from policy object
+            let _agentName = currentPolicy.agent || currentPolicy.assignedTo || '';
+            // Fallback: scrape from overview tab only (not edit form labels)
+            if (!_agentName) {
+                const _overviewTab = document.getElementById('overview-view-content');
+                if (_overviewTab) {
+                    const _labels = _overviewTab.querySelectorAll('label');
+                    for (const _lbl of _labels) {
+                        if (_lbl.textContent.trim() === 'Agent') {
+                            const _p = _lbl.nextElementSibling;
+                            if (_p && _p.textContent.trim() && _p.textContent.trim() !== 'N/A') {
+                                _agentName = _p.textContent.trim();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            const _agentRaw = _agentName.toLowerCase().trim();
+            const _agentKey = Object.keys(_agentEmailMap).find(k => _agentRaw.includes(k));
+            const agentEmail = currentPolicy.agentEmail || (_agentKey ? _agentEmailMap[_agentKey] : '') || '';
 
-            addCRMCOIEmailRecipient();
-            const newRows = document.querySelectorAll('.crm-coi-email-recipient-row');
-            const lastRow = newRows[newRows.length - 1];
-            const emailInput = lastRow.querySelector('.crm-coi-email-recipient');
-            emailInput.value = agentEmail;
-            emailInput.placeholder = `${currentPolicy.agent || 'Agent'} (Agent)`;
+            if (agentEmail) {
+                addCRMCOIEmailRecipient();
+                const newRows = document.querySelectorAll('.crm-coi-email-recipient-row');
+                const lastRow = newRows[newRows.length - 1];
+                lastRow.dataset.addedBy = 'agent';
+                const emailInput = lastRow.querySelector('.crm-coi-email-recipient');
+                emailInput.value = agentEmail;
+                emailInput.placeholder = `${_agentName || 'Agent'} (Agent)`;
+            } else {
+                checkbox.checked = false;
+                if (!silent) alert('No agent email found for this policy.');
+            }
         }
-
-        // Keep the checkbox checked to show it was used
+    } else {
+        // Unchecked — remove the row that was added by this checkbox
+        const container = document.getElementById('crmCoiEmailRecipientsContainer');
+        const rows = container.querySelectorAll('.crm-coi-email-recipient-row');
+        if (rows.length > 1) {
+            const toRemove = container.querySelector(`.crm-coi-email-recipient-row[data-added-by="${dataAttr}"]`);
+            if (toRemove) toRemove.remove();
+        }
     }
 };
 
@@ -37348,6 +37404,12 @@ window.showCRMSavedCertificateHolders = function() {
             city: 'San Francisco, CA 94114',
             email: 'transportation@registrymonitoring.com',
             phone: '(216) 316-1565'
+        },
+        {
+            name: 'Assure Assist',
+            address: '543 Country Club Dr, Unit B338',
+            city: 'Simi Valley, CA 93065',
+            email: 'coi@assureassist.com'
         }
     ];
 
@@ -40033,11 +40095,13 @@ function filterTodosBySchedule(todos, scheduleView) {
             <div class="tool-window-header">
                 <div class="tool-window-title"><i class="fas fa-comments"></i><span>Team Chat</span></div>
                 <div class="tool-window-controls">
+                    <button class="tool-window-btn" title="Google Chat Settings" onclick="_toggleChatSettings()" id="chat-settings-btn" style="font-size:12px;"><i class="fab fa-google"></i></button>
                     <button class="tool-window-btn" title="Minimize" onclick="_minimizeChatWindow()"><i class="fas fa-minus"></i></button>
                     <button class="tool-window-btn" title="Close" onclick="_closeTeamChat()"><i class="fas fa-times"></i></button>
                 </div>
             </div>
-            <div class="chat-layout" style="flex:1;min-height:0;">
+            <div id="chat-settings-panel" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:16px;background:#f8fafc;"></div>
+            <div class="chat-layout" style="flex:1;min-height:0;" id="chat-layout-area">
                 <div class="chat-sidebar" id="chat-sidebar"></div>
                 <div class="chat-main">
                     <div class="chat-header-bar" id="chat-header-bar"></div>
@@ -40079,6 +40143,216 @@ function filterTodosBySchedule(todos, scheduleView) {
         if (win) win.remove();
         _chatMinimized = false;
     };
+
+    // ── Google Chat Settings Panel ─────────────────────────────────────────────
+
+    const GCHAT_DM_CHANNELS = [
+        { key: 'dm_grant_hunter',  label: 'DM: Grant \u2194 Hunter' },
+        { key: 'dm_carson_grant',  label: 'DM: Grant \u2194 Carson' },
+        { key: 'dm_carson_hunter', label: 'DM: Hunter \u2194 Carson' }
+    ];
+
+    let _gchatSettingsOpen = false;
+    let _gchatStatus = null;
+    let _slackStatus = { hasWebhook: false, hasToken: false, webhookOk: false }; // cached status { connected, spaces }
+
+    window._toggleChatSettings = async function() {
+        const panel = document.getElementById('chat-settings-panel');
+        const layout = document.getElementById('chat-layout-area');
+        if (!panel || !layout) return;
+        _gchatSettingsOpen = !_gchatSettingsOpen;
+        panel.style.display  = _gchatSettingsOpen ? 'block' : 'none';
+        layout.style.display = _gchatSettingsOpen ? 'none'  : 'flex';
+        const btn = document.getElementById('chat-settings-btn');
+        if (btn) btn.style.color = _gchatSettingsOpen ? '#2563eb' : '';
+        if (_gchatSettingsOpen) {
+            panel.innerHTML = `<div style="text-align:center;padding:30px;color:#9ca3af;font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>`;
+            try {
+                const resp = await fetch('/api/google-chat/status');
+                _gchatStatus = await resp.json();
+            } catch(e) {
+                _gchatStatus = { connected: {}, spaces: [] };
+            }
+            _renderGChatSettings();
+        }
+    };
+
+    function _renderGChatSettings() {
+        const panel = document.getElementById('chat-settings-panel');
+        if (!panel) return;
+        const { connected = {}, spaces = [] } = _gchatStatus || {};
+        const linkedMap = {};
+        (spaces || []).forEach(s => { linkedMap[s.channel] = s; });
+
+        const connRows = ['grant','hunter','carson'].map(u => {
+            const c = connected[u];
+            return `<tr>
+                <td style="padding:6px 10px;font-weight:600;font-size:13px;">${u.charAt(0).toUpperCase()+u.slice(1)}</td>
+                <td style="padding:6px 10px;font-size:12px;">
+                    ${c ? `<span style="color:#16a34a;"><i class="fas fa-check-circle"></i> ${c.email}</span>`
+                        : `<span style="color:#9ca3af;"><i class="fas fa-times-circle"></i> Not connected</span>`}
+                </td>
+                <td style="padding:6px 10px;">
+                    <a href="/api/google-chat/auth?user=${u}" target="_blank"
+                       style="font-size:12px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:3px 9px;border-radius:6px;border:1px solid #bfdbfe;">
+                       ${c ? '<i class="fas fa-sync-alt"></i> Reconnect' : '<i class="fab fa-google"></i> Connect'}</a>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const spaceChannels = [{ key: 'group', label: 'Team Channel' }, ...GCHAT_DM_CHANNELS];
+        const spaceRows = spaceChannels.map(ch => {
+            const linked = linkedMap[ch.key];
+            return `<tr id="gchat-space-row-${ch.key}">
+                <td style="padding:6px 10px;font-weight:600;font-size:13px;">${ch.label}</td>
+                <td style="padding:6px 10px;font-size:12px;color:${linked ? '#16a34a' : '#9ca3af'};">
+                    ${linked ? `<i class="fas fa-link"></i> ${linked.space_display_name || linked.space_name}` : 'Not linked'}
+                </td>
+                <td style="padding:6px 10px;display:flex;gap:6px;flex-wrap:wrap;">
+                    <button onclick="_gchatPickSpace('${ch.key}')"
+                        style="font-size:12px;padding:3px 9px;border-radius:6px;border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;cursor:pointer;">
+                        ${linked ? '<i class="fas fa-exchange-alt"></i> Change' : '<i class="fas fa-link"></i> Link Space'}</button>
+                    ${linked ? `<button onclick="_gchatUnlinkSpace('${ch.key}')"
+                        style="font-size:12px;padding:3px 9px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;cursor:pointer;">
+                        <i class="fas fa-unlink"></i> Unlink</button>` : ''}
+                </td>
+            </tr>`;
+        }).join('');
+
+        const anyConnected = Object.keys(connected).length > 0;
+
+        panel.innerHTML = `
+            <div style="max-width:500px;margin:0 auto;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+                    <i class="fab fa-google" style="font-size:20px;color:#2563eb;"></i>
+                    <span style="font-size:15px;font-weight:700;color:#111827;">Google Chat Sync</span>
+                    <button onclick="_gchatRefreshStatus()" title="Refresh"
+                        style="margin-left:auto;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;">
+                        <i class="fas fa-sync-alt"></i></button>
+                </div>
+
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;margin-bottom:6px;">Connections</div>
+                <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:16px;overflow:hidden;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <tbody>${connRows}</tbody>
+                    </table>
+                </div>
+
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;margin-bottom:6px;">Linked Spaces</div>
+                ${!anyConnected
+                    ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Connect at least one Google account above before linking spaces.</div>`
+                    : `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;" id="gchat-spaces-table">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <tbody>${spaceRows}</tbody>
+                        </table>
+                    </div>`}
+
+                <div style="margin-top:12px;font-size:11px;color:#9ca3af;line-height:1.5;">
+                    Messages sent in CRM chat will appear in the linked Google Chat space, and vice versa.
+                    Each user should connect their own Google account for accurate attribution.
+                </div>
+            </div>`;
+    }
+
+    window._gchatRefreshStatus = async function() {
+        const panel = document.getElementById('chat-settings-panel');
+        if (!panel) return;
+        try {
+            const resp = await fetch('/api/google-chat/status');
+            _gchatStatus = await resp.json();
+            _renderGChatSettings();
+        } catch(e) {}
+    };
+
+    window._gchatPickSpace = async function(channel) {
+        // Find a connected user to list spaces from
+        const connected = (_gchatStatus && _gchatStatus.connected) ? Object.keys(_gchatStatus.connected) : [];
+        if (!connected.length) { alert('Connect a Google account first.'); return; }
+
+        const btn = document.querySelector(`#gchat-space-row-${channel} button`);
+        if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading…'; btn.disabled = true; }
+
+        let spaces = [];
+        try {
+            const resp = await fetch(`/api/google-chat/spaces?user=${connected[0]}`);
+            const data = await resp.json();
+            spaces = data.spaces || [];
+        } catch(e) {
+            alert('Failed to load spaces: ' + e.message);
+            if (btn) { btn.innerHTML = '<i class="fas fa-link"></i> Link Space'; btn.disabled = false; }
+            return;
+        }
+
+        if (!spaces.length) {
+            alert('No Google Chat spaces found for this account.');
+            if (btn) { btn.innerHTML = '<i class="fas fa-link"></i> Link Space'; btn.disabled = false; }
+            return;
+        }
+
+        // Show a simple modal picker
+        const picked = await _gchatSpacePicker(spaces);
+        if (btn) { btn.innerHTML = '<i class="fas fa-link"></i> Link Space'; btn.disabled = false; }
+        if (!picked) return;
+
+        try {
+            const resp = await fetch('/api/google-chat/link-space', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel, spaceName: picked.name, user: connected[0] })
+            });
+            const result = await resp.json();
+            if (result.ok) {
+                await _gchatRefreshStatus();
+            } else {
+                alert('Failed to link space: ' + (result.error || 'Unknown error'));
+            }
+        } catch(e) {
+            alert('Error: ' + e.message);
+        }
+    };
+
+    window._gchatUnlinkSpace = async function(channel) {
+        if (!confirm('Unlink this Google Chat space?')) return;
+        try {
+            await fetch('/api/google-chat/unlink-space', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel })
+            });
+            await _gchatRefreshStatus();
+        } catch(e) { alert('Error: ' + e.message); }
+    };
+
+    function _gchatSpacePicker(spaces) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:#fff;border-radius:12px;padding:20px;width:380px;max-height:480px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+            box.innerHTML = `
+                <div style="font-weight:700;font-size:15px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>Pick a Google Chat Space</span>
+                    <button id="gchat-picker-close" style="background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer;">&times;</button>
+                </div>
+                <div style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:4px;">
+                    ${spaces.map((s, i) => `
+                        <button data-idx="${i}" style="text-align:left;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;display:flex;flex-direction:column;gap:2px;transition:background 0.1s;"
+                            onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='#fff'">
+                            <span style="font-weight:600;">${(s.displayName || s.name).replace(/</g,'&lt;')}</span>
+                            <span style="font-size:11px;color:#9ca3af;">${(s.type||'').replace(/_/g,' ')} &bull; ${s.name}</span>
+                        </button>`).join('')}
+                </div>`;
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+            box.querySelector('#gchat-picker-close').onclick = () => { overlay.remove(); resolve(null); };
+            overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+            box.querySelectorAll('button[data-idx]').forEach(b => {
+                b.onclick = () => { const idx = parseInt(b.dataset.idx); overlay.remove(); resolve(spaces[idx]); };
+            });
+        });
+    }
 
 })();
 
@@ -40599,11 +40873,13 @@ function filterTodosBySchedule(todos, scheduleView) {
                     <span>Team Chat</span>
                 </div>
                 <div class="tool-window-controls">
+                    <button class="tool-window-btn" title="Google Chat Settings" onclick="_toggleChatSettings()" id="chat-settings-btn" style="font-size:12px;"><i class="fab fa-google"></i></button>
                     <button class="tool-window-btn" title="Minimize" onclick="_minimizeChatWindow()"><i class="fas fa-minus"></i></button>
                     <button class="tool-window-btn" title="Close" onclick="_closeTeamChat()"><i class="fas fa-times"></i></button>
                 </div>
             </div>
-            <div class="chat-layout" style="flex:1;min-height:0;">
+            <div id="chat-settings-panel" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:16px;background:#f8fafc;"></div>
+            <div class="chat-layout" style="flex:1;min-height:0;" id="chat-layout-area">
                 <div class="chat-sidebar" id="chat-sidebar"></div>
                 <div class="chat-main">
                     <div class="chat-header-bar" id="chat-header-bar"></div>
@@ -40648,6 +40924,308 @@ function filterTodosBySchedule(todos, scheduleView) {
         const win = document.getElementById('team-chat-window');
         if (win) win.remove();
         _chatMinimized = false;
+    };
+
+    // ── Google Chat Settings Panel ─────────────────────────────────────────────
+
+    const GCHAT_DM_CHANNELS = [
+        { key: 'dm_grant_hunter',  label: 'DM: Grant \u2194 Hunter' },
+        { key: 'dm_carson_grant',  label: 'DM: Grant \u2194 Carson' },
+        { key: 'dm_carson_hunter', label: 'DM: Hunter \u2194 Carson' }
+    ];
+
+    let _gchatSettingsOpen = false;
+    let _gchatStatus = null;
+    let _slackStatus = { hasWebhook: false, hasToken: false, webhookOk: false };
+
+    window._toggleChatSettings = async function() {
+        const panel  = document.getElementById('chat-settings-panel');
+        const layout = document.getElementById('chat-layout-area');
+        if (!panel || !layout) return;
+        _gchatSettingsOpen = !_gchatSettingsOpen;
+        panel.style.display  = _gchatSettingsOpen ? 'block' : 'none';
+        layout.style.display = _gchatSettingsOpen ? 'none'  : 'flex';
+        const btn = document.getElementById('chat-settings-btn');
+        if (btn) btn.style.color = _gchatSettingsOpen ? '#2563eb' : '';
+        if (_gchatSettingsOpen) {
+            panel.innerHTML = `<div style="text-align:center;padding:30px;color:#9ca3af;font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading\u2026</div>`;
+            try {
+                const [gr, sr] = await Promise.all([fetch('/api/google-chat/status'), fetch('/api/slack/status')]);
+                _gchatStatus = await gr.json();
+                _slackStatus = await sr.json();
+            } catch(e) { _gchatStatus = { connected: {}, spaces: [] }; }
+            _renderGChatSettings();
+        }
+    };
+
+    function _renderGChatSettings() {
+        const panel = document.getElementById('chat-settings-panel');
+        if (!panel) return;
+        const { connected = {}, spaces = [] } = _gchatStatus || {};
+        const linkedMap = {};
+        (spaces || []).forEach(s => { linkedMap[s.channel] = s; });
+
+        const connRows = ['grant','hunter','carson'].map(u => {
+            const c = connected[u];
+            return `<tr>
+                <td style="padding:6px 10px;font-weight:600;font-size:13px;">${u.charAt(0).toUpperCase()+u.slice(1)}</td>
+                <td style="padding:6px 10px;font-size:12px;">
+                    ${c ? `<span style="color:#16a34a;"><i class="fas fa-check-circle"></i> ${c.email}</span>`
+                        : `<span style="color:#9ca3af;"><i class="fas fa-times-circle"></i> Not connected</span>`}
+                </td>
+                <td style="padding:6px 10px;">
+                    <a href="/api/google-chat/auth?user=${u}" target="_blank"
+                       style="font-size:12px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:3px 9px;border-radius:6px;border:1px solid #bfdbfe;">
+                       ${c ? '<i class="fas fa-sync-alt"></i> Reconnect' : '<i class="fab fa-google"></i> Connect'}</a>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const spaceChannels = [{ key: 'group', label: 'Team Channel' }, ...GCHAT_DM_CHANNELS];
+        const spaceRows = spaceChannels.map(ch => {
+            const linked = linkedMap[ch.key];
+            const isWebhook = linked && linked.space_name === 'webhook';
+            return `<div id="gchat-space-row-${ch.key}" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:600;font-size:13px;min-width:130px;">${ch.label}</span>
+                <span style="font-size:12px;color:${linked ? '#16a34a' : '#9ca3af'};flex:1;">
+                    ${linked ? `<i class="fas fa-${isWebhook ? 'link' : 'check-circle'}"></i> ${linked.space_display_name || 'Linked'}${isWebhook ? ' (webhook)' : ''}` : 'Not linked'}
+                </span>
+                <button onclick="_gchatSetWebhook('${ch.key}')"
+                    style="font-size:12px;padding:3px 9px;border-radius:6px;border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;cursor:pointer;white-space:nowrap;">
+                    ${linked ? '<i class="fas fa-exchange-alt"></i> Change' : '<i class="fas fa-link"></i> Set Webhook'}</button>
+                ${linked ? `<button onclick="_gchatUnlinkSpace('${ch.key}')"
+                    style="font-size:12px;padding:3px 9px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;cursor:pointer;">
+                    <i class="fas fa-unlink"></i></button>` : ''}
+            </div>`;
+        }).join('');
+
+
+        panel.innerHTML = `
+            <div style="max-width:500px;margin:0 auto;">
+
+                <!-- SLACK SECTION -->
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                    <i class="fab fa-slack" style="font-size:20px;color:#4a154b;"></i>
+                    <span style="font-size:15px;font-weight:700;color:#111827;">Slack Sync</span>
+                    <button onclick="_gchatRefreshStatus()" title="Refresh" style="margin-left:auto;background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;"><i class="fas fa-sync-alt"></i></button>
+                </div>
+
+                <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:12px;">
+                    <div style="display:flex;gap:16px;font-size:13px;">
+                        <span>${_slackStatus.hasWebhook ? '<span style="color:#16a34a"><i class="fas fa-check-circle"></i> Webhook set</span>' : '<span style="color:#9ca3af"><i class="fas fa-times-circle"></i> No webhook</span>'}</span>
+                        <span>${_slackStatus.hasToken ? '<span style="color:#16a34a"><i class="fas fa-check-circle"></i> Bot token set</span>' : '<span style="color:#9ca3af"><i class="fas fa-times-circle"></i> No bot token</span>'}</span>
+                        <span>${_slackStatus.webhookOk ? '<span style="color:#16a34a"><i class="fas fa-wifi"></i> Connected</span>' : '<span style="color:#f59e0b"><i class="fas fa-wifi"></i> Untested</span>'}</span>
+                    </div>
+                </div>
+
+                ${_slackStatus.hasWebhook && _slackStatus.hasToken ? `
+                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:12px;color:#166534;margin-bottom:12px;">
+                    <i class="fas fa-check-circle"></i> <strong>Slack is connected.</strong>
+                    Team chat messages will sync to your Slack channel.<br><br>
+                    <strong>One last step:</strong> complete the Events API setup below so Slack messages flow back into the CRM.
+                </div>` : ''}
+
+                <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:10px 12px;font-size:12px;color:#6b21a8;margin-bottom:14px;line-height:1.8;">
+                    <strong>Complete the 2-way sync (do this once):</strong><br>
+                    1. Go to <a href="https://api.slack.com/apps" target="_blank" style="color:#7c3aed;">api.slack.com/apps</a> &rarr; your app<br>
+                    2. <strong>Features &rarr; Event Subscriptions &rarr; Enable Events</strong><br>
+                    3. Request URL: <code style="background:#ede9fe;padding:1px 5px;border-radius:4px;font-size:11px;">https://162-220-14-239.nip.io/api/slack/events</code><br>
+                    4. Subscribe to bot events &rarr; add <code style="background:#ede9fe;padding:1px 5px;border-radius:4px;font-size:11px;">message.channels</code> &rarr; Save<br>
+                    5. In your Slack channel, type <code style="background:#ede9fe;padding:1px 5px;border-radius:4px;font-size:11px;">/invite @Vanguard CRM</code>
+                </div>
+
+                <hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0;">
+
+                <!-- GOOGLE CHAT SECTION (collapsed) -->
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                    <i class="fab fa-google" style="font-size:16px;color:#9ca3af;"></i>
+                    <span style="font-size:13px;font-weight:600;color:#9ca3af;">Google Chat</span>
+                    <span style="font-size:11px;color:#d1d5db;margin-left:4px;">(requires Google Workspace)</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">${spaceRows}</div>
+
+            </div>`;
+    }
+
+    window._gchatRefreshStatus = async function() {
+        try {
+            const resp = await fetch('/api/google-chat/status');
+            _gchatStatus = await resp.json();
+            _renderGChatSettings();
+        } catch(e) {}
+    };
+
+    window._gchatSetWebhook = async function(channel) {
+        const chLabels = { group: 'Team Channel', dm_grant_hunter: 'DM: Grant \u2194 Hunter', dm_carson_grant: 'DM: Grant \u2194 Carson', dm_carson_hunter: 'DM: Hunter \u2194 Carson' };
+        const label = chLabels[channel] || channel;
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#fff;border-radius:12px;padding:22px;width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+        box.innerHTML = `
+            <div style="font-weight:700;font-size:15px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+                <span><i class="fab fa-google" style="color:#2563eb;margin-right:6px;"></i>Link ${label}</span>
+                <button id="wh-close" style="background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer;">&times;</button>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;font-size:12px;color:#1e40af;margin-bottom:14px;line-height:1.6;">
+                In Google Chat: open the space &rarr; click <strong>space name</strong> &rarr; <strong>Apps &amp; Integrations</strong> &rarr; <strong>Webhooks</strong> &rarr; <strong>Add webhook</strong> &rarr; copy the URL
+            </div>
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Webhook URL</label>
+            <input id="wh-url-input" type="text" placeholder="https://chat.googleapis.com/v1/spaces/..."
+                style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;outline:none;margin-bottom:4px;"
+                onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#d1d5db'">
+            <div id="wh-err" style="font-size:11px;color:#dc2626;min-height:16px;margin-bottom:10px;"></div>
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Display name (optional)</label>
+            <input id="wh-name-input" type="text" placeholder="e.g. Vanguard Team"
+                style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;outline:none;margin-bottom:14px;"
+                onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#d1d5db'">
+            <button id="wh-save"
+                style="width:100%;padding:10px;border-radius:8px;background:#2563eb;color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;">
+                <i class="fas fa-link"></i> Save &amp; Link
+            </button>`;
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        box.querySelector('#wh-close').onclick = () => overlay.remove();
+        overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+        box.querySelector('#wh-save').onclick = async () => {
+            const url = (box.querySelector('#wh-url-input').value || '').trim();
+            const name = (box.querySelector('#wh-name-input').value || '').trim();
+            const errEl = box.querySelector('#wh-err');
+            if (!url) { errEl.textContent = 'Please paste the webhook URL.'; return; }
+            if (!url.startsWith('https://chat.googleapis.com/')) { errEl.textContent = 'URL must start with https://chat.googleapis.com/'; return; }
+            errEl.textContent = '';
+            const btn = box.querySelector('#wh-save');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving\u2026'; btn.disabled = true;
+            try {
+                const resp = await fetch('/api/google-chat/link-webhook', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel, webhookUrl: url, displayName: name || label })
+                });
+                const data = await resp.json();
+                if (data.ok) { overlay.remove(); await _gchatRefreshStatus(); }
+                else { errEl.textContent = data.error || 'Failed to save.'; btn.innerHTML = '<i class="fas fa-link"></i> Save & Link'; btn.disabled = false; }
+            } catch(e) { errEl.textContent = e.message; btn.innerHTML = '<i class="fas fa-link"></i> Save & Link'; btn.disabled = false; }
+        };
+    };
+
+    window._gchatPickSpace = async function(channel) {
+        const connected = (_gchatStatus && _gchatStatus.connected) ? Object.keys(_gchatStatus.connected) : [];
+        if (!connected.length) { alert('Connect a Google account first.'); return; }
+        const btn = document.querySelector(`#gchat-space-row-${channel} button`);
+        if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading\u2026'; btn.disabled = true; }
+
+        // Try to load spaces from API; fall back to manual input if unavailable
+        let spaces = [], apiError = null;
+        try {
+            const resp = await fetch(`/api/google-chat/spaces?user=${connected[0]}`);
+            const data = await resp.json();
+            if (data.error) apiError = data.error;
+            else spaces = data.spaces || [];
+        } catch(e) { apiError = e.message; }
+
+        if (btn) { btn.innerHTML = '<i class="fas fa-link"></i> Link Space'; btn.disabled = false; }
+
+        // Show picker — always includes manual URL input as fallback
+        const result = await _gchatSpacePicker(spaces, apiError, connected[0]);
+        if (!result) return;
+
+        try {
+            const resp = await fetch('/api/google-chat/link-space', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel, spaceName: result.name, displayName: result.displayName, user: connected[0] })
+            });
+            const data = await resp.json();
+            if (data.ok) { await _gchatRefreshStatus(); }
+            else { alert('Failed to link space: ' + (data.error || 'Unknown error')); }
+        } catch(e) { alert('Error: ' + e.message); }
+    };
+
+    window._gchatUnlinkSpace = async function(channel) {
+        if (!confirm('Unlink this Google Chat space?')) return;
+        try {
+            await fetch('/api/google-chat/unlink-space', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel })
+            });
+            await _gchatRefreshStatus();
+        } catch(e) { alert('Error: ' + e.message); }
+    };
+
+    window._gchatSpacePicker = function(spaces, apiError, connectedUser) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:#fff;border-radius:12px;padding:20px;width:420px;max-height:540px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+
+            const spaceListHtml = spaces.length
+                ? `<div style="margin-bottom:12px;">
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;margin-bottom:6px;">Your Spaces</div>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        ${spaces.map((s,i) => `<button data-idx="${i}"
+                            style="text-align:left;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;"
+                            onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='#fff'">
+                            <div style="font-weight:600;">${(s.displayName||s.name).replace(/</g,'&lt;')}</div>
+                            <div style="font-size:11px;color:#9ca3af;">${(s.type||'').replace(/_/g,' ')} &bull; ${s.name}</div>
+                        </button>`).join('')}
+                    </div>
+                  </div>`
+                : (apiError
+                    ? `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e;margin-bottom:12px;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Couldn't load spaces automatically. Paste your Chat link below instead.
+                       </div>`
+                    : '');
+
+            box.innerHTML = `
+                <div style="font-weight:700;font-size:15px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+                    <span><i class="fab fa-google" style="color:#2563eb;margin-right:6px;"></i>Link Google Chat Space</span>
+                    <button id="gchat-picker-close" style="background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer;">&times;</button>
+                </div>
+                <div style="overflow-y:auto;flex:1;">${spaceListHtml}
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;margin-bottom:6px;">
+                        ${spaces.length ? 'Or paste a link manually' : 'Paste the Google Chat space link'}
+                    </div>
+                    <input id="gchat-manual-url" type="text" placeholder="https://chat.google.com/room/... or spaces/XXXX"
+                        style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;outline:none;margin-bottom:8px;"
+                        onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#d1d5db'">
+                    <button id="gchat-manual-link-btn"
+                        style="width:100%;padding:9px;border-radius:8px;background:#2563eb;color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;">
+                        <i class="fas fa-link"></i> Link This Space
+                    </button>
+                </div>`;
+
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+
+            function close() { overlay.remove(); resolve(null); }
+            box.querySelector('#gchat-picker-close').onclick = close;
+            overlay.onclick = e => { if (e.target === overlay) close(); };
+
+            // Select from list
+            box.querySelectorAll('button[data-idx]').forEach(b => {
+                b.onclick = () => { overlay.remove(); resolve(spaces[parseInt(b.dataset.idx)]); };
+            });
+
+            // Manual URL/ID input
+            box.querySelector('#gchat-manual-link-btn').onclick = () => {
+                const raw = (box.querySelector('#gchat-manual-url').value || '').trim();
+                if (!raw) { box.querySelector('#gchat-manual-url').style.borderColor = '#ef4444'; return; }
+                // Extract space ID from various URL formats or bare IDs
+                let spaceId = raw;
+                const urlMatch = raw.match(/spaces\/([A-Za-z0-9_-]+)/);
+                const pathMatch = raw.match(/[/#]([A-Za-z0-9_-]{8,})\/?$/);
+                if (urlMatch) spaceId = 'spaces/' + urlMatch[1];
+                else if (!raw.startsWith('spaces/') && pathMatch) spaceId = 'spaces/' + pathMatch[1];
+                else if (!raw.startsWith('spaces/')) spaceId = 'spaces/' + raw;
+                overlay.remove();
+                resolve({ name: spaceId, displayName: spaceId });
+            };
+        });
     };
 
     // Show bubble on startup — poll until user session is available (up to ~10s)
