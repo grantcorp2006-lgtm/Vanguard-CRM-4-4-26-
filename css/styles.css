@@ -317,6 +317,30 @@ body {
     transition: opacity 0.3s ease;
 }
 
+/* Nav folder / dropdown styles */
+.nav-folder-arrow {
+    display: none;
+}
+.sidebar:hover .nav-folder-arrow {
+    display: inline;
+}
+.nav-folder.open .nav-folder-arrow {
+    transform: rotate(180deg);
+}
+.nav-sub-menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+}
+.nav-sub-menu li a {
+    padding-left: 2.5rem !important;
+    font-size: 0.9em;
+}
+.sidebar:not(:hover) .nav-sub-menu {
+    display: none !important;
+}
+
 .sidebar:hover .sidebar-menu li a span:not(.count) {
     display: inline;
     opacity: 1;
@@ -1593,6 +1617,11 @@ table.data-table td.client-name .client-avatar {
 .status-badge.pending {
     background: #fed7aa;
     color: #92400e;
+}
+
+.status-badge.inactive {
+    background: #e5e7eb;
+    color: #6b7280;
 }
 
 .status-badge.prospect {

@@ -4376,12 +4376,41 @@ function updateActiveMenuItem(hash) {
         }
     }
 
-    // Show Archived Leads nav item only when on leads or archived-leads
-    const archivedNavItem = document.getElementById('archived-leads-nav-item');
-    if (archivedNavItem) {
-        archivedNavItem.style.display = (normalizedHash === '#leads' || normalizedHash === '#archived-leads') ? '' : 'none';
-    }
+    // Auto-expand nav folders when on their child pages
+    const folders = [
+        { id: 'leads-nav-folder', menuId: 'leads-sub-menu', hashes: ['#leads', '#archived-leads'] },
+        { id: 'clients-nav-folder', menuId: 'clients-sub-menu', hashes: ['#clients', '#policies', '#renewals'] },
+        { id: 'leadgen-nav-folder', menuId: 'leadgen-sub-menu', hashes: ['#lead-generation', '#lead-gen-lookup', '#lead-gen-generate', '#lead-gen-sms'] }
+    ];
+    folders.forEach(f => {
+        const folder = document.getElementById(f.id);
+        const subMenu = document.getElementById(f.menuId);
+        if (folder && subMenu) {
+            if (f.hashes.includes(normalizedHash)) {
+                folder.classList.add('open');
+                subMenu.style.display = '';
+            } else {
+                folder.classList.remove('open');
+                subMenu.style.display = 'none';
+            }
+        }
+    });
 }
+
+// Nav folder toggles
+function toggleNavFolder(folderId, subMenuId) {
+    const folder = document.getElementById(folderId);
+    const subMenu = document.getElementById(subMenuId);
+    if (!folder || !subMenu) return;
+    const isOpen = folder.classList.toggle('open');
+    subMenu.style.display = isOpen ? '' : 'none';
+}
+function toggleLeadsFolder() { toggleNavFolder('leads-nav-folder', 'leads-sub-menu'); }
+function toggleClientsFolder() { toggleNavFolder('clients-nav-folder', 'clients-sub-menu'); }
+function toggleLeadGenFolder() { toggleNavFolder('leadgen-nav-folder', 'leadgen-sub-menu'); }
+window.toggleLeadsFolder = toggleLeadsFolder;
+window.toggleClientsFolder = toggleClientsFolder;
+window.toggleLeadGenFolder = toggleLeadGenFolder;
 
 // Modal Functions
 function showModal(modalId) {
@@ -4800,9 +4829,13 @@ function loadContent(section) {
             }
             break;
         case '#lead-generation':
+        case '#lead-gen-lookup':
+        case '#lead-gen-generate':
+        case '#lead-gen-sms':
             dashboardContent.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading Lead Generation...</div>';
             try {
-                loadLeadGenerationView();
+                const tabMap = { '#lead-gen-lookup': 'lookup', '#lead-gen-generate': 'generate', '#lead-gen-sms': 'sms' };
+                loadLeadGenerationView(tabMap[section] || 'lookup');
                 setTimeout(() => {
                     if (dashboardContent.innerHTML.includes('loading-spinner')) {
                         console.error('🔥 ERROR: loadLeadGenerationView() did not replace loading content!');
@@ -11890,7 +11923,7 @@ function loadPoliciesView() {
     let policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
     console.log('📊 Loading policies from localStorage:', policies.length);
 
-    // ── Filter by agent BEFORE computing stats — prevents total premium leaking to non-admins ──
+    // ── Filter by agent BEFORE computing stats — non-admins only see their own ──
     if (currentUser && currentUser.toLowerCase() === 'maureen') {
         policies = policies.filter(p => {
             const a = (p.assignedTo || p.agent || p.assignedAgent || p.producer || 'Grant').toLowerCase();
@@ -11903,24 +11936,11 @@ function loadPoliciesView() {
             return a === _cu;
         });
     }
+    // Admins see all policies — filterPolicies() adjusts after rows load
     // ─────────────────────────────────────────────────────────────────────────────────────────
 
-    // Update from server in background (non-blocking)
-    if (window.loadPoliciesFromServer) {
-        console.log('🔄 Updating policies from server in background...');
-        window.loadPoliciesFromServer().then(serverPolicies => {
-            if (serverPolicies && serverPolicies.length > 0) {
-                localStorage.setItem('insurance_policies', JSON.stringify(serverPolicies));
-                console.log('✅ Updated policies from server');
-                // Refresh the view with new data
-                if (document.querySelector('.dashboard-content')?.innerHTML?.includes('Policies Management')) {
-                    loadPoliciesView();
-                }
-            }
-        }).catch(error => {
-            console.log('⚠️ Server update failed, using localStorage data');
-        });
-    }
+    // Server sync is handled by generatePolicyRows (fix-policy-display-limit.js override)
+    // No background fetch here to avoid race conditions with double rendering
 
     // Calculate actual statistics
     const totalPolicies = policies.length;
@@ -11942,14 +11962,20 @@ function loadPoliciesView() {
         return expDate >= today && expDate <= sixtyDaysFromNow;
     }).length;
     
-    // Calculate total premium
+    // Calculate total premium (exclude expired/inactive policies)
     let totalPremium = 0;
     policies.forEach(policy => {
-        const premiumValue = policy.financial?.['Annual Premium'] || 
-                           policy.financial?.['Premium'] || 
-                           policy.premium || 
+        // Skip expired policies
+        if (policy.expirationDate) {
+            const expDate = new Date(policy.expirationDate);
+            if (expDate < today) return;
+        }
+
+        const premiumValue = policy.financial?.['Annual Premium'] ||
+                           policy.financial?.['Premium'] ||
+                           policy.premium ||
                            policy.annualPremium || 0;
-        
+
         if (premiumValue) {
             let numValue = 0;
             if (typeof premiumValue === 'number') {
@@ -12039,26 +12065,31 @@ function loadPoliciesView() {
                         <option value="">All Carriers</option>
                         <option value="progressive">Progressive</option>
                         <option value="geico">GEICO</option>
-                        <option value="state farm">State Farm</option>
-                        <option value="allstate">Allstate</option>
-                        <option value="liberty mutual">Liberty Mutual</option>
-                        <option value="farmers">Farmers</option>
+                        <option value="northland">Northland</option>
+                        <option value="canal">Canal</option>
+                        <option value="crum">Crum & Forster</option>
+                        <option value="nico">Nico</option>
+                        <option value="occidental">Occidental</option>
+                        <option value="berkley">Berkley Prime</option>
                     </select>
                     <select class="filter-select" id="policyStatusFilter" onchange="filterPolicies()">
                         <option value="">All Status</option>
-                        <option value="active">Active</option>
+                        <option value="active" selected>Active</option>
+                        <option value="inactive">Inactive</option>
                         <option value="pending">Pending</option>
                         <option value="cancelled">Cancelled</option>
                         <option value="cancel-pending">Cancel Pending</option>
                         <option value="expired">Expired</option>
                     </select>
                     ${isAdmin ? `<select class="filter-select" id="policyAgentFilter" onchange="filterPolicies()">
-                        <option value="">${currentUser && currentUser.toLowerCase() === 'maureen' ? 'All My Policies' : 'All Agents'}</option>
+                        <option value="">${currentUser && currentUser.toLowerCase() === 'maureen' ? 'All My Policies' : 'All Agencies'}</option>
                         ${currentUser && currentUser.toLowerCase() === 'maureen' ? '<option value="Maureen">Maureen</option>' : `
-                        <option value="Grant">Grant</option>
-                        <option value="Carson">Carson</option>
-                        <option value="Hunter">Hunter</option>
-                        <option value="Maureen" style="color: #2563eb;">MAUREEN</option>`}
+                        <option value="Vanguard" style="font-weight:700;color:#2563eb;">Vanguard</option>
+                        <option value="Grant">&nbsp;&nbsp;Grant</option>
+                        <option value="Carson">&nbsp;&nbsp;Carson</option>
+                        <option value="Hunter">&nbsp;&nbsp;Hunter</option>
+                        <option value="United" style="font-weight:700;color:#2563eb;">United</option>
+                        <option value="Maureen">&nbsp;&nbsp;Maureen</option>`}
                     </select>` : ''}
                 </div>
             </div>
@@ -12100,19 +12131,11 @@ function loadPoliciesView() {
                     window.initializePolicyFilters();
                 }
 
-                // AUTO-FILTER FOR MAUREEN: Apply filter immediately after policies are loaded
-                if (currentUser && currentUser.toLowerCase() === 'maureen') {
-                    setTimeout(() => {
-                        const agentFilter = document.getElementById('policyAgentFilter');
-                        if (agentFilter) {
-                            agentFilter.value = '';
-                            console.log('🔒 IMMEDIATE POLICY AUTO-FILTER: Set policy filter to "All My Policies" for Maureen');
-                            // Trigger the filter function
-                            filterPolicies();
-                            console.log('✅ IMMEDIATE POLICY AUTO-FILTER: Applied Maureen "All My Policies" filter');
-                        }
-                    }, 200); // Small delay to ensure DOM is updated
-                }
+                // Apply filter immediately for ALL users to sync stats with visible rows
+                setTimeout(() => {
+                    filterPolicies();
+                    console.log('✅ IMMEDIATE POLICY FILTER: Applied after row load');
+                }, 50);
             } catch (error) {
                 console.error('Error generating policy rows:', error);
                 tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px; color: #dc2626;">Error loading policies</td></tr>';
@@ -12171,26 +12194,28 @@ function filterPolicies() {
         // Check carrier filter
         const matchesCarrier = !selectedCarrier || carrier.includes(selectedCarrier);
 
-        // Check status filter
-        const matchesStatus = !selectedStatus || status.includes(selectedStatus);
+        // Check status filter (exact match to prevent "active" matching "inactive")
+        const matchesStatus = !selectedStatus || status.trim() === selectedStatus;
 
         // Special filtering logic for agent filter
+        const vanguardAgents = ['Grant', 'Carson', 'Hunter'];
+        const unitedAgents = ['Maureen'];
         let matchesAgent;
         if (isMaureen) {
-            // For Maureen: if no specific agent selected ("All My Policies"), still only show Maureen's policies
             if (!selectedAgent) {
                 matchesAgent = assignedAgent === 'Maureen';
             } else {
                 matchesAgent = assignedAgent === selectedAgent;
             }
+        } else if (!selectedAgent) {
+            // "All Agencies" — show everyone
+            matchesAgent = true;
+        } else if (selectedAgent === 'Vanguard') {
+            matchesAgent = vanguardAgents.includes(assignedAgent);
+        } else if (selectedAgent === 'United') {
+            matchesAgent = unitedAgents.includes(assignedAgent);
         } else {
-            // For non-Maureen users: exclude Maureen policies when "All Agents" is selected
-            if (!selectedAgent) {
-                matchesAgent = assignedAgent !== 'Maureen';
-                console.log(`🔍 "All Agents" filter: ${matchesAgent ? 'SHOW' : 'HIDE'} policy assigned to "${assignedAgent}"`);
-            } else {
-                matchesAgent = assignedAgent === selectedAgent;
-            }
+            matchesAgent = assignedAgent === selectedAgent;
         }
 
         // Show row only if it matches all filters
@@ -12201,17 +12226,19 @@ function filterPolicies() {
         if (shouldShow) {
             visibleTotal++;
 
-            if (status.includes('active')) {
+            if (status.trim() === 'active') {
                 visibleActive++;
             }
 
-            if (status.includes('pending') && status.includes('renewal')) {
+            if (status.trim() === 'pending' || status.includes('renewal')) {
                 visiblePendingRenewal++;
             }
 
-            // Parse premium for total calculation
-            const premiumValue = parseFloat(premiumText.replace(/[$,]/g, '')) || 0;
-            visibleTotalPremium += premiumValue;
+            // Parse premium for total calculation (exclude inactive/expired policies)
+            if (!status.includes('inactive')) {
+                const premiumValue = parseFloat(premiumText.replace(/[$,]/g, '')) || 0;
+                visibleTotalPremium += premiumValue;
+            }
         }
     });
 
@@ -14454,18 +14481,7 @@ window.loadLeadGenerationView = function loadLeadGenerationView(activeTab = 'loo
                 <h1>Lead Generation Database</h1>
             </header>
 
-            <!-- Folder-style tabs -->
-            <div class="folder-tabs">
-                <button class="folder-tab ${activeTab === 'lookup' ? 'active' : ''}" onclick="switchLeadSection('lookup')">
-                    <i class="fas fa-search"></i> Carrier Lookup
-                </button>
-                <button class="folder-tab ${activeTab === 'generate' ? 'active' : ''}" onclick="switchLeadSection('generate')">
-                    <i class="fas fa-magic"></i> Generate Leads
-                </button>
-                <button class="folder-tab ${activeTab === 'sms' ? 'active' : ''}" onclick="switchLeadSection('sms')">
-                    <i class="fas fa-sms"></i> SMS Blast
-                </button>
-            </div>
+            <!-- Tabs removed — navigation is via sidebar sub-menu -->
             
             <div class="lead-gen-container">
                 <!-- Carrier Lookup Section -->
@@ -14520,7 +14536,7 @@ window.loadLeadGenerationView = function loadLeadGenerationView(activeTab = 'loo
                     ${getGenerateLeadsContent()}
                 </div>
 
-                <!-- SMS Blast Section -->
+                <!-- Email & SMS Blast Section -->
                 <div id="smsBlastSection" class="tab-section" style="display: ${activeTab === 'sms' ? 'block' : 'none'};">
                     ${getSMSBlastContent()}
                 </div>
@@ -18599,9 +18615,8 @@ async function loadDownloadsView() {
     const dashboardContent = document.querySelector('.dashboard-content');
     if (!dashboardContent) return;
 
-    const apiUrl = window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : `http://${window.location.hostname}:3001`;
+    const apiUrl = window.location.origin;
+    const _myNavGen = window._navGen || 0;
 
     // Helper: parse HTML string and extract text of a selector
     function parseText(html, sel) {
@@ -18675,7 +18690,7 @@ async function loadDownloadsView() {
                     <button id="jn-import-btn" onclick="jnImportFromJenesis()" style="padding:6px 16px; font-size:13px; display:flex; align-items:center; gap:6px; border:none; border-radius:6px; background:#2563eb; cursor:pointer; color:#fff; font-weight:600;">
                         <i class="fas fa-cloud-download-alt"></i> Import Latest
                     </button>
-                    <button onclick="loadDownloadsView()" class="btn-secondary" style="padding:6px 14px; font-size:13px; display:flex; align-items:center; gap:6px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer; color:#374151;">
+                    <button id="jn-refresh-btn" onclick="jnRefreshData()" class="btn-secondary" style="padding:6px 14px; font-size:13px; display:flex; align-items:center; gap:6px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer; color:#374151;">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                 </div>
@@ -18883,10 +18898,24 @@ async function loadDownloadsView() {
         }
     };
 
-    // Fetch downloads
-    fetch(`${apiUrl}/api/jenesis/downloads?status=-1`)
-        .then(r => r.json())
-        .then(data => {
+    // ── jnRefreshData: re-fetch both tables without rebuilding DOM shell ──────────
+    async function jnRefreshData() {
+        const btn = document.getElementById('jn-refresh-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...'; }
+
+        const controller = new AbortController();
+        const abortTimer = setTimeout(() => controller.abort(), 15000);
+
+        try {
+        const [dlResult, jobsResult] = await Promise.allSettled([
+            fetch(`${apiUrl}/api/jenesis/downloads?status=-1`, { cache: 'no-store', signal: controller.signal }).then(r => r.json()),
+            fetch(`${apiUrl}/api/jenesis/policy-jobs`, { cache: 'no-store', signal: controller.signal }).then(r => r.json()),
+        ]);
+        clearTimeout(abortTimer);
+
+        // Downloads table
+        if (dlResult.status === 'fulfilled') {
+            const data = dlResult.value;
             const rows = (data.data || []).map(row => {
                 const st = parseStatus(row[2]);
                 return {
@@ -18903,17 +18932,15 @@ async function loadDownloadsView() {
             window._jnAllDownloads = rows;
             const countEl = document.getElementById('jn-dl-count');
             if (countEl) countEl.textContent = data.recordsTotal || rows.length;
-            jnRenderDownloads(rows, '');
-        })
-        .catch(err => {
+            jnRenderDownloads(rows, document.getElementById('jn-status-filter')?.value || '');
+        } else {
             const wrap = document.getElementById('jn-downloads-table-wrap');
-            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">Error loading downloads: ${err.message}</div>`;
-        });
+            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">Error loading downloads: ${dlResult.reason?.message}</div>`;
+        }
 
-    // Fetch policy jobs
-    fetch(`${apiUrl}/api/jenesis/policy-jobs`)
-        .then(r => r.json())
-        .then(data => {
+        // Policy jobs table
+        if (jobsResult.status === 'fulfilled') {
+            const data = jobsResult.value;
             const rows = (data.data || []).map(row => {
                 const info = parsePolicyInfo(row[1]);
                 const tid = parseTransactionId(row[0]);
@@ -18962,11 +18989,28 @@ async function loadDownloadsView() {
                     </tbody>
                 </table>
             `;
-        })
-        .catch(err => {
+        } else {
             const wrap = document.getElementById('jn-jobs-table-wrap');
-            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">Error loading policy jobs: ${err.message}</div>`;
-        });
+            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">Error loading policy jobs: ${jobsResult.reason?.message}</div>`;
+        }
+        } catch (e) {
+            const wrap = document.getElementById('jn-downloads-table-wrap');
+            if (wrap) wrap.innerHTML = `<div class="jn-empty" style="color:#ef4444;">${e.name === 'AbortError' ? 'Request timed out — JenesisNow took too long to respond.' : 'Error: ' + e.message}</div>`;
+        } finally {
+            clearTimeout(abortTimer);
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh'; }
+        }
+    }
+    window.jnRefreshData = jnRefreshData;
+
+    // Initial load
+    jnRefreshData();
+
+    // Auto-poll every 90s; self-cancel when user navigates away
+    const _jnPollTimer = setInterval(() => {
+        if (window._navGen !== _myNavGen) { clearInterval(_jnPollTimer); return; }
+        jnRefreshData();
+    }, 90000);
 }
 // ─── End JenesisNow Downloads View ───────────────────────────────────────────
 
@@ -19066,9 +19110,7 @@ async function _jnMarkCancelPending(parsedPolicies) {
 
 // Poll JenesisNow for new downloads and auto-process them
 async function _jnCheckNewDownloads() {
-    const apiUrl = window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : `http://${window.location.hostname}:3001`;
+    const apiUrl = window.location.origin;
 
     try {
         const seenJobs = new Set(JSON.parse(localStorage.getItem('jn_seen_jobs') || '[]'));
@@ -23050,6 +23092,11 @@ async function generatePolicyRows() {
         // Check if policy is expired based on expiration date
         let statusClass = getStatusClass(policy.policyStatus || policy.status);
         let displayStatus = policy.policyStatus || policy.status || 'Active';
+        // Normalize any DB-stored "UPDATE POLICY" status
+        if (displayStatus.toUpperCase() === 'UPDATE POLICY') {
+            displayStatus = 'Inactive';
+            statusClass = 'inactive';
+        }
 
         // Override status if policy has expired
         if (policy.expirationDate) {
@@ -23057,8 +23104,8 @@ async function generatePolicyRows() {
             const expirationDate = new Date(policy.expirationDate);
 
             if (expirationDate < today) {
-                statusClass = 'pending'; // This will map to orange styling
-                displayStatus = 'UPDATE POLICY';
+                statusClass = 'inactive'; // Grey styling for expired policies
+                displayStatus = 'Inactive';
             }
         }
         // Check multiple possible locations for the premium
