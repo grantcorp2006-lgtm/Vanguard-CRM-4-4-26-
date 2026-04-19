@@ -133,10 +133,43 @@ app.get('/', (req, res) => {
     });
 });
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json({ limit: '50mb' }));
+// ── Security Middleware ──────────────────────────────────────────────────────
+const helmet = require('helmet');
+const { authenticateToken, requireRole, auditLog } = require('./auth-middleware');
+const authRoutes = require('./auth-routes');
+const { encryptField, decryptField } = require('./crypto-utils');
+
+app.use(helmet({
+    contentSecurityPolicy: false,       // CRM loads CDN scripts
+    crossOriginEmbedderPolicy: false
+}));
+
+app.use(cors({
+    origin: [
+        'https://162-220-14-239.nip.io',
+        'http://localhost:3000',
+        'http://localhost:3001'
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(bodyParser.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
+
+// Auth routes (public — no JWT required)
+app.use('/api/auth', authRoutes);
+
+// Protect all /api/* routes except public paths
+app.use('/api', (req, res, next) => {
+    const publicPaths = ['/auth/', '/health', '/portal/', '/twilio/incoming-call',
+                         '/twilio/call-status', '/twilio/recording-status',
+                         '/twilio/voicemail-transcription', '/twilio/recording-complete',
+                         '/twilio/conference-status', '/twilio/call-status-callback'];
+    if (publicPaths.some(p => req.path.startsWith(p))) return next();
+    return authenticateToken(req, res, next);
+});
 
 // Multer configuration for file uploads
 const uploadDir = '/var/www/vanguard/uploads/documents/';
@@ -1031,12 +1064,7 @@ app.post('/api/policies', (req, res) => {
         console.log('🔧 Generated policy ID:', id);
     }
 
-    // If no clientId but have client name, try to use policy number
-    if (!clientId && policy.policyNumber) {
-        clientId = policy.policyNumber;
-        policy.clientId = clientId;
-        console.log('🔧 Set client ID to policy number:', clientId);
-    }
+    // NOTE: do NOT fall back to policy number as clientId — that breaks portal lookups.
 
     // Structure data in the same nested format as existing policies
     const policyData = {
@@ -5030,6 +5058,15 @@ const googleCalendarModule = require('./google-calendar-routes');
 app.use('/api/google-calendar', googleCalendarModule.router);
 googleCalendarModule.startAutoSync(); // bidirectional sync — 5min (9am-6pm EST), 10min off-hours
 
+// Google Chat bidirectional sync
+const googleChatModule = require('./google-chat-routes');
+app.use('/api/google-chat', googleChatModule.router);
+googleChatModule.startSync(5000); // poll every 5 seconds
+
+// Slack bidirectional sync
+const slackModule = require('./slack-routes');
+app.use('/api/slack', slackModule.router);
+
 // Outlook routes for email
 const outlookRoutes = require('./outlook-routes');
 app.use('/api/outlook', outlookRoutes);
@@ -5041,6 +5078,10 @@ app.use('/api/titan', titanRoutes);
 // COI PDF Generator routes
 const coiPdfRoutes = require('./coi-pdf-generator');
 app.use('/api/coi', coiPdfRoutes);
+
+// JenesisNow integration routes
+const jenesisRoutes = require('./jenesis-routes');
+app.use('/api/jenesis', jenesisRoutes);
 
 // COI Request Email endpoint will be defined after multer configuration
 
@@ -5799,7 +5840,7 @@ app.post('/api/coi/send-request', (req, res, next) => {
                       (agent && agent.toLowerCase() === 'maureen');
         const senderEmail = isUIG ? 'contact@uigagency.com' : 'contact@vigagency.com';
         const senderName  = isUIG ? 'UIG Agency'            : 'VIG Agency';
-        const senderPass  = isUIG ? '@Jacob2007'             : (process.env.GODADDY_PASSWORD || '25nickc124!');
+        const senderPass  = isUIG ? process.env.GODADDY_UIG_PASSWORD : (process.env.GODADDY_VIG_PASSWORD || process.env.GODADDY_PASSWORD);
 
         console.log(`📧 COI sender: ${senderEmail} (agent: ${agent || 'none'}, united: ${united || 'false'})`);
 
@@ -9660,7 +9701,7 @@ app.post('/api/send-callback-reminder', async (req, res) => {
             secure: true,
             auth: {
                 user: 'contact@vigagency.com',
-                pass: process.env.GODADDY_PASSWORD || '25nickc124!'
+                pass: process.env.GODADDY_VIG_PASSWORD || process.env.GODADDY_PASSWORD
             }
         });
 
@@ -10692,7 +10733,12 @@ function getPlaidConnection() {
     return new Promise((resolve, reject) => {
         db.get('SELECT * FROM plaid_connections ORDER BY created_at DESC LIMIT 1', (err, row) => {
             if (err) reject(err);
-            else resolve(row || null);
+            else if (row && row.access_token) {
+                row.access_token = decryptField(row.access_token);
+                resolve(row);
+            } else {
+                resolve(row || null);
+            }
         });
     });
 }
@@ -10774,7 +10820,7 @@ app.post('/api/plaid/exchange-token', async (req, res) => {
             db.run(
                 `INSERT INTO plaid_connections (access_token, item_id, institution_id, institution_name, account_id, account_name, account_type, account_subtype)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [accessToken, itemId, institutionId, institutionName,
+                [encryptField(accessToken), itemId, institutionId, institutionName,
                  account?.account_id || '', account?.name || 'Account',
                  account?.type || 'depository', account?.subtype || 'checking'],
                 (err) => { if (err) reject(err); else resolve(); }
@@ -11598,16 +11644,27 @@ app.get('/api/chat/messages', (req, res) => {
 app.post('/api/chat/send', (req, res) => {
     const { sender, recipient, message } = req.body || {};
     if (!sender || !message) return res.status(400).json({ error: 'Missing fields' });
-    const readBy = JSON.stringify([sender]);
+    const senderLc    = sender.toLowerCase();
+    const recipientLc = recipient ? recipient.toLowerCase() : null;
+    const readBy = JSON.stringify([senderLc]);
     db.run(
         `INSERT INTO chat_messages (sender, recipient, message, read_by) VALUES (?, ?, ?, ?)`,
-        [sender.toLowerCase(), recipient ? recipient.toLowerCase() : null, message, readBy],
+        [senderLc, recipientLc, message, readBy],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
-            db.get('SELECT * FROM chat_messages WHERE id = ?', [this.lastID], (err2, row) => {
-                if (err2 || !row) return res.json({ ok: true, id: this.lastID });
+            const crmMessageId = this.lastID;
+            db.get('SELECT * FROM chat_messages WHERE id = ?', [crmMessageId], (err2, row) => {
+                if (err2 || !row) return res.json({ ok: true, id: crmMessageId });
                 res.json({ ok: true, message: { ...row, read_by: JSON.parse(row.read_by || '[]') } });
             });
+            // Forward to Google Chat + Slack asynchronously (non-blocking)
+            const channel = recipientLc
+                ? 'dm_' + [senderLc, recipientLc].sort().join('_')
+                : 'group';
+            googleChatModule.forwardToGChat(channel, senderLc, message, crmMessageId)
+                .catch(e => console.error('[GChat] Forward error:', e.message));
+            slackModule.forwardToSlack(channel, senderLc, message, crmMessageId)
+                .catch(e => console.error('[Slack] Forward error:', e.message));
         }
     );
 });

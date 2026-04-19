@@ -54,9 +54,19 @@
 
     // Logout function
     function logout() {
+        // Notify server (best-effort)
+        const token = sessionStorage.getItem('vanguard_jwt');
+        if (token) {
+            fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token }
+            }).catch(() => {});
+        }
         // Clear all session data
         sessionStorage.removeItem('vanguard_user');
-        window.location.href = '/login.html';
+        sessionStorage.removeItem('vanguard_jwt');
+        var portal = localStorage.getItem('vanguard_login_portal');
+        window.location.href = (portal === 'united') ? '/login-united.html' : '/login.html';
     }
 
     // Check if user is admin
