@@ -15311,11 +15311,178 @@ function _acctCommissionsHTML(isAdmin) {
     if (statusF === 'paid') filtered = filtered.filter(p=>p.isPaid);
     if (statusF === 'pending') filtered = filtered.filter(p=>!p.isPaid);
 
+    // Commission statement state
+    if (!_acct._stmtAgent) _acct._stmtAgent = '';
+    if (!_acct._stmtPeriod) _acct._stmtPeriod = 'ytd';
+    if (!_acct._stmtCustomStart) _acct._stmtCustomStart = '';
+    if (!_acct._stmtCustomEnd) _acct._stmtCustomEnd = '';
+
+    // Build statement HTML
+    let stmtResultHTML = '';
+    if (_acct._stmtRunning) {
+        const now = new Date();
+        const agent = _acct._stmtAgent;
+        const period = _acct._stmtPeriod;
+
+        // Determine date range
+        let startDate, endDate = now;
+        if (period === 'ytd') {
+            startDate = new Date(now.getFullYear(), 0, 1);
+        } else if (period === 'q1') {
+            startDate = new Date(now.getFullYear(), 0, 1);
+            endDate = new Date(now.getFullYear(), 2, 31);
+        } else if (period === 'q2') {
+            startDate = new Date(now.getFullYear(), 3, 1);
+            endDate = new Date(now.getFullYear(), 5, 30);
+        } else if (period === 'q3') {
+            startDate = new Date(now.getFullYear(), 6, 1);
+            endDate = new Date(now.getFullYear(), 8, 30);
+        } else if (period === 'q4') {
+            startDate = new Date(now.getFullYear(), 9, 1);
+            endDate = new Date(now.getFullYear(), 11, 31);
+        } else if (period === 'last-month') {
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+        } else if (period === 'this-month') {
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else if (period === 'custom') {
+            startDate = _acct._stmtCustomStart ? new Date(_acct._stmtCustomStart) : new Date(now.getFullYear(), 0, 1);
+            endDate = _acct._stmtCustomEnd ? new Date(_acct._stmtCustomEnd) : now;
+        } else {
+            startDate = new Date(now.getFullYear(), 0, 1);
+        }
+
+        // Filter policies by agent and date
+        let stmtPolicies = policies.filter(p => {
+            if (agent && (p.agent||'').toLowerCase() !== agent.toLowerCase()) return false;
+            // Use policy creation from ID timestamp: POL-{timestamp}-xxx
+            const match = (p.id||'').match(/POL-(\d+)-/);
+            if (match) {
+                const created = new Date(parseInt(match[1]));
+                return created >= startDate && created <= endDate;
+            }
+            return true;
+        });
+
+        // Determine transaction type for each policy
+        const stmtRows = stmtPolicies.map(p => {
+            // Determine type based on policy data
+            let txType = 'New Business';
+            const pNum = (p.policyNumber||'').toLowerCase();
+            const cName = (p.client||'').toLowerCase();
+            // Check if it's a renewal (same client appears multiple times)
+            const sameClient = policies.filter(pp => (pp.client||'').toLowerCase() === cName);
+            if (sameClient.length > 1) {
+                const thisIdx = sameClient.indexOf(p);
+                if (thisIdx > 0) txType = 'Renewal';
+            }
+            // Check for negative premium (cancellation/return)
+            if (p.premium < 0) txType = 'Cancellation / Return Premium';
+            // Check for endorsement indicators
+            if ((p.policyNumber||'').includes('END') || (p.client||'').includes('endorsement')) txType = 'Endorsement';
+
+            const commRate = 0.06;
+            const commAmt = p.premium * commRate;
+            return { ...p, txType, commAmt, commRate };
+        });
+
+        const stmtTotalPremium = stmtRows.reduce((a, r) => a + (r.premium||0), 0);
+        const stmtTotalComm = stmtRows.reduce((a, r) => a + r.commAmt, 0);
+        const stmtPaid = stmtRows.filter(r => r.isPaid).reduce((a, r) => a + r.commAmt, 0);
+        const stmtPending = stmtTotalComm - stmtPaid;
+
+        const periodLabel = period === 'ytd' ? 'Year to Date' : period === 'this-month' ? 'This Month' : period === 'last-month' ? 'Last Month' : period.startsWith('q') ? period.toUpperCase() + ' ' + now.getFullYear() : period === 'custom' ? ((startDate ? startDate.toLocaleDateString() : '') + ' — ' + (endDate ? endDate.toLocaleDateString() : '')) : period;
+
+        stmtResultHTML = `
+        <div style="margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);color:white;padding:20px 24px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <h3 style="margin:0;font-size:18px;">Commission Statement</h3>
+                <p style="margin:4px 0 0;opacity:0.85;font-size:13px;">${agent || 'All Agents'} — ${periodLabel}</p>
+              </div>
+              <div style="text-align:right;display:flex;align-items:center;gap:14px;">
+                <div>
+                  <div style="font-size:24px;font-weight:700;">${fmtDollar(stmtTotalComm)}</div>
+                  <div style="font-size:12px;opacity:0.8;">Total Commission Earned</div>
+                </div>
+                <button onclick="printCommissionStatement()" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.4);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;backdrop-filter:blur(4px);" title="Print / Save as PDF"><i class="fas fa-print"></i></button>
+              </div>
+            </div>
+            <div style="display:flex;gap:24px;margin-top:14px;">
+              <div><span style="opacity:0.7;font-size:12px;">Total Premium</span><br><strong>${fmtDollar(stmtTotalPremium)}</strong></div>
+              <div><span style="opacity:0.7;font-size:12px;">Collected</span><br><strong style="color:#86efac;">${fmtDollar(stmtPaid)}</strong></div>
+              <div><span style="opacity:0.7;font-size:12px;">Pending</span><br><strong style="color:#fde68a;">${fmtDollar(stmtPending)}</strong></div>
+              <div><span style="opacity:0.7;font-size:12px;">Policies</span><br><strong>${stmtRows.length}</strong></div>
+            </div>
+          </div>
+          ${stmtRows.length ? `<table class="acct-table" style="margin:0;">
+            <thead><tr>
+              <th>Client</th>
+              <th>Policy #</th>
+              <th>Carrier</th>
+              <th>Transaction Type</th>
+              <th style="text-align:right">Premium</th>
+              <th style="text-align:right">Commission</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody>${stmtRows.map(r => `<tr>
+              <td>${r.client||'—'}</td>
+              <td style="font-family:monospace;font-size:12px;">${r.policyNumber||'—'}</td>
+              <td>${r.carrier||'—'}</td>
+              <td><span style="background:${r.txType==='New Business'?'#dbeafe':r.txType==='Renewal'?'#d1fae5':r.txType.includes('Cancellation')?'#fee2e2':'#fef3c7'};color:${r.txType==='New Business'?'#1e40af':r.txType==='Renewal'?'#065f46':r.txType.includes('Cancellation')?'#991b1b':'#92400e'};padding:2px 8px;border-radius:4px;font-size:12px;">${r.txType}</span></td>
+              <td style="text-align:right">${fmtDollar(r.premium)}</td>
+              <td style="text-align:right;font-weight:600;color:#2563eb">${fmtDollar(r.commAmt)}</td>
+              <td><span class="acct-badge ${r.isPaid?'paid':'pending'}">${r.isPaid?'Collected':'Pending'}</span></td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr style="font-weight:700;background:#f8fafc;">
+              <td colspan="4" style="text-align:right;">Totals</td>
+              <td style="text-align:right">${fmtDollar(stmtTotalPremium)}</td>
+              <td style="text-align:right;color:#2563eb">${fmtDollar(stmtTotalComm)}</td>
+              <td></td>
+            </tr></tfoot>
+          </table>` : `<div style="padding:40px;text-align:center;color:#9ca3af;"><i class="fas fa-file-invoice-dollar" style="font-size:32px;margin-bottom:8px;"></i><p>No policies found for this period</p></div>`}
+        </div>`;
+    }
+
     return `
 <div class="acct-kpi-grid" style="margin-bottom:16px;">
   ${_kpi('Total Commission', fmtDollar(totalComm), 'fa-percent', '#2563eb', `${policies.length} policies`)}
   ${_kpi('Collected', fmtDollar(paidComm), 'fa-check-circle', '#16a34a', `${policies.filter(p=>p.isPaid).length} policies`)}
   ${_kpi('Pending', fmtDollar(pendingComm), 'fa-clock', '#f59e0b', `${policies.filter(p=>!p.isPaid).length} policies`)}
+</div>
+
+<!-- Commission Statements -->
+<div class="acct-card" style="margin-bottom:16px;">
+  <div class="acct-card-hdr" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <span><i class="fas fa-file-invoice-dollar"></i> Commission Statements</span>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select id="stmtAgentSelect" onchange="_acct._stmtAgent=this.value;" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <option value="">All Agents</option>
+        <option value="Grant" ${_acct._stmtAgent==='Grant'?'selected':''}>Grant</option>
+        <option value="Carson" ${_acct._stmtAgent==='Carson'?'selected':''}>Carson</option>
+        <option value="Hunter" ${_acct._stmtAgent==='Hunter'?'selected':''}>Hunter</option>
+        <option value="Maureen" ${_acct._stmtAgent==='Maureen'?'selected':''}>Maureen</option>
+      </select>
+      <select id="stmtPeriodSelect" onchange="_acct._stmtPeriod=this.value;document.getElementById('stmtCustomDates').style.display=this.value==='custom'?'flex':'none';" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <option value="ytd" ${_acct._stmtPeriod==='ytd'?'selected':''}>Year to Date</option>
+        <option value="this-month" ${_acct._stmtPeriod==='this-month'?'selected':''}>This Month</option>
+        <option value="last-month" ${_acct._stmtPeriod==='last-month'?'selected':''}>Last Month</option>
+        <option value="q1" ${_acct._stmtPeriod==='q1'?'selected':''}>Q1</option>
+        <option value="q2" ${_acct._stmtPeriod==='q2'?'selected':''}>Q2</option>
+        <option value="q3" ${_acct._stmtPeriod==='q3'?'selected':''}>Q3</option>
+        <option value="q4" ${_acct._stmtPeriod==='q4'?'selected':''}>Q4</option>
+        <option value="custom" ${_acct._stmtPeriod==='custom'?'selected':''}>Custom Range</option>
+      </select>
+      <div id="stmtCustomDates" style="display:${_acct._stmtPeriod==='custom'?'flex':'none'};gap:6px;align-items:center;">
+        <input type="date" value="${_acct._stmtCustomStart||''}" onchange="_acct._stmtCustomStart=this.value" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+        <span style="color:#9ca3af;">to</span>
+        <input type="date" value="${_acct._stmtCustomEnd||''}" onchange="_acct._stmtCustomEnd=this.value" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+      </div>
+      <button onclick="_acct._stmtRunning=true;acctTab('commissions')" style="background:#2563eb;color:white;border:none;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"><i class="fas fa-play"></i> Run Statement</button>
+    </div>
+  </div>
+  ${stmtResultHTML}
 </div>
 
 <div class="acct-card">
@@ -15616,6 +15783,122 @@ async function acctSaveRate(carrier, rateStr) {
         if (res.ok) showNotification(`Rate saved for ${carrier}`, 'success');
         else showNotification('Save failed', 'error');
     } catch(e) { showNotification('Error: ' + e.message, 'error'); }
+}
+
+function printCommissionStatement() {
+    const stmtEl = document.querySelector('.acct-card[style*="margin-bottom:16px"] > div[style*="border:1px solid"]');
+    if (!stmtEl) { showNotification('Run a statement first', 'warning'); return; }
+
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Statement</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding:0; color:#1f2937; }
+  .header { background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%); color:white; padding:28px 32px; }
+  .header h3 { font-size:20px; margin:0; }
+  .header .sub { margin-top:4px; opacity:0.85; font-size:14px; }
+  .header .total { font-size:28px; font-weight:700; }
+  .header .total-label { font-size:12px; opacity:0.8; }
+  .header .kpis { display:flex; gap:28px; margin-top:16px; }
+  .header .kpis span { opacity:0.7; font-size:12px; }
+  .header .kpis strong { font-size:15px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; padding:10px 14px; background:#f8fafc; color:#64748b; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; border-bottom:2px solid #e5e7eb; }
+  td { padding:10px 14px; border-bottom:1px solid #f1f5f9; }
+  .right { text-align:right; }
+  .comm { font-weight:600; color:#2563eb; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+  .badge-new { background:#dbeafe; color:#1e40af; }
+  .badge-renewal { background:#d1fae5; color:#065f46; }
+  .badge-cancel { background:#fee2e2; color:#991b1b; }
+  .badge-endorse { background:#fef3c7; color:#92400e; }
+  .badge-paid { background:#d1fae5; color:#065f46; }
+  .badge-pending { background:#fef3c7; color:#92400e; }
+  tfoot td { font-weight:700; background:#f8fafc; border-top:2px solid #e5e7eb; }
+  .footer { text-align:center; padding:20px; color:#9ca3af; font-size:11px; border-top:1px solid #e5e7eb; margin-top:8px; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style></head><body>`);
+
+    // Build clean print version
+    const s = _acct.summary || {};
+    const policies = s.policies || [];
+    const agent = _acct._stmtAgent || 'All Agents';
+    const period = _acct._stmtPeriod || 'ytd';
+    const now = new Date();
+    let startDate, endDate = now;
+    if (period === 'ytd') startDate = new Date(now.getFullYear(), 0, 1);
+    else if (period === 'q1') { startDate = new Date(now.getFullYear(), 0, 1); endDate = new Date(now.getFullYear(), 2, 31); }
+    else if (period === 'q2') { startDate = new Date(now.getFullYear(), 3, 1); endDate = new Date(now.getFullYear(), 5, 30); }
+    else if (period === 'q3') { startDate = new Date(now.getFullYear(), 6, 1); endDate = new Date(now.getFullYear(), 8, 30); }
+    else if (period === 'q4') { startDate = new Date(now.getFullYear(), 9, 1); endDate = new Date(now.getFullYear(), 11, 31); }
+    else if (period === 'last-month') { startDate = new Date(now.getFullYear(), now.getMonth()-1, 1); endDate = new Date(now.getFullYear(), now.getMonth(), 0); }
+    else if (period === 'this-month') startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if (period === 'custom') { startDate = _acct._stmtCustomStart ? new Date(_acct._stmtCustomStart) : new Date(now.getFullYear(),0,1); endDate = _acct._stmtCustomEnd ? new Date(_acct._stmtCustomEnd) : now; }
+    else startDate = new Date(now.getFullYear(), 0, 1);
+
+    const periodLabel = period === 'ytd' ? 'Year to Date' : period === 'this-month' ? 'This Month' : period === 'last-month' ? 'Last Month' : period.startsWith('q') ? period.toUpperCase()+' '+now.getFullYear() : period === 'custom' ? (startDate.toLocaleDateString()+' — '+endDate.toLocaleDateString()) : period;
+
+    let stmtPolicies = policies.filter(p => {
+        if (agent && agent !== 'All Agents' && (p.agent||'').toLowerCase() !== agent.toLowerCase()) return false;
+        const match = (p.id||'').match(/POL-(\d+)-/);
+        if (match) { const created = new Date(parseInt(match[1])); return created >= startDate && created <= endDate; }
+        return true;
+    });
+
+    const rows = stmtPolicies.map(p => {
+        let txType = 'New Business';
+        const cName = (p.client||'').toLowerCase();
+        const sameClient = policies.filter(pp => (pp.client||'').toLowerCase() === cName);
+        if (sameClient.length > 1 && sameClient.indexOf(p) > 0) txType = 'Renewal';
+        if (p.premium < 0) txType = 'Cancellation / Return Premium';
+        const commAmt = p.premium * 0.06;
+        return { ...p, txType, commAmt };
+    });
+
+    const totalPrem = rows.reduce((a,r) => a+(r.premium||0), 0);
+    const totalComm = rows.reduce((a,r) => a+r.commAmt, 0);
+    const paidComm = rows.filter(r=>r.isPaid).reduce((a,r) => a+r.commAmt, 0);
+    const pendComm = totalComm - paidComm;
+    const fD = v => '$' + (v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+
+    w.document.write(`
+    <div class="header">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div><h3>Commission Statement</h3><p class="sub">${agent} — ${periodLabel}</p></div>
+        <div style="text-align:right;"><div class="total">${fD(totalComm)}</div><div class="total-label">Total Commission Earned</div></div>
+      </div>
+      <div class="kpis">
+        <div><span>Total Premium</span><br><strong>${fD(totalPrem)}</strong></div>
+        <div><span>Collected</span><br><strong style="color:#86efac;">${fD(paidComm)}</strong></div>
+        <div><span>Pending</span><br><strong style="color:#fde68a;">${fD(pendComm)}</strong></div>
+        <div><span>Policies</span><br><strong>${rows.length}</strong></div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Client</th><th>Policy #</th><th>Carrier</th><th>Transaction Type</th><th class="right">Premium</th><th class="right">Commission</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(r => {
+        const cls = r.txType==='New Business'?'new':r.txType==='Renewal'?'renewal':r.txType.includes('Cancel')?'cancel':'endorse';
+        return `<tr>
+          <td>${r.client||'—'}</td>
+          <td style="font-family:monospace;">${r.policyNumber||'—'}</td>
+          <td>${r.carrier||'—'}</td>
+          <td><span class="badge badge-${cls}">${r.txType}</span></td>
+          <td class="right">${fD(r.premium)}</td>
+          <td class="right comm">${fD(r.commAmt)}</td>
+          <td><span class="badge badge-${r.isPaid?'paid':'pending'}">${r.isPaid?'Collected':'Pending'}</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr><td colspan="4" class="right">Totals</td><td class="right">${fD(totalPrem)}</td><td class="right comm">${fD(totalComm)}</td><td></td></tr></tfoot>
+    </table>
+    <div class="footer">Generated ${new Date().toLocaleString()} — Vanguard Insurance Group</div>
+    </body></html>`);
+
+    w.document.close();
+    setTimeout(() => {
+        w.print();
+        w.onafterprint = () => w.close();
+        setTimeout(() => { try { if (!w.closed) w.close(); } catch(e){} }, 1000);
+    }, 400);
 }
 
 async function acctTogglePaid(policyId, policyNumber, clientName, carrier, agent, premium, commissionRate, commission, currentlyPaid) {
