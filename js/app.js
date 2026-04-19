@@ -5766,7 +5766,7 @@ function loadFullDashboard() {
         </div>
 
         <!-- Main Sections -->
-        <div class="dashboard-sections" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div class="dashboard-sections" style="display: grid; gap: 20px;">
             <!-- To-Do List -->
             <div class="section-card todo-container" style="height: fit-content; min-height: 600px;">
                 <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -6170,16 +6170,18 @@ function _goalsFormatTime(secs) {
     return m + 'm';
 }
 
-function _goalBar(label, value, goal, color, icon, displayText, fractionOverride) {
+function _goalBar(label, value, goal, color, icon, displayText, fractionOverride, shortLabel) {
     const fraction = fractionOverride !== undefined ? Math.max(0, fractionOverride) : (goal > 0 ? value / goal : 0);
     const pct = Math.min(100, Math.round(fraction * 100));
     const achieved = pct >= 100;
     const barColor = achieved ? '#10b981' : color;
+    const short = shortLabel || label;
     return '<div style="background:#f9fafb;border-radius:8px;padding:10px 12px;border:1px solid #e5e7eb;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
             '<div style="display:flex;align-items:center;gap:6px;">' +
                 '<i class="fas ' + icon + '" style="color:' + barColor + ';font-size:0.8rem;"></i>' +
-                '<span style="font-size:0.78rem;font-weight:600;color:#374151;">' + label + '</span>' +
+                '<span class="goal-label-full" style="font-size:0.78rem;font-weight:600;color:#374151;">' + label + '</span>' +
+                '<span class="goal-label-short" style="font-size:0.78rem;font-weight:600;color:#374151;display:none;">' + short + '</span>' +
                 (achieved ? '<i class="fas fa-check-circle" style="color:#10b981;font-size:0.72rem;"></i>' : '') +
             '</div>' +
             '<span style="font-size:0.72rem;color:#6b7280;">' + displayText + '</span>' +
@@ -6377,7 +6379,7 @@ function renderPersonalGoals(data, period) {
     '</div>';
     if (fieldActive('totalTalkHours'))
         html += _goalBar('Total Talk Time', callSecsInRange, totalTalkGoal, '#3b82f6', 'fa-phone',
-            _goalsFormatTime(callSecsInRange) + ' / ' + g.totalTalkHours + 'h', callSecsInRange / totalTalkGoal);
+            _goalsFormatTime(callSecsInRange) + ' / ' + g.totalTalkHours + 'h', callSecsInRange / totalTalkGoal, 'Talk Time');
     if (fieldActive('sales'))
         html += _goalBar('Sales', salesInRange, g.sales, '#10b981', 'fa-trophy', salesInRange + ' / ' + g.sales);
     if (fieldActive('newLeads'))
@@ -6389,7 +6391,7 @@ function renderPersonalGoals(data, period) {
         html += _goalBar(appsLabel, appsInRange, g.apps, '#f59e0b', 'fa-paper-plane', appsInRange + ' / ' + g.apps);
     if (fieldActive('callbacks'))
         html += _goalBar('Scheduled Callbacks', Math.round(cbPct), g.callbacks, '#8b5cf6', 'fa-phone-alt',
-            Math.round(cbPct) + '% / ' + g.callbacks + '% goal', cbPct / g.callbacks);
+            Math.round(cbPct) + '%/' + g.callbacks + '%', cbPct / g.callbacks, 'Callbacks');
     if (!html)
         html = '<div style="color:#9ca3af;text-align:center;grid-column:1/-1;padding:10px;font-size:0.85rem;">All goals are currently disabled.</div>';
     container.innerHTML = html;
