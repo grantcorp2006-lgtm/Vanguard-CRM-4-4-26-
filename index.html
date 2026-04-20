@@ -743,7 +743,7 @@
                                             <i class="fas fa-crown" style="margin-right: 3px; font-size: 9px;"></i>EXCLUSIVE
                                         </span>
                                     `;
-                                } else if (isAdmin(user.username)) {
+                                } else if (isAdmin(user.username) && user.username.toLowerCase() !== 'grant') {
                                     userBadge = `
                                         <span style="
                                             background: linear-gradient(135deg, #ff6b6b, #ee5a52);

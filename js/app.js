@@ -12126,6 +12126,8 @@ function loadPoliciesView() {
         if (tbody) {
             try {
                 const policyRows = await generatePolicyRows();
+                // Hide rows before inserting so the unfiltered list never flashes visibly
+                tbody.style.visibility = 'hidden';
                 tbody.innerHTML = policyRows;
 
                 // Initialize policy filters after rows are loaded
@@ -12136,6 +12138,8 @@ function loadPoliciesView() {
                 // Apply filter immediately for ALL users to sync stats with visible rows
                 setTimeout(() => {
                     filterPolicies();
+                    // Reveal only after filter has been applied — eliminates flash
+                    tbody.style.visibility = '';
                     console.log('✅ IMMEDIATE POLICY FILTER: Applied after row load');
                 }, 50);
             } catch (error) {
