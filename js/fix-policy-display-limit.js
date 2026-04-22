@@ -26,20 +26,24 @@ window.generatePolicyRows = async function() {
     let currentUser = null;
     let isAdmin = false;
 
+    let isCsrUser = false;
     if (sessionData) {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
-            console.log(`🔍 Policy Display Fix - Current user: ${currentUser}, Is Admin: ${isAdmin}`);
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
+            isCsrUser = (user.role || '') === 'csr';
+            console.log(`🔍 Policy Display Fix - Current user: ${currentUser}, Is Admin: ${isAdmin}, Is CSR: ${isCsrUser}`);
         } catch (error) {
             console.error('Error parsing session data:', error);
         }
     }
 
     // Filter policies based on user role
-    // Maureen can only see her own policies (no agent dropdown for others)
-    // Admins and other users: render ALL policies, let filterPolicies() handle visibility
+    // Maureen: only her own policies
+    // CSR: all policies (search-gated in filterPolicies)
+    // Admins: all policies
+    // Agents: only their own
     if (currentUser && currentUser.toLowerCase() === 'maureen') {
         const originalCount = policies.length;
         policies = policies.filter(policy => {
@@ -47,13 +51,15 @@ window.generatePolicyRows = async function() {
             return assignedTo === 'maureen';
         });
         console.log(`🔒 Policy Display Fix: Filtered to Maureen's policies: ${originalCount} -> ${policies.length}`);
-    } else if (!isAdmin && currentUser) {
+    } else if (!isAdmin && !isCsrUser && currentUser) {
         const originalCount = policies.length;
         policies = policies.filter(policy => {
             const assignedTo = (policy.assignedTo || policy.agent || policy.assignedAgent || policy.producer || 'Grant').toLowerCase();
             return assignedTo === currentUser.toLowerCase();
         });
         console.log(`🔒 Policy Display Fix: Filtered policies: ${originalCount} -> ${policies.length} (showing only ${currentUser}'s policies)`);
+    } else if (isCsrUser) {
+        console.log(`🎧 Policy Display Fix: CSR user - loading all ${policies.length} policies (search-gated)`);
     }
     // Admins: render all policies — filterPolicies() will handle agent visibility
 
@@ -71,7 +77,7 @@ window.generatePolicyRows = async function() {
     }
 
     // Generate rows for actual saved policies - SHOW ALL POLICIES
-    return policies.map(policy => {
+    const _htmlRows = policies.map(policy => {
         // Ensure policy type is available - check multiple possible locations
         const policyType = policy.policyType || policy.type || (policy.overview && policy.overview['Policy Type'] ?
             policy.overview['Policy Type'].toLowerCase().replace(/\s+/g, '-') : 'unknown');
@@ -205,7 +211,7 @@ window.generatePolicyRows = async function() {
                 <td>
                     ${expirationDate}
                 </td>
-                <td>
+                <td style="display: none; visibility: hidden;">
                     ${premium}/yr
                 </td>
                 <td>
@@ -230,6 +236,34 @@ window.generatePolicyRows = async function() {
             </tr>
         `;
     }).join('');
+
+    // Auto-open a pending deep-link policy after rows are rendered into the DOM
+    const _pending = sessionStorage.getItem('vanguard_pending_policy');
+    if (_pending) {
+        sessionStorage.removeItem('vanguard_pending_policy');
+        // Poll until the policy exists in localStorage AND the table has rows,
+        // then open it. Handles slow mobile / Slack WebView load times.
+        let _pendAttempts = 0;
+        const _pendPoll = setInterval(() => {
+            _pendAttempts++;
+            const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const found = policies.find(p => p.policyNumber === _pending || p.id === _pending);
+            const tbody = document.getElementById('policyTableBody');
+            const hasRows = tbody && tbody.querySelector('tr[data-policy-id]');
+            if ((found || hasRows) && typeof window.viewPolicy === 'function') {
+                clearInterval(_pendPoll);
+                // Use the policy ID if we found it, otherwise use the number
+                const openId = found ? (found.id || found.policyNumber) : _pending;
+                window.viewPolicy(openId);
+                setTimeout(() => {
+                    if (typeof switchViewTab === 'function') switchViewTab('documents');
+                }, 500);
+            }
+            if (_pendAttempts > 40) clearInterval(_pendPoll); // give up after ~12 seconds
+        }, 300);
+    }
+
+    return _htmlRows;
 };
 
 console.log('Policy Display Fix: Override installed - all policies will be displayed');

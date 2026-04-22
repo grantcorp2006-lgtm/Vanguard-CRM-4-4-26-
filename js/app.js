@@ -634,6 +634,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const _initialHash = window.location.hash || '#dashboard';
 
+    // Direct policy route on page load: #policy/POLICYNUMBER
+    if (_initialHash.startsWith('#policy/')) {
+        const _polNum = decodeURIComponent(_initialHash.substring(8));
+        if (_polNum) {
+            const _dc = document.querySelector('.dashboard-content');
+            if (_dc) _dc.innerHTML = '';
+            // Small delay to let scripts initialize
+            setTimeout(() => _directOpenPolicy(_polNum), 200);
+            return; // skip normal loadContent below
+        }
+    }
+
     // If not on dashboard, blank out the pre-rendered HTML immediately so
     // the static dashboard stats don't flash before the real view loads.
     if (_initialHash !== '#dashboard') {
@@ -4596,10 +4608,52 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// Direct policy open: finds policy by number or ID, loads policies view, then opens profile
+function _directOpenPolicy(polNum) {
+    console.log('🔗 Direct policy open:', polNum);
+    // Load policies view first (needed for the policy detail page to render into)
+    loadContent('#policies');
+    updateActiveMenuItem('#policies');
+
+    // Poll until policies are in localStorage and viewPolicy is available
+    let attempts = 0;
+    const poll = setInterval(() => {
+        attempts++;
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const match = policies.find(p =>
+            p.policyNumber === polNum || p.id === polNum ||
+            (p.policyNumber || '').trim() === polNum.trim() ||
+            (p.id || '').trim() === polNum.trim()
+        );
+        if (match && typeof window.viewPolicy === 'function') {
+            clearInterval(poll);
+            window.viewPolicy(match.id || match.policyNumber);
+            // Switch to Documents tab for COI deep links
+            setTimeout(() => {
+                if (typeof switchViewTab === 'function') switchViewTab('documents');
+            }, 500);
+        }
+        if (attempts > 50) {
+            clearInterval(poll);
+            console.warn('Direct policy open: policy not found after 15s:', polNum);
+        }
+    }, 300);
+}
+
 // Handle browser back/forward navigation
 window.addEventListener('hashchange', function() {
     const hash = window.location.hash || '#dashboard';
     console.log('🔥 CRITICAL DEBUG: Hash changed to:', hash);
+
+    // Direct policy route: #policy/POLICYNUMBER → open policy profile directly
+    if (hash.startsWith('#policy/')) {
+        const polNum = decodeURIComponent(hash.substring(8));
+        if (polNum) {
+            _directOpenPolicy(polNum);
+            return;
+        }
+    }
+
     console.log('🔥 CRITICAL DEBUG: About to call loadContent');
 
     // Force clear any stuck loading states and timeouts before switching
@@ -12527,7 +12581,8 @@ function filterPolicies() {
     if (_isCsrPolicy) {
         const dataRows = tbody ? tbody.querySelectorAll('tr:not(#csrPolicySearchPrompt)') : [];
         let promptRow = document.getElementById('csrPolicySearchPrompt');
-        if (policySearchValue.length < 4) {
+        // Skip the 4-char gate if a magic link deep-link is pending
+        if (policySearchValue.length < 4 && !window._magicLinkPending) {
             dataRows.forEach(r => r.style.display = 'none');
             if (tbody && !promptRow) {
                 promptRow = document.createElement('tr');
@@ -24749,6 +24804,38 @@ window.showDriverDetailModal = function(startIndex) {
     renderModal();
 };
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Delegated listener for tab clicks — works in Slack's in-app browser
+// which blocks inline onclick handlers.
+(function() {
+    document.addEventListener('touchend', function(e) {
+        var btn = e.target;
+        // Walk up to find the tab button (max 5 levels)
+        for (var i = 0; i < 5 && btn && btn !== document; i++) {
+            if (btn.classList && btn.classList.contains('policy-view-tab-btn') && btn.getAttribute('data-tab')) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                var tabId = btn.getAttribute('data-tab');
+                // Inline the tab switch logic directly — no function call dependency
+                var page = document.getElementById('policyDetailPage');
+                if (page && tabId) {
+                    var allBtns = page.querySelectorAll('.policy-view-tab-btn');
+                    for (var j = 0; j < allBtns.length; j++) {
+                        var isActive = allBtns[j].getAttribute('data-tab') === tabId;
+                        if (isActive) { allBtns[j].classList.add('pv-tab-active'); allBtns[j].style.borderBottom = '3px solid #0066cc'; allBtns[j].style.color = '#0066cc'; }
+                        else { allBtns[j].classList.remove('pv-tab-active'); allBtns[j].style.borderBottom = '3px solid transparent'; allBtns[j].style.color = '#6b7280'; }
+                    }
+                    var panels = page.querySelectorAll('.tab-content');
+                    for (var k = 0; k < panels.length; k++) { panels[k].style.display = 'none'; }
+                    var target = document.getElementById(tabId + '-view-content');
+                    if (target) target.style.display = 'block';
+                }
+                return;
+            }
+            btn = btn.parentElement;
+        }
+    }, true);
+})();
 
 function switchViewTab(tabId) {
     // Update all tab buttons
@@ -38630,27 +38717,77 @@ window.sendCOIForPolicy = function(policyId) {
         if (agentCb) { agentCb.checked = true; handleCheckboxChange('agent', true); }
         if (insuredCb) { insuredCb.checked = true; handleCheckboxChange('insured', true); }
 
-        // Force pixel widths — percentage-based widths fail due to CSS cascade issues.
-        // getBoundingClientRect() reads the actual rendered width of the modal box,
-        // then setProperty(..., 'important') writes inline !important styles which
-        // are the absolute highest CSS priority and cannot be overridden by any rule.
-        // Only apply pixel-width fix on mobile — desktop layout is handled by CSS alone
+        // Mobile: fix all widths and layouts via JS (CSS selectors unreliable on iOS Safari)
         if (window.innerWidth <= 768) requestAnimationFrame(() => {
             const m = document.getElementById('crmCOIModal');
             if (!m) return;
-            const mb = m.querySelector('.modal-body');
-            if (!mb) return;
-            // clientWidth excludes scrollbar — gives true available content width
-            const fw = mb.clientWidth - 40; // subtract 20px padding × 2 sides
-            if (fw <= 0) return;
-            m.querySelectorAll('form, .form-group, #crmCoiEmailRecipientsContainer, .policy-info-banner, .form-actions, .crm-coi-email-recipient-row').forEach(el => {
-                const isFlex = el.classList.contains('crm-coi-email-recipient-row') || el.classList.contains('form-actions');
-                el.style.setProperty('display', isFlex ? 'flex' : 'block', 'important');
-                el.style.setProperty('width', fw + 'px', 'important');
-                el.style.setProperty('min-width', fw + 'px', 'important');
+            const fw = (window.innerWidth - 32) + 'px';
+
+            // Force all containers to full width
+            m.querySelectorAll('.form-group, .policy-info-banner, .form-actions, form, #crmCoiEmailRecipientsContainer, .crm-coi-email-recipient-row, #crmThirdPartyFields').forEach(el => {
+                el.style.setProperty('width', fw, 'important');
+                el.style.setProperty('min-width', '0', 'important');
+                el.style.setProperty('max-width', fw, 'important');
                 el.style.setProperty('box-sizing', 'border-box', 'important');
-                el.style.setProperty('flex-shrink', '0', 'important');
             });
+
+            // Radio group (Myself / Third-Party): force horizontal
+            m.querySelectorAll('.radio-group').forEach(el => {
+                el.style.setProperty('display', 'flex', 'important');
+                el.style.setProperty('flex-direction', 'row', 'important');
+                el.style.setProperty('gap', '20px', 'important');
+            });
+
+            // Email recipients header row: stack label above controls
+            m.querySelectorAll('.form-group > div[style*="justify-content"]').forEach(el => {
+                el.style.setProperty('flex-direction', 'column', 'important');
+                el.style.setProperty('align-items', 'flex-start', 'important');
+                el.style.setProperty('justify-content', 'flex-start', 'important');
+                el.style.setProperty('gap', '8px', 'important');
+                el.style.setProperty('width', fw, 'important');
+            });
+
+            // Checkboxes row: force horizontal
+            const cbRow = m.querySelector('.form-group > div[style*="justify-content"] > div');
+            if (cbRow) {
+                cbRow.style.setProperty('display', 'flex', 'important');
+                cbRow.style.setProperty('flex-direction', 'row', 'important');
+                cbRow.style.setProperty('flex-wrap', 'wrap', 'important');
+                cbRow.style.setProperty('gap', '8px', 'important');
+            }
+
+            // Form actions: full width, stacked
+            m.querySelectorAll('.form-actions').forEach(el => {
+                el.style.setProperty('flex-direction', 'column', 'important');
+                el.style.setProperty('gap', '8px', 'important');
+            });
+            m.querySelectorAll('.form-actions button').forEach(el => {
+                el.style.setProperty('width', '100%', 'important');
+            });
+
+            // Add the "+" button
+            const container = document.getElementById('crmCoiEmailRecipientsContainer');
+            if (container && !container.querySelector('.coi-mobile-add-btn')) {
+                const addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'coi-mobile-add-btn';
+                addBtn.textContent = '+';
+                addBtn.onclick = function() {
+                    if (window.addCRMCOIEmailRecipientWithOptions) addCRMCOIEmailRecipientWithOptions();
+                    else if (window.addCRMCOIEmailRecipient) addCRMCOIEmailRecipient();
+                    setTimeout(() => {
+                        const cont = document.getElementById('crmCoiEmailRecipientsContainer');
+                        if (cont && addBtn.parentNode) {
+                            cont.appendChild(addBtn);
+                            // Fix width on new row
+                            cont.querySelectorAll('.crm-coi-email-recipient-row').forEach(r => {
+                                r.style.setProperty('width', fw, 'important');
+                            });
+                        }
+                    }, 50);
+                };
+                container.appendChild(addBtn);
+            }
         });
     }, 0);
 
