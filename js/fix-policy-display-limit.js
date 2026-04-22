@@ -96,7 +96,15 @@ window.generatePolicyRows = async function() {
                 'workers-comp': 'Workers Compensation',
                 'umbrella': 'Umbrella',
                 'life': 'Life',
-                'health': 'Health'
+                'health': 'Health',
+                'trucking': 'Trucking',
+                'commercial-trucking': 'Commercial Trucking',
+                'owner-operator': 'Owner Operator',
+                'motor-carrier': 'Motor Carrier',
+                'cargo': 'Cargo',
+                'non-trucking': 'Non-Trucking Liability',
+                'bobtail': 'Bobtail',
+                'physical-damage': 'Physical Damage'
             };
             return labels[normalizedType] || type;
         }
@@ -104,6 +112,7 @@ window.generatePolicyRows = async function() {
         function getBadgeClass(type) {
             if (!type) return 'badge-gray';
             const typeStr = type.toString().toLowerCase();
+            if (typeStr.includes('truck') || typeStr.includes('motor-carrier') || typeStr.includes('owner-operator') || typeStr.includes('cargo') || typeStr.includes('bobtail')) return 'badge-orange';
             if (typeStr.includes('commercial')) return 'badge-orange';
             if (typeStr.includes('auto')) return 'badge-blue';
             if (typeStr.includes('home')) return 'badge-green';
@@ -211,7 +220,7 @@ window.generatePolicyRows = async function() {
                 <td>
                     ${expirationDate}
                 </td>
-                <td style="display: none; visibility: hidden;">
+                <td>
                     ${premium}/yr
                 </td>
                 <td>

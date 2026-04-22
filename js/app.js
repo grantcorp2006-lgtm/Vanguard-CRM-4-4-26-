@@ -19634,14 +19634,14 @@ async function loadDownloadsView() {
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fetching…'; }
 
         try {
-            // Fetch all downloads (status=All) so we can find processed Policy entries
-            const listRes = await fetch(`${apiUrl}/api/jenesis/downloads?status=All`);
+            // Fetch all downloads so we can find processed Policy entries
+            const listRes = await fetch(`${apiUrl}/api/jenesis/downloads`);
             const listData = await listRes.json();
-            const allRows = (listData.data || []).map(row => ({
-                jobId: parseJobId(row[0]),
-                type: (row[4] || '').trim(),
-                statusText: parseStatus(row[2]).text,
-                date: (row[5] || '').replace(/<[^>]+>/g, '').trim(),
+            const allRows = (listData.rows || []).map(row => ({
+                jobId:      row.id,
+                type:       (row.fileType || '').trim(),
+                statusText: row.status || '',
+                date:       row.createdAt || '',
             }));
 
             const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
@@ -19720,13 +19720,13 @@ async function loadDownloadsView() {
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fetching…'; }
 
         try {
-            const listRes = await fetch(`${apiUrl}/api/jenesis/downloads?status=All`);
+            const listRes = await fetch(`${apiUrl}/api/jenesis/downloads`);
             const listData = await listRes.json();
-            const allRows = (listData.data || []).map(row => ({
-                jobId: parseJobId(row[0]),
-                type: (row[4] || '').trim(),
-                statusText: parseStatus(row[2]).text,
-                date: (row[5] || '').replace(/<[^>]+>/g, '').trim(),
+            const allRows = (listData.rows || []).map(row => ({
+                jobId:      row.id,
+                type:       (row.fileType || '').trim(),
+                statusText: row.status || '',
+                date:       row.createdAt || '',
             }));
 
             const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
@@ -19812,22 +19812,21 @@ async function loadDownloadsView() {
         // Downloads table
         if (dlResult.status === 'fulfilled') {
             const data = dlResult.value;
-            const rows = (data.data || []).map(row => {
-                const st = parseStatus(row[2]);
-                return {
-                    jobId: parseJobId(row[0]),
-                    company: parseText(row[1], null),
-                    statusText: st.text,
-                    statusCls: st.cls,
-                    method: row[3] || '',
-                    type: row[4] || '',
-                    date: row[5] || '',
-                    policies: parsePolicies(row[2])
-                };
-            });
+            const _statusClsMap = { Processed:'badge-processed', Pending:'badge-pending', Incomplete:'badge-incomplete', 'On Hold':'badge-onhold', Duplicate:'badge-duplicate', Error:'badge-error' };
+            const _toStatusCls = s => { const k = Object.keys(_statusClsMap).find(k => (s||'').includes(k)); return _statusClsMap[k] || 'badge-pending'; };
+            const rows = (data.rows || []).map(row => ({
+                jobId:      row.id,
+                company:    row.company || '',
+                statusText: row.status  || '',
+                statusCls:  _toStatusCls(row.status),
+                method:     row.method   || '',
+                type:       row.fileType || '',
+                date:       row.createdAt|| '',
+                policies:   row.policies || []
+            }));
             window._jnAllDownloads = rows;
             const countEl = document.getElementById('jn-dl-count');
-            if (countEl) countEl.textContent = data.recordsTotal || rows.length;
+            if (countEl) countEl.textContent = data.total || rows.length;
             jnRenderDownloads(rows, document.getElementById('jn-status-filter')?.value || '');
         } else {
             const wrap = document.getElementById('jn-downloads-table-wrap');
@@ -22119,23 +22118,58 @@ function parseIvansFixed(content) {
 }
 
 function _ivansLobLabel(code) {
-    return ({ PAUTO:'Personal Auto', CAUTO:'Commercial Auto', SYNBN:'Commercial Auto',
-              PRTBN:'Personal Auto', HOME:'Homeowners', HO:'Homeowners',
-              COMMP:'Commercial Property', GL:'General Liability',
-              WC:"Workers' Comp", UMBRL:'Umbrella', BOAT:'Boat' })[code] || code || '';
+    return ({
+        PAUTO:'Personal Auto',  CAUTO:'Commercial Auto', SYNBN:'Commercial Auto',
+        PRTBN:'Personal Auto',  HOME:'Homeowners',        HO:'Homeowners',
+        COMMP:'Commercial Property', GL:'General Liability',
+        WC:"Workers' Comp",     UMBRL:'Umbrella',          BOAT:'Boat',
+        TRUCK:'Trucking',       TRCK:'Trucking',            CT:'Commercial Trucking',
+        TRK:'Trucking',         MC:'Motor Carrier',         OO:'Owner Operator',
+        NTL:'Non-Trucking Liability', BTL:'Bobtail',        CARGO:'Cargo',
+        PD:'Physical Damage',   CA:'Commercial Auto',
+    })[code] || code || '';
 }
 function _ivansLobToType(lob) {
-    return ({
-        'Personal Auto':       'personal-auto',
-        'Commercial Auto':     'commercial-auto',
-        'Commercial':          'commercial-auto',
-        'Homeowners':          'homeowners',
-        'Commercial Property': 'commercial-property',
-        "General Liability":   'general-liability',
-        "Workers' Comp":       'workers-comp',
-        'Umbrella':            'umbrella',
-        'Boat':                'boat',
-    })[lob] || (lob && lob.toLowerCase().includes('commercial') ? 'commercial-auto' : 'personal-auto');
+    if (!lob) return 'personal-auto';
+    const mapped = ({
+        'Personal Auto':            'personal-auto',
+        'Commercial Auto':          'commercial-auto',
+        'Commercial':               'commercial-auto',
+        'Homeowners':               'homeowners',
+        'Commercial Property':      'commercial-property',
+        "General Liability":        'general-liability',
+        "Workers' Comp":            'workers-comp',
+        'Workers Comp':             'workers-comp',
+        'Umbrella':                 'umbrella',
+        'Boat':                     'boat',
+        'Trucking':                 'trucking',
+        'Commercial Truck':         'trucking',
+        'Commercial Trucking':      'trucking',
+        'Truck':                    'trucking',
+        'Motor Carrier':            'motor-carrier',
+        'Owner Operator':           'owner-operator',
+        'Non-Trucking Liability':   'non-trucking',
+        'Non Trucking Liability':   'non-trucking',
+        'Bobtail':                  'bobtail',
+        'Physical Damage':          'physical-damage',
+        'Cargo':                    'cargo',
+    })[lob];
+    if (mapped) return mapped;
+    const l = lob.toLowerCase();
+    if (l.includes('truck'))                             return 'trucking';
+    if (l.includes('motor carrier'))                     return 'motor-carrier';
+    if (l.includes('owner operator') || l.includes('owner-operator')) return 'owner-operator';
+    if (l.includes('non-truck') || l.includes('non truck')) return 'non-trucking';
+    if (l.includes('bobtail'))                           return 'bobtail';
+    if (l.includes('cargo'))                             return 'cargo';
+    if (l.includes('physical damage'))                   return 'physical-damage';
+    if (l.includes('commercial'))                        return 'commercial-auto';
+    if (l.includes('general liab'))                      return 'general-liability';
+    if (l.includes('workers'))                           return 'workers-comp';
+    if (l.includes('home') || l.includes('ho'))          return 'homeowners';
+    if (l.includes('umbrella'))                          return 'umbrella';
+    if (l.includes('personal auto') || l.includes('pauto')) return 'personal-auto';
+    return 'personal-auto'; // final fallback
 }
 
 function parseAcordXML(content) {
