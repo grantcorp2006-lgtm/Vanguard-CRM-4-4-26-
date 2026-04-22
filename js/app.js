@@ -656,12 +656,61 @@ document.addEventListener('DOMContentLoaded', function() {
         const _openDeepLinkedClient = () => {
             if (typeof viewClient === 'function') {
                 viewClient(_dlClientId);
-                // Clean the URL without reloading
                 window.history.replaceState({}, '', window.location.origin + window.location.pathname + '#clients');
             }
         };
-        // Give clients view time to render before opening profile
-        setTimeout(_openDeepLinkedClient, 1500);
+        // Poll until the dashboard content is ready, then open the profile
+        let _dlAttempts = 0;
+        const _dlPoll = setInterval(() => {
+            _dlAttempts++;
+            if (document.querySelector('.dashboard-content') || _dlAttempts > 20) {
+                clearInterval(_dlPoll);
+                _openDeepLinkedClient();
+            }
+        }, 300);
+    }
+
+    // Deep-link support: ?policyNumber=XXX auto-opens the policy profile
+    const _dlPolicyNumber = _dlParams.get('policyNumber');
+    if (_dlPolicyNumber) {
+        if (_initialHash !== '#policies') {
+            window.location.hash = '#policies';
+        }
+        const _openDeepLinkedPolicy = () => {
+            // Step 1: clear status filter (default "active" may hide the policy)
+            const _sf = document.getElementById('policyStatusFilter');
+            if (_sf) _sf.value = '';
+            // Step 2: type the policy number into the search box and filter
+            const _sb = document.getElementById('policySearch');
+            if (_sb) {
+                _sb.value = _dlPolicyNumber;
+                if (typeof filterPolicies === 'function') filterPolicies();
+            }
+            // Step 3: after filter renders, click the view button on the first matching row
+            setTimeout(() => {
+                const _tbody = document.getElementById('policyTableBody');
+                const _row = _tbody && _tbody.querySelector('tr[data-policy-id]');
+                if (_row) {
+                    const _pid = _row.getAttribute('data-policy-id');
+                    if (typeof window.viewPolicy === 'function') window.viewPolicy(_pid);
+                } else {
+                    // Fallback: call by policy number directly
+                    if (typeof window.viewPolicy === 'function') window.viewPolicy(_dlPolicyNumber);
+                }
+                window.history.replaceState({}, '', window.location.origin + window.location.pathname + '#policies');
+            }, 400);
+        };
+        // Wait for policyTableBody to have actual policy rows (not just empty/spinner state)
+        let _dlpAttempts = 0;
+        const _dlpPoll = setInterval(() => {
+            _dlpAttempts++;
+            const tbody = document.getElementById('policyTableBody');
+            const hasRows = tbody && tbody.querySelector('tr[data-policy-id]');
+            if (hasRows || _dlpAttempts > 60) {
+                clearInterval(_dlpPoll);
+                _openDeepLinkedPolicy();
+            }
+        }, 300);
     }
 });
 
@@ -3710,6 +3759,234 @@ function refreshCalendarDisplay() {
             );
         }
     }
+
+    // Sync new events to the dashboard widget if it's visible
+    if (window.dashCalState && document.getElementById('dashCalGrid')) {
+        window.dashCalState.serverEvents = window.calendarState.serverEvents || [];
+        window.dashCalState.serverCallbacks = window.calendarState.serverCallbacks || [];
+        const dashGrid = document.getElementById('dashCalGrid');
+        if (dashGrid) dashGrid.innerHTML = generateDashCalGrid(window.dashCalState.currentYear, window.dashCalState.currentMonth);
+        const sd = window.dashCalState.selectedDate || new Date();
+        const dashEvents = document.getElementById('dashCalEvents');
+        if (dashEvents) dashEvents.innerHTML = generateDashCalEventsHTML(sd.getFullYear(), sd.getMonth(), sd.getDate());
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+// DASHBOARD CALENDAR WIDGET
+// ═══════════════════════════════════════════════════════
+
+function generateDashCalGrid(year, month) {
+    const firstDay = new Date(year, month, 1);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const startDow = firstDay.getDay();
+    const today = new Date();
+    const selectedDate = window.dashCalState?.selectedDate;
+
+    let html = `<div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #e5e7eb; border-radius: 6px; overflow: hidden;">
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Sun</div>
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Mon</div>
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Tue</div>
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Wed</div>
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Thu</div>
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Fri</div>
+        <div style="background:#374151;color:white;padding:5px 2px;text-align:center;font-weight:600;font-size:11px;">Sat</div>`;
+
+    for (let i = 0; i < startDow; i++) html += `<div style="background:#f9fafb;padding:4px;"></div>`;
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const isToday = today.getDate() === day && today.getMonth() === month && today.getFullYear() === year;
+        const isSel = selectedDate && selectedDate.getDate() === day && selectedDate.getMonth() === month && selectedDate.getFullYear() === year;
+        const events = getWidgetEventsForDate(year, month, day);
+        const bg = isSel ? '#dbeafe' : isToday ? '#eff6ff' : 'white';
+        const border = isSel ? '2px solid #2563eb' : isToday ? '2px solid #3b82f6' : 'none';
+        const dots = events.slice(0, 3).map(e => `<div style="background:${e.isServerCallback ? getAgentColor(e.assignedAgent) : getEventColor(e.type)};color:white;font-size:7px;padding:1px 2px;border-radius:2px;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${e.title}">${e.title}</div>`).join('') + (events.length > 3 ? `<div style="font-size:7px;color:#6b7280;">+${events.length - 3}</div>` : '');
+
+        html += `<div onclick="dashCalSelectDate(${year},${month},${day})" style="background:${bg};padding:4px 3px;cursor:pointer;border:${border};min-height:40px;display:flex;flex-direction:column;" onmouseover="if(!this.dataset.sel)this.style.background='#f3f4f6'" onmouseout="if(!this.dataset.sel)this.style.background='${bg}'" ${isSel ? 'data-sel="1"' : ''}>
+            <div style="font-weight:${isToday?'700':'500'};color:${isToday?'#1e40af':'#374151'};font-size:12px;line-height:1;">${day}</div>
+            ${events.length > 0 ? `<div style="margin-top:1px;">${dots}</div>` : ''}
+        </div>`;
+    }
+
+    const remaining = 42 - (startDow + daysInMonth);
+    for (let i = 0; i < remaining; i++) html += `<div style="background:#f9fafb;padding:4px;"></div>`;
+    html += `</div>`;
+    return html;
+}
+
+function switchDashCalView(view) {
+    if (!window.dashCalState) return;
+    window.dashCalState.currentView = view;
+    const personalBtn = document.getElementById('dashCalPersonalBtn');
+    const agencyBtn = document.getElementById('dashCalAgencyBtn');
+    if (personalBtn) { personalBtn.style.background = view === 'personal' ? '#3b82f6' : 'white'; personalBtn.style.color = view === 'personal' ? 'white' : '#6b7280'; }
+    if (agencyBtn) { agencyBtn.style.background = view === 'agency' ? '#3b82f6' : 'white'; agencyBtn.style.color = view === 'agency' ? 'white' : '#6b7280'; }
+    const grid = document.getElementById('dashCalGrid');
+    if (grid) grid.innerHTML = generateDashCalGrid(window.dashCalState.currentYear, window.dashCalState.currentMonth);
+    const sd = window.dashCalState.selectedDate || new Date();
+    const eventsEl = document.getElementById('dashCalEvents');
+    if (eventsEl) eventsEl.innerHTML = generateDashCalEventsHTML(sd.getFullYear(), sd.getMonth(), sd.getDate());
+}
+
+function getWidgetEventsForDate(year, month, day) {
+    const dateStr = new Date(year, month, day).toISOString().split('T')[0];
+    const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const currentUser = (sessionData.username || '').toLowerCase();
+    const state = window.dashCalState || {};
+    const isPersonal = (state.currentView || 'personal') === 'personal';
+
+    const localEvents = JSON.parse(localStorage.getItem('calendarEvents') || '[]')
+        .filter(e => e.date === dateStr && (!isPersonal || !e.assignedAgent || e.assignedAgent.toLowerCase() === currentUser));
+
+    const serverEvents = (state.serverEvents || [])
+        .filter(e => e.date === dateStr && (!isPersonal || !e.created_by || e.created_by.toLowerCase() === currentUser))
+        .map(e => ({ id: `server_${e.id}`, title: e.title, time: e.time || '09:00', type: e.description || '', date: e.date, isServerEvent: true, assignedAgent: e.created_by }));
+
+    const serverCallbacks = (state.serverCallbacks || [])
+        .filter(cb => {
+            if (!cb.date_time) return false;
+            const cbDate = new Date(cb.date_time).toISOString().split('T')[0];
+            if (cbDate !== dateStr) return false;
+            return !isPersonal || !cb.assigned_agent || cb.assigned_agent.toLowerCase() === currentUser;
+        })
+        .map(cb => ({
+            id: `callback_${cb.id}`, callbackId: cb.id,
+            title: `CB: ${(typeof shortenCompanyName === 'function' ? shortenCompanyName(cb.lead_name || 'Unknown') : (cb.lead_name || 'Unknown'))}`,
+            time: new Date(cb.date_time).toTimeString().slice(0, 5),
+            type: 'callback', date: dateStr, leadId: cb.lead_id, notes: cb.notes,
+            assignedAgent: cb.assigned_agent, isServerCallback: true
+        }));
+
+    const todoKey = isPersonal ? 'syncedPersonalTodos' : 'syncedAgencyTodos';
+    const todoEvents = JSON.parse(localStorage.getItem(todoKey) || '[]')
+        .filter(t => t.targetDate && new Date(t.targetDate).toISOString().split('T')[0] === dateStr)
+        .map(t => ({ id: `todo_${t.id}`, title: t.text, time: new Date(t.targetDate).toTimeString().slice(0, 5), type: 'todo', date: dateStr, isTodo: true }));
+
+    return [...localEvents, ...serverEvents, ...serverCallbacks, ...todoEvents];
+}
+
+function dashCalChangeMonth(dir) {
+    if (!window.dashCalState) return;
+    window.dashCalState.currentMonth += dir;
+    if (window.dashCalState.currentMonth > 11) { window.dashCalState.currentMonth = 0; window.dashCalState.currentYear++; }
+    else if (window.dashCalState.currentMonth < 0) { window.dashCalState.currentMonth = 11; window.dashCalState.currentYear--; }
+    const el = document.getElementById('dashCalMonthYear');
+    if (el) el.textContent = `${getMonthName(window.dashCalState.currentMonth)} ${window.dashCalState.currentYear}`;
+    const grid = document.getElementById('dashCalGrid');
+    if (grid) grid.innerHTML = generateDashCalGrid(window.dashCalState.currentYear, window.dashCalState.currentMonth);
+}
+
+function dashCalSelectDate(year, month, day) {
+    if (!window.dashCalState) return;
+    window.dashCalState.selectedDate = new Date(year, month, day);
+    const eventsEl = document.getElementById('dashCalEvents');
+    if (eventsEl) eventsEl.innerHTML = generateDashCalEventsHTML(year, month, day);
+    const grid = document.getElementById('dashCalGrid');
+    if (grid) grid.innerHTML = generateDashCalGrid(window.dashCalState.currentYear, window.dashCalState.currentMonth);
+}
+
+function generateDashCalEventsHTML(year, month, day) {
+    const events = getWidgetEventsForDate(year, month, day).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const dateDisplay = new Date(year, month, day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const isGrant = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase() === 'grant';
+
+    if (events.length === 0) {
+        return `<div style="text-align:center;color:#9ca3af;padding:20px;font-size:13px;"><i class="fas fa-calendar-day" style="display:block;font-size:22px;margin-bottom:8px;opacity:0.4;"></i>${dateDisplay}<br>No events scheduled</div>`;
+    }
+
+    const header = `<div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #e5e7eb;">${dateDisplay} — ${events.length} event${events.length !== 1 ? 's' : ''}</div>`;
+    const items = events.map(event => {
+        const color = event.isServerCallback ? getAgentColor(event.assignedAgent) : getEventColor(event.type);
+        const timeStr = typeof formatTime === 'function' ? formatTime(event.time) : event.time;
+        const deleteRefresh = `setTimeout(()=>{const sd=window.dashCalState?.selectedDate||new Date();const el=document.getElementById('dashCalEvents');if(el)el.innerHTML=generateDashCalEventsHTML(sd.getFullYear(),sd.getMonth(),sd.getDate());const g=document.getElementById('dashCalGrid');if(g)g.innerHTML=generateDashCalGrid(window.dashCalState.currentYear,window.dashCalState.currentMonth);},400)`;
+        const actions = event.isServerCallback
+            ? `<button onclick="openLeadProfile('${event.leadId}')" style="margin-top:4px;padding:3px 7px;background:#3b82f6;color:white;border:none;border-radius:3px;font-size:10px;cursor:pointer;"><i class="fas fa-user"></i> Open Lead</button>
+               ${isGrant ? `<button onclick="deleteScheduledCallback('${event.callbackId||event.id}','${event.leadId}');${deleteRefresh}" style="margin-top:4px;margin-left:4px;padding:3px 7px;background:#ef4444;color:white;border:none;border-radius:3px;font-size:10px;cursor:pointer;"><i class="fas fa-trash"></i></button>` : ''}`
+            : `<button onclick="deleteEvent('${event.id}');${deleteRefresh}" style="margin-top:4px;padding:3px 7px;background:#ef4444;color:white;border:none;border-radius:3px;font-size:10px;cursor:pointer;"><i class="fas fa-trash"></i></button>`;
+        return `<div style="background:#f9fafb;border-left:3px solid ${color};padding:8px;margin-bottom:6px;border-radius:4px;">
+            <div style="font-weight:600;color:#111827;font-size:13px;">${event.title}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;"><i class="fas fa-clock"></i> ${timeStr} · <span style="text-transform:capitalize;">${(event.type||'').replace('-',' ')}</span></div>
+            ${actions}
+        </div>`;
+    }).join('');
+    return header + items;
+}
+
+async function dashCalAddEvent() {
+    const titleEl = document.getElementById('dashCalTitle');
+    const timeEl = document.getElementById('dashCalTime');
+    const typeEl = document.getElementById('dashCalType');
+
+    if (!titleEl?.value.trim()) { showNotification('Please enter an event title', 'warning'); return; }
+
+    const btn = document.querySelector('button[onclick="dashCalAddEvent()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...'; }
+
+    const sessionData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const currentUser = sessionData.username || '';
+    const selectedDate = window.dashCalState?.selectedDate || new Date();
+
+    const eventData = {
+        title: titleEl.value.trim(),
+        time: timeEl?.value || '09:00',
+        description: typeEl?.value || 'meeting',
+        date: selectedDate.toISOString().split('T')[0],
+        userId: currentUser
+    };
+
+    const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3001' : `http://${window.location.hostname}:3001`;
+
+    try {
+        const response = await fetch(`${apiUrl}/api/calendar-events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(eventData)
+        });
+
+        if (response.ok) {
+            titleEl.value = '';
+            showNotification('Event added to calendar!', 'success');
+            await loadServerCalendarEvents();
+            if (window.dashCalState) window.dashCalState.serverEvents = window.calendarState?.serverEvents || [];
+            // Also refresh the popup calendar if open
+            if (window.calendarState && document.getElementById('calendarGrid')) refreshCalendarDisplay();
+            const sd = window.dashCalState?.selectedDate || new Date();
+            const eventsEl = document.getElementById('dashCalEvents');
+            if (eventsEl) eventsEl.innerHTML = generateDashCalEventsHTML(sd.getFullYear(), sd.getMonth(), sd.getDate());
+            const grid = document.getElementById('dashCalGrid');
+            if (grid) grid.innerHTML = generateDashCalGrid(window.dashCalState.currentYear, window.dashCalState.currentMonth);
+        } else {
+            showNotification('Error adding event', 'error');
+        }
+    } catch(e) {
+        console.error('Dashboard calendar widget error:', e);
+        showNotification('Error adding event', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Add Event'; }
+    }
+}
+
+function initDashCalWidget() {
+    if (!document.getElementById('dashCalGrid')) return;
+    const now = new Date();
+    const _widgetUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+    window.dashCalState = {
+        currentMonth: now.getMonth(),
+        currentYear: now.getFullYear(),
+        selectedDate: now,
+        currentView: 'personal',
+        serverEvents: window.calendarState?.serverEvents || [],
+        serverCallbacks: window.calendarState?.serverCallbacks || []
+    };
+    // Hide agency toggle for Maureen
+    const agencyBtn = document.getElementById('dashCalAgencyBtn');
+    if (agencyBtn && _widgetUser === 'maureen') agencyBtn.style.display = 'none';
+    const monthEl = document.getElementById('dashCalMonthYear');
+    if (monthEl) monthEl.textContent = `${getMonthName(now.getMonth())} ${now.getFullYear()}`;
+    const grid = document.getElementById('dashCalGrid');
+    if (grid) grid.innerHTML = generateDashCalGrid(now.getFullYear(), now.getMonth());
+    const eventsEl = document.getElementById('dashCalEvents');
+    if (eventsEl) eventsEl.innerHTML = generateDashCalEventsHTML(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 // Navigate from calendar to specific todo
@@ -5637,7 +5914,7 @@ function updateClientCount() {
             try {
                 const user = JSON.parse(sessionData);
                 const currentUser = user.username;
-                const isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
+                const isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
 
                 if (!isAdmin) {
                     clients = clients.filter(client => {
@@ -5768,7 +6045,7 @@ function loadFullDashboard() {
         <!-- Main Sections -->
         <div class="dashboard-sections" style="display: grid; gap: 20px;">
             <!-- To-Do List -->
-            <div class="section-card todo-container" style="height: fit-content; min-height: 600px;">
+            <div class="section-card todo-container" style="height: 100%; min-height: 600px; box-sizing: border-box;">
                 <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h2 style="color: white;">To-Do</h2>
                     <div style="display: flex; gap: 5px;" id="dashboardTodoViewButtons">
@@ -5938,6 +6215,61 @@ function loadFullDashboard() {
                 </div>
             </div>
         </div>
+
+        <!-- Dashboard Calendar Widget -->
+        <div class="section-card" id="dashCalWidget" style="margin-top: 0;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="color: white;"><i class="fas fa-calendar-alt" style="margin-right: 8px;"></i>Calendar</h2>
+                <button onclick="openCalendar()" style="padding: 5px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; cursor: pointer; font-weight: 500;">
+                    <i class="fas fa-external-link-alt"></i> Open Full Calendar
+                </button>
+            </div>
+            <div style="display: flex; min-height: 380px;">
+                <!-- Left: Calendar Grid -->
+                <div style="flex: 0 0 58%; padding: 16px; background: #f9fafb; border-right: 1px solid #e5e7eb;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <button onclick="dashCalChangeMonth(-1)" style="padding: 6px 10px; border: 1px solid #d1d5db; background: white; border-radius: 6px; cursor: pointer;"><i class="fas fa-chevron-left"></i></button>
+                        <span id="dashCalMonthYear" style="font-size: 15px; font-weight: 600; color: #111827;"></span>
+                        <button onclick="dashCalChangeMonth(1)" style="padding: 6px 10px; border: 1px solid #d1d5db; background: white; border-radius: 6px; cursor: pointer;"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                    <div style="display: flex; justify-content: center; margin-bottom: 12px; background: #f8fafc; border-radius: 8px; padding: 6px; border: 1px solid #e5e7eb;">
+                        <div style="display: flex; background: white; border-radius: 6px; border: 1px solid #d1d5db; overflow: hidden;">
+                            <button id="dashCalPersonalBtn" onclick="switchDashCalView('personal')" style="padding: 6px 14px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s ease;">
+                                <i class="fas fa-user" style="margin-right: 5px;"></i>Personal
+                            </button>
+                            <button id="dashCalAgencyBtn" onclick="switchDashCalView('agency')" style="padding: 6px 14px; border: none; background: white; color: #6b7280; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s ease;">
+                                <i class="fas fa-users" style="margin-right: 5px;"></i>Agency
+                            </button>
+                        </div>
+                    </div>
+                    <div id="dashCalGrid"></div>
+                </div>
+                <!-- Right: Quick Add + Events -->
+                <div style="flex: 1; padding: 16px; display: flex; flex-direction: column; min-width: 0;">
+                    <div style="background: #f0f9ff; border: 1px solid #3b82f6; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                        <h4 style="margin: 0 0 8px 0; color: #1e40af; font-size: 14px;">Quick Add Event</h4>
+                        <input type="text" id="dashCalTitle" placeholder="Event title..." style="width: calc(100% - 14px); padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; margin-bottom: 6px; font-size: 14px;">
+                        <div style="display: flex; gap: 2%;">
+                            <input type="time" id="dashCalTime" style="width: 48%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px;">
+                            <select id="dashCalType" style="width: 48%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px;">
+                                <option value="meeting">Meeting</option>
+                                <option value="call">Client Call</option>
+                                <option value="appointment">Appointment</option>
+                                <option value="reminder">Reminder</option>
+                                <option value="follow-up">Follow-up</option>
+                                <option value="callback">Callback</option>
+                            </select>
+                        </div>
+                        <button onclick="dashCalAddEvent()" style="width: 100%; margin-top: 8px; padding: 6px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                            <i class="fas fa-plus"></i> Add Event
+                        </button>
+                    </div>
+                    <div id="dashCalEvents" style="flex: 1; overflow-y: auto; max-height: 260px;">
+                        <div style="text-align: center; color: #9ca3af; padding: 20px; font-size: 13px;"><i class="fas fa-calendar-day" style="display: block; font-size: 22px; margin-bottom: 8px; opacity: 0.4;"></i>Select a date to view events</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     `;
 
     // Clear any existing cached dashboard to force reload with new layout
@@ -5998,6 +6330,9 @@ function loadDashboardView() {
 
             // Sync todos to backend for notifications
             syncTodosToBackend();
+
+            // Initialize the dashboard calendar widget
+            initDashCalWidget();
         }).catch(error => {
             console.error('⚠️ Error loading server data for dashboard, showing manual todos only:', error);
             // Server data failed, show manual todos at least
@@ -6005,6 +6340,9 @@ function loadDashboardView() {
 
             // Still try to sync todos even if server data failed
             syncTodosToBackend();
+
+            // Init widget with whatever data we have
+            initDashCalWidget();
         });
 
         loadReminderStats(); // Load reminder statistics
@@ -6995,7 +7333,7 @@ function getCurrentUser() {
 // Check if current user is admin
 function isCurrentUserAdmin() {
     const currentUser = getCurrentUser();
-    const isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
+    const isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
     console.log('🔍 ADMIN CHECK:', {
         currentUser,
         currentUserLower: currentUser.toLowerCase(),
@@ -10999,16 +11337,19 @@ async function generateClientRows(page = 1) {
     console.log('🚨 GENERATECLIENTROWS - Syncing with server first...');
 
     // ALWAYS sync with server first to get latest data
+    let clients = [];
     try {
         const serverClients = await loadClientsFromServer();
         console.log(`🔄 Server sync: Retrieved ${serverClients.length} clients from API`);
+        // Prefer the server return value; fall back to localStorage if server returned nothing
+        clients = serverClients.length > 0
+            ? serverClients
+            : JSON.parse(localStorage.getItem('insurance_clients') || '[]');
     } catch (error) {
         console.error('⚠️ Server sync failed, proceeding with localStorage:', error);
+        clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
     }
-
-    // Now load from localStorage (which should now have fresh data)
-    let clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
-    console.log(`✅ Loaded ${clients.length} clients from localStorage (post-server-sync)`);
+    console.log(`✅ Working with ${clients.length} clients (post-server-sync)`);
 
     // USER-SPECIFIC FILTERING: Maureen can only see her assigned clients (secondary filter)
     const currentUserData = localStorage.getItem('user');
@@ -11046,19 +11387,21 @@ async function generateClientRows(page = 1) {
     let currentUser = null;
     let isAdmin = false;
 
+    let isCsrUser = false;
     if (sessionData) {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
-            console.log(`🔍 Current user: ${currentUser}, Is Admin: ${isAdmin}`);
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
+            isCsrUser = (user.role || '') === 'csr';
+            console.log(`🔍 Current user: ${currentUser}, Is Admin: ${isAdmin}, Is CSR: ${isCsrUser}`);
         } catch (error) {
             console.error('Error parsing session data:', error);
         }
     }
 
-    // Filter clients based on user role
-    if (!isAdmin && currentUser) {
+    // Filter clients based on user role — CSR sees all clients (gated by search in UI)
+    if (!isAdmin && !isCsrUser && currentUser) {
         const originalCount = clients.length;
         clients = clients.filter(client => {
             const assignedTo = client.assignedTo || client.agent || 'Grant'; // Default to Grant if no assignment
@@ -11164,10 +11507,10 @@ async function generateClientRows(page = 1) {
         `;
     }
     
-    // Calculate pagination
+    // Calculate pagination — CSR loads all clients so DOM-based search finds any client
     const totalPages = Math.ceil(clients.length / clientsPerPage);
-    const startIndex = (page - 1) * clientsPerPage;
-    const endIndex = Math.min(startIndex + clientsPerPage, clients.length);
+    const startIndex = isCsrUser ? 0 : (page - 1) * clientsPerPage;
+    const endIndex = isCsrUser ? clients.length : Math.min(startIndex + clientsPerPage, clients.length);
     const paginatedClients = clients.slice(startIndex, endIndex);
 
     // Store current page globally
@@ -11301,7 +11644,7 @@ async function loadClientsView() {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(user.username.toLowerCase());
+            isAdmin = ['grant', 'maureen'].includes(user.username.toLowerCase()) || (user.role || '').includes('admin');
         } catch (error) {
             console.error('Error parsing session data:', error);
         }
@@ -11388,8 +11731,11 @@ async function loadClientsView() {
     // Populate the table with actual client data
     const tbody = document.getElementById('clientsTableBody');
     if (tbody) {
-        // Check if we actually have clients after server load
-        const finalClients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+        // Check if we actually have clients — prefer serverClients return value over localStorage
+        // so a stale/empty cache doesn't block the view from loading
+        const finalClients = serverClients.length > 0
+            ? serverClients
+            : JSON.parse(localStorage.getItem('insurance_clients') || '[]');
         if (finalClients.length === 0) {
             console.log('⚠️ Still no clients after server load - showing empty state');
             tbody.innerHTML = `
@@ -11405,6 +11751,7 @@ async function loadClientsView() {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Syncing clients...</td></tr>';
             generateClientRows(currentClientPage).then(content => {
                 tbody.innerHTML = content;
+                filterClients();
             }).catch(error => {
                 console.error('Error generating client rows:', error);
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #dc2626;">Error loading clients</td></tr>';
@@ -11431,6 +11778,7 @@ async function loadClientsView() {
                     tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Syncing clients...</td></tr>';
                     generateClientRows(currentClientPage).then(content => {
                         tbody.innerHTML = content;
+                        filterClients();
                     }).catch(error => {
                         console.error('Error generating client rows:', error);
                         tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #dc2626;">Error loading clients</td></tr>';
@@ -11545,7 +11893,7 @@ function updateClientsPagination() {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
         } catch (error) {
             console.error('Error parsing session data:', error);
         }
@@ -11658,6 +12006,7 @@ window.goToClientPage = function(page) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Syncing clients...</td></tr>';
         generateClientRows(page).then(content => {
             tbody.innerHTML = content;
+            filterClients();
         }).catch(error => {
             console.error('Error generating client rows:', error);
             tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #dc2626;">Error loading clients</td></tr>';
@@ -11798,8 +12147,8 @@ function loadPoliciesView() {
                     padding: 8px 10px !important;
                 }
 
-                /* Card shell */
-                .policies-view .data-table tr {
+                /* Card shell — use :not([style*=none]) so JS display:none still works */
+                .policies-view .data-table tr:not([style*="display: none"]):not([style*="display:none"]) {
                     display: flex !important;
                     flex-wrap: wrap !important;
                     align-items: center !important;
@@ -11843,7 +12192,7 @@ function loadPoliciesView() {
                 .policies-view .data-table td:nth-child(10) {
                     display: flex !important;
                     position: absolute !important; top: 0 !important; bottom: 0 !important; right: 0 !important;
-                    width: 42px !important;
+                    width: 64px !important;
                     flex-direction: column !important; align-items: center !important; justify-content: center !important;
                     border-left: 1px solid #e5e7eb !important;
                     border-radius: 0 10px 10px 0 !important;
@@ -11851,13 +12200,13 @@ function loadPoliciesView() {
                     gap: 0 !important;
                 }
                 .policies-view .data-table td:nth-child(10) .action-buttons {
-                    display: flex !important; flex-direction: column !important; gap: 4px !important;
+                    display: flex !important; flex-direction: column !important; gap: 10px !important;
                 }
                 .policies-view .data-table td:nth-child(10) .btn-icon {
-                    width: 28px !important; height: 28px !important;
-                    padding: 0 !important; font-size: 12px !important;
+                    width: 44px !important; height: 44px !important;
+                    padding: 0 !important; font-size: 18px !important;
                     display: flex !important; align-items: center !important;
-                    justify-content: center !important; border-radius: 6px !important;
+                    justify-content: center !important; border-radius: 8px !important;
                 }
 
                 /* ── Row 2: client name (100% → forces new row) ── */
@@ -11914,7 +12263,7 @@ function loadPoliciesView() {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
             console.log(`🔍 Policies view - Current user: ${currentUser}, Is Admin: ${isAdmin}`);
         } catch (error) {
             console.error('Error parsing session data:', error);
@@ -12029,7 +12378,7 @@ function loadPoliciesView() {
                 </div>
             </div>
 
-            <div class="policy-stats">
+            ${(function(){ const _s=JSON.parse(sessionStorage.getItem('vanguard_user')||'{}'); return _s.role==='csr'; })() ? '' : `<div class="policy-stats">
                 <div class="mini-stat">
                     <span class="mini-stat-value">${totalPolicies}</span>
                     <span class="mini-stat-label">Total Policies</span>
@@ -12046,12 +12395,12 @@ function loadPoliciesView() {
                     <span class="mini-stat-value">${formattedPremium}</span>
                     <span class="mini-stat-label">Total Premium</span>
                 </div>` : ''}
-            </div>
+            </div>`}
             
             <div class="filters-bar">
                 <div class="search-box">
                     <i class="fas fa-search"></i>
-                    <input type="text" placeholder="Search by policy number, client name...">
+                    <input type="text" id="policySearch" placeholder="Search by policy number, client name..." onkeyup="filterPolicies()">
                 </div>
                 <div class="filter-group">
                     <select class="filter-select" id="policyTypeFilter" onchange="filterPolicies()">
@@ -12126,8 +12475,6 @@ function loadPoliciesView() {
         if (tbody) {
             try {
                 const policyRows = await generatePolicyRows();
-                // Hide rows before inserting so the unfiltered list never flashes visibly
-                tbody.style.visibility = 'hidden';
                 tbody.innerHTML = policyRows;
 
                 // Initialize policy filters after rows are loaded
@@ -12138,8 +12485,6 @@ function loadPoliciesView() {
                 // Apply filter immediately for ALL users to sync stats with visible rows
                 setTimeout(() => {
                     filterPolicies();
-                    // Reveal only after filter has been applied — eliminates flash
-                    tbody.style.visibility = '';
                     console.log('✅ IMMEDIATE POLICY FILTER: Applied after row load');
                 }, 50);
             } catch (error) {
@@ -12173,6 +12518,34 @@ function filterPolicies() {
         }
     }
 
+    const policySearchValue = (document.getElementById('policySearch')?.value || '').toLowerCase();
+    const tbody = document.getElementById('policyTableBody');
+
+    // CSR: require 4+ characters before showing any policies
+    const _csrPolicySession = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsrPolicy = (_csrPolicySession.role || '') === 'csr';
+    if (_isCsrPolicy) {
+        const dataRows = tbody ? tbody.querySelectorAll('tr:not(#csrPolicySearchPrompt)') : [];
+        let promptRow = document.getElementById('csrPolicySearchPrompt');
+        if (policySearchValue.length < 4) {
+            dataRows.forEach(r => r.style.display = 'none');
+            if (tbody && !promptRow) {
+                promptRow = document.createElement('tr');
+                promptRow.id = 'csrPolicySearchPrompt';
+                promptRow.innerHTML = `<td colspan="10" style="text-align:center;padding:40px;color:#6b7280;">
+                    <i class="fas fa-search" style="font-size:48px;margin-bottom:16px;opacity:0.3;"></i>
+                    <p style="font-size:16px;margin:0;">Search for policies in the top left</p>
+                    <p style="font-size:14px;margin-top:8px;">Type 4 or more characters to display results</p>
+                </td>`;
+                tbody.appendChild(promptRow);
+            } else if (promptRow) {
+                promptRow.style.display = '';
+            }
+            return;
+        }
+        if (promptRow) promptRow.style.display = 'none';
+    }
+
     const rows = document.querySelectorAll('#policyTableBody tr');
 
     // Variables to track filtered stats
@@ -12193,6 +12566,10 @@ function filterPolicies() {
         const status = (row.cells[8]?.textContent || '').toLowerCase();
         const assignedAgent = (row.cells[7]?.textContent || '').trim();
         const premiumText = row.cells[6]?.textContent || '$0';
+
+        // Check search text against full row content
+        const rowText = row.textContent.toLowerCase();
+        const matchesSearch = !policySearchValue || rowText.includes(policySearchValue);
 
         // Check type filter
         const matchesType = !selectedType || type.includes(selectedType);
@@ -12225,7 +12602,7 @@ function filterPolicies() {
         }
 
         // Show row only if it matches all filters
-        const shouldShow = matchesType && matchesCarrier && matchesStatus && matchesAgent;
+        const shouldShow = matchesSearch && matchesType && matchesCarrier && matchesStatus && matchesAgent;
         row.style.display = shouldShow ? '' : 'none';
 
         // If row is visible, count it in stats
@@ -12283,29 +12660,46 @@ function updatePolicyStats(totalPolicies, activePolicies, pendingRenewal, totalP
 let currentRenewalView = 'month';
 let selectedRenewalPolicyId = null;
 
-function loadRenewalsView() {
+async function loadRenewalsView() {
     const dashboardContent = document.querySelector('.dashboard-content');
     if (!dashboardContent) return;
 
-    // Get real policy data from localStorage
-    let allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    let clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
-
-    // Get current user and check if they are admin
+    // Get current user and check role first
     const sessionData = sessionStorage.getItem('vanguard_user');
     let currentUser = null;
     let isAdmin = false;
+    let isCsrUser = false;
 
     if (sessionData) {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
-            console.log(`🔍 Renewals filtering - Current user: ${currentUser}, Is Admin: ${isAdmin}`);
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
+            isCsrUser = (user.role || '') === 'csr';
+            console.log(`🔍 Renewals filtering - Current user: ${currentUser}, Is Admin: ${isAdmin}, Is CSR: ${isCsrUser}`);
         } catch (error) {
             console.error('Error parsing session data:', error);
         }
     }
+
+    // For CSR: fetch all policies and clients from server so nothing is missed
+    if (isCsrUser) {
+        try {
+            await loadPoliciesFromServer();
+        } catch (e) { console.warn('Renewals: server policy fetch failed, using localStorage', e); }
+        try {
+            const r = await fetch('/api/clients?limit=500&offset=0');
+            if (r.ok) {
+                const data = await r.json();
+                const serverClients = Array.isArray(data) ? data : (data.clients || []);
+                if (serverClients.length > 0) localStorage.setItem('insurance_clients', JSON.stringify(serverClients));
+            }
+        } catch (e) { console.warn('Renewals: server client fetch failed, using localStorage', e); }
+    }
+
+    // Get real policy data from localStorage (now fresh for CSR)
+    let allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    let clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
 
     // Agency → agent mapping (same as Carriers tab)
     const RENEWAL_AGENCY_AGENTS = {
@@ -12332,6 +12726,9 @@ function loadRenewalsView() {
         });
 
         console.log(`🔒 Maureen special renewals filter: Policies ${originalPolicyCount} -> ${allPolicies.length}, Clients ${originalClientCount} -> ${clients.length}`);
+    } else if (isCsrUser) {
+        // CSR: show all policies/clients (they service everyone)
+        console.log(`🎧 Renewals: CSR user - showing all ${allPolicies.length} policies`);
     } else if (!isAdmin && currentUser) {
         // Regular non-admin filtering
         const originalPolicyCount = allPolicies.length;
@@ -16645,13 +17042,6 @@ function loadCommunicationsView() {
                 </div>
             </header>
             
-            <div class="tabs">
-                <button class="tab-btn active" onclick="loadCommunicationTab('reminders')">Reminders</button>
-                <button class="tab-btn" onclick="loadCommunicationTab('campaigns')">Campaigns</button>
-                <button class="tab-btn" onclick="loadCommunicationTab('email')">Email Blast</button>
-                <button class="tab-btn" onclick="loadCommunicationTab('sms')">SMS Blast</button>
-                <button class="tab-btn" onclick="loadCommunicationTab('history')">History</button>
-            </div>
             
             <div id="communicationTabContent">
                 <!-- Default to reminders tab content -->
@@ -18685,6 +19075,13 @@ function loadSettingsView() {
                     <div id="agency-drop-zone" style="display:none;"></div>
                     <div id="agency-file-list" style="margin-top:10px;"></div>
                 </div>
+
+                <div class="settings-section" id="teamManagementSection" style="display:none;">
+                    <h3>Team</h3>
+                    <div id="teamUserList" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+                        <p style="color:#9ca3af;font-size:13px;">Loading team...</p>
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -18864,6 +19261,75 @@ function loadSettingsView() {
     }
     // initIvansSettingsPanel removed (panel replaced with simple upload button)
 
+    // ── Team Management section (admin only) ─────────────────────────────────
+    (function initTeamSection() {
+        const sessionUser = (() => { try { return JSON.parse(sessionStorage.getItem('vanguard_user') || '{}'); } catch(e) { return {}; } })();
+        if (!['master_admin','united_admin','vanguard_admin','admin'].includes(sessionUser.role)) return;
+        const section = document.getElementById('teamManagementSection');
+        if (section) section.style.display = '';
+
+        const ROLE_META = {
+            master_admin:   { label: 'Master Admin',   color: 'linear-gradient(135deg,#f59e0b,#d97706)', icon: 'fa-crown' },
+            united_admin:   { label: 'United Admin',   color: 'linear-gradient(135deg,#8b5cf6,#6d28d9)', icon: 'fa-shield-alt' },
+            vanguard_admin: { label: 'Vanguard Admin', color: 'linear-gradient(135deg,#ff6b6b,#ee5a52)', icon: 'fa-crown' },
+            agent:          { label: 'Agent',          color: 'linear-gradient(135deg,#10b981,#059669)', icon: 'fa-user-tie' },
+            producer:       { label: 'Producer',       color: 'linear-gradient(135deg,#f59e0b,#d97706)', icon: 'fa-briefcase' },
+            csr:            { label: 'CSR',            color: 'linear-gradient(135deg,#3b82f6,#1d4ed8)', icon: 'fa-headset' },
+        };
+
+        async function loadTeam() {
+            const list = document.getElementById('teamUserList');
+            if (!list) return;
+            try {
+                const token = sessionStorage.getItem('vanguard_jwt');
+                const res = await fetch('/api/auth/users', { headers: { 'Authorization': 'Bearer ' + token } });
+                const data = await res.json();
+                if (!data.users) throw new Error('Failed to load');
+                list.innerHTML = data.users.map(u => {
+                    const meta = ROLE_META[u.role] || ROLE_META.agent;
+                    return `
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <div style="width:36px;height:36px;border-radius:50%;background:${meta.color};display:flex;align-items:center;justify-content:center;color:white;font-size:14px;">
+                                <i class="fas ${meta.icon}"></i>
+                            </div>
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:14px;">${u.username}</div>
+                                <div style="font-size:11px;color:#6b7280;">${u.active ? 'Active' : 'Inactive'} · ID ${u.id}</div>
+                            </div>
+                        </div>
+                        <select onchange="window.updateUserRole(${u.id}, this.value, this)"
+                                style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;cursor:pointer;">
+                            ${Object.entries(ROLE_META).map(([val, m]) =>
+                                `<option value="${val}" ${u.role === val ? 'selected' : ''}>${m.label}</option>`
+                            ).join('')}
+                        </select>
+                    </div>`;
+                }).join('');
+            } catch(e) {
+                list.innerHTML = `<p style="color:#dc2626;font-size:13px;">Error loading team: ${e.message}</p>`;
+            }
+        }
+
+        window.updateUserRole = async function(userId, newRole, selectEl) {
+            const token = sessionStorage.getItem('vanguard_jwt');
+            try {
+                const res = await fetch(`/api/auth/users/${userId}/role`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: newRole })
+                });
+                if (!res.ok) throw new Error('Failed');
+                showNotification('Role updated', 'success');
+            } catch(e) {
+                showNotification('Failed to update role', 'error');
+                loadTeam(); // reload to reset UI
+            }
+        };
+
+        loadTeam();
+    })();
+
     // Update average performance display after the HTML is loaded
     console.log('🔄 DEBUG: Setting timeout to update average performance display');
     setTimeout(async () => {
@@ -18976,8 +19442,11 @@ async function loadDownloadsView() {
             <header class="content-header" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
                 <h1 style="margin:0;"><i class="fas fa-download" style="margin-right:8px; color:var(--primary,#2563eb);"></i>JenesisNow Downloads</h1>
                 <div style="display:flex; gap:8px; align-items:center;">
-                    <button id="jn-import-btn" onclick="jnImportFromJenesis()" style="padding:6px 16px; font-size:13px; display:flex; align-items:center; gap:6px; border:none; border-radius:6px; background:#2563eb; cursor:pointer; color:#fff; font-weight:600;">
-                        <i class="fas fa-cloud-download-alt"></i> Import Latest
+                    <button id="jn-import-btn" onclick="jnImportFromJenesis()" style="padding:6px 16px; font-size:13px; display:flex; align-items:center; gap:6px; border:none; border-radius:6px; background:#2563eb; cursor:pointer; color:#fff; font-weight:600; transition:0.2s;">
+                        <i class="fas fa-cloud-download-alt"></i> Sync All Policies
+                    </button>
+                    <button id="jn-import-recent-btn" onclick="jnImportRecentFromJenesis()" style="padding:6px 16px; font-size:13px; display:flex; align-items:center; gap:6px; border:none; border-radius:6px; background:#059669; cursor:pointer; color:#fff; font-weight:600; transition:0.2s;">
+                        <i class="fas fa-history"></i> Sync Recent Policies
                     </button>
                     <button id="jn-refresh-btn" onclick="jnRefreshData()" class="btn-secondary" style="padding:6px 14px; font-size:13px; display:flex; align-items:center; gap:6px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer; color:#374151;">
                         <i class="fas fa-sync-alt"></i> Refresh
@@ -19105,7 +19574,7 @@ async function loadDownloadsView() {
     window.jnImportFromJenesis = async function() {
         const btn = document.getElementById('jn-import-btn');
         const resetBtn = () => {
-            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Import Latest'; }
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Sync All Policies'; }
         };
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fetching…'; }
 
@@ -19127,8 +19596,8 @@ async function loadDownloadsView() {
                 return resetBtn();
             }
 
-            // Take the 10 most recent (list is already newest-first from JenesisNow)
-            const toFetch = policyRows.slice(0, 10);
+            // Take up to 500 (all) — list is already newest-first from JenesisNow
+            const toFetch = policyRows.slice(0, 500);
             let allPolicies = [];
             let fileCount = 0;
 
@@ -19182,6 +19651,89 @@ async function loadDownloadsView() {
 
         } catch (err) {
             console.error('[JenesisNow] import error:', err);
+            if (window.showNotification) showNotification('JenesisNow import error: ' + err.message, 'error');
+            resetBtn();
+        }
+    };
+
+    // ── jnImportRecentFromJenesis: sync the 4 most recent policy files ────────────
+    window.jnImportRecentFromJenesis = async function() {
+        const btn = document.getElementById('jn-import-recent-btn');
+        const resetBtn = () => {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-history"></i> Sync Recent Policies'; }
+        };
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fetching…'; }
+
+        try {
+            const listRes = await fetch(`${apiUrl}/api/jenesis/downloads?status=All`);
+            const listData = await listRes.json();
+            const allRows = (listData.data || []).map(row => ({
+                jobId: parseJobId(row[0]),
+                type: (row[4] || '').trim(),
+                statusText: parseStatus(row[2]).text,
+                date: (row[5] || '').replace(/<[^>]+>/g, '').trim(),
+            }));
+
+            const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
+
+            if (policyRows.length === 0) {
+                if (window.showNotification) showNotification('No processed Policy downloads found in JenesisNow', 'warning');
+                return resetBtn();
+            }
+
+            // Take only the 4 most recent
+            const toFetch = policyRows.slice(0, 4);
+            let allPolicies = [];
+            let fileCount = 0;
+
+            for (let i = 0; i < toFetch.length; i++) {
+                const row = toFetch[i];
+                if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Fetching file ${i + 1}/${toFetch.length}…`;
+                try {
+                    const fileRes = await fetch(`${apiUrl}/api/jenesis/file/${row.jobId}`);
+                    const fileData = await fileRes.json();
+                    const fname = fileData.filename || `jenesis_${row.jobId}.al3`;
+                    if (fileData.policies && fileData.policies.length) {
+                        fileData.policies.forEach(p => { p._srcFile = fname; });
+                        allPolicies = allPolicies.concat(fileData.policies);
+                        fileCount++;
+                    } else if (fileData.error) {
+                        console.warn(`[JenesisNow] job ${row.jobId}: ${fileData.error}`);
+                    }
+                } catch (e) {
+                    console.warn(`[JenesisNow] failed to fetch job ${row.jobId}:`, e.message);
+                }
+            }
+
+            if (allPolicies.length === 0) {
+                if (window.showNotification) showNotification('No policies found in recent JenesisNow files', 'warning');
+                return resetBtn();
+            }
+
+            // Deduplicate: same policy number + insured → keep first
+            const seen = new Set();
+            const deduped = allPolicies.filter(p => {
+                const key = ((p.policyNumber || '').replace(/\s/g, '').toLowerCase()) + '|' + ((p.insuredName || '').toLowerCase().trim());
+                if (!key || key === '|') return true;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+
+            resetBtn();
+
+            showIvansUpload();
+            setTimeout(() => {
+                const statusEl = document.getElementById('ivans-parse-status');
+                if (statusEl) statusEl.innerHTML = `
+                    <div style="color:#15803d;font-size:13px;font-weight:600;padding:8px 14px;background:#f0fdf4;border-radius:8px;border:1px solid #86efac;margin-bottom:8px;">
+                        <i class="fas fa-check-circle"></i> Found <strong>${deduped.length}</strong> polic${deduped.length !== 1 ? 'ies' : 'y'} from <strong>${fileCount}</strong> recent JenesisNow file${fileCount !== 1 ? 's' : ''}
+                    </div>`;
+                showIvansReview(deduped);
+            }, 150);
+
+        } catch (err) {
+            console.error('[JenesisNow] recent import error:', err);
             if (window.showNotification) showNotification('JenesisNow import error: ' + err.message, 'error');
             resetBtn();
         }
@@ -19306,6 +19858,53 @@ async function loadDownloadsView() {
 // ─── JenesisNow Auto-Import ───────────────────────────────────────────────────
 
 // Silently import parsed policies without a review modal — updates existing, creates new
+// ── IVANS note helpers ────────────────────────────────────────────────────────
+
+// Return human-readable label for AL3 transaction code
+function _ivansTransactionLabel(code) {
+    const map = { NB: 'New Business', EN: 'Endorsement', CN: 'Cancellation',
+                  RN: 'Renewal', XL: 'Cancellation', RI: 'Reinstatement',
+                  AU: 'Audit', PC: 'Policy Change', RW: 'Rewrite', EX: 'Expiration' };
+    return map[(code || '').toUpperCase()] || code || '';
+}
+
+// Synchronously prepend a timestamped note to policy.notes (string field)
+function _ivansAppendPolicyNote(policy, noteText) {
+    if (!noteText) return;
+    const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const stamp   = `[${dateStr} — IVANS]`;
+    const existing = (typeof policy.notes === 'string' ? policy.notes : (policy.notes?.content || '')).trim();
+    policy.notes = existing ? `${stamp} ${noteText}\n\n${existing}` : `${stamp} ${noteText}`;
+}
+
+// Asynchronously add an entry to the matched client's notesLog array
+async function _ivansAddClientNote(clientId, noteText) {
+    if (!clientId || !noteText) return;
+    try {
+        const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+        const ci = clients.findIndex(c => String(c.id) === String(clientId));
+        if (ci < 0) return;
+        if (!Array.isArray(clients[ci].notesLog)) clients[ci].notesLog = [];
+        clients[ci].notesLog.push({ text: noteText, date: new Date().toISOString(), source: 'ivans' });
+        localStorage.setItem('insurance_clients', JSON.stringify(clients));
+        fetch('/api/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clients[ci]) }).catch(() => {});
+    } catch (e) { /* ignore */ }
+}
+
+// Build a concise summary note string from an IVANS policy object + label prefix
+function _buildIvansNoteText(p, label) {
+    const txLabel = _ivansTransactionLabel(p.transactionCode);
+    const prefix  = txLabel ? `${label} — ${txLabel}` : label;
+    const polNum  = (p.policyNumber || '').replace(/\s+/g, '') || '';
+    const carrier = p.carrier || '';
+    const parts   = [carrier, polNum ? `Policy #${polNum}` : ''].filter(Boolean);
+    const dates   = [p.effectiveDate ? `eff. ${p.effectiveDate}` : '', p.expirationDate ? `exp. ${p.expirationDate}` : ''].filter(Boolean);
+    const prem    = p.premium ? `Premium: $${parseFloat(p.premium).toLocaleString()}` : '';
+    let text = `${prefix}: ${[...parts, ...dates, prem].filter(Boolean).join(' | ')}`;
+    if (p.remarks) text += `\n\nCarrier notes: ${p.remarks}`;
+    return text;
+}
+
 async function _jnSilentImport(parsedPolicies) {
     let updated = 0, created = 0;
     const storedPols = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
@@ -19330,7 +19929,11 @@ async function _jnSilentImport(parsedPolicies) {
             ep.source = ep.source || 'jenesis';
             updated++;
             await _ivansUpsertClient(ep);
+            // Add note to policy (included in server save below) and to client
+            const _siNoteText = _buildIvansNoteText(p, 'IVANS update');
+            _ivansAppendPolicyNote(ep, _siNoteText);
             try { await fetch(`/api/policies/${ep.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ep) }); } catch (e) {}
+            await _ivansAddClientNote(ep.clientId, _siNoteText);
         } else {
             const newId = `POL-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
             const n = p.premium ? parseFloat(p.premium) : 0;
@@ -19357,10 +19960,14 @@ async function _jnSilentImport(parsedPolicies) {
                 ivansUpdated:   new Date().toISOString(),
                 contact:        conObj,
             };
+            // Add creation note before pushing to store
+            const _siNewNoteText = _buildIvansNoteText(p, 'IVANS new policy');
+            _ivansAppendPolicyNote(newPol, _siNewNoteText);
             storedPols.push(newPol);
             created++;
             try { await fetch('/api/policies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newPol) }); } catch (e) {}
             await _ivansUpsertClient(newPol);
+            await _ivansAddClientNote(newPol.clientId, _siNewNoteText);
         }
     }
 
@@ -19386,9 +19993,16 @@ async function _jnMarkCancelPending(parsedPolicies) {
             if (!alreadyCancelled) {
                 existing.policyStatus = 'Cancel Pending';
                 existing.ivansUpdated = new Date().toISOString();
+                // Add cancellation notice to policy notes and client
+                const _cpNoteText = `Cancellation notice received via IVANS for policy ${existing.policyNumber || ''}. Status set to Cancel Pending.` +
+                    (p.carrier ? ` Carrier: ${p.carrier}.` : '') +
+                    (p.remarks ? `\n\nCarrier message: ${p.remarks}` : '');
+                _ivansAppendPolicyNote(existing, _cpNoteText);
                 count++;
                 changed = true;
                 try { await fetch(`/api/policies/${existing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(existing) }); } catch (e) {}
+                await _ivansUpsertClient(existing);
+                await _ivansAddClientNote(existing.clientId, _cpNoteText);
             }
         }
     }
@@ -20505,7 +21119,8 @@ async function viewClient(id) {
         });
 
         if (response.ok) {
-            const clients = await response.json();
+            const data = await response.json();
+            const clients = Array.isArray(data) ? data : (data.clients || []);
             console.log('📋 API returned', clients.length, 'clients');
             console.log('🔍 Looking for client with ID:', id);
             console.log('🔍 Available client IDs:', clients.map(c => c.id).slice(0, 5));
@@ -21751,7 +22366,10 @@ async function confirmIvansImport() {
                 updated++;
                 // Upsert client record FIRST so clientId is set before server sync
                 await _ivansUpsertClient(policies[idx]);
-                // Sync to server (now includes clientId)
+                // Add IVANS note to policy (included in server save) and to client
+                const _ciNoteText = _buildIvansNoteText(p, 'IVANS import');
+                _ivansAppendPolicyNote(policies[idx], _ciNoteText);
+                // Sync to server (now includes clientId and notes)
                 try {
                     const r = await fetch(`/api/policies/${p._id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(policies[idx]) });
                     if (!r.ok) console.warn(`IVANS: PUT /api/policies/${p._id} failed (${r.status}) — falling back to POST upsert`);
@@ -21759,6 +22377,7 @@ async function confirmIvansImport() {
                         await fetch('/api/policies', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(policies[idx]) });
                     }
                 } catch(e) { console.warn('IVANS: server sync error (update):', e); }
+                await _ivansAddClientNote(policies[idx].clientId, _ciNoteText);
             }
         } else {
             // CREATE new policy
@@ -21820,14 +22439,18 @@ async function confirmIvansImport() {
                 assignedTo:     p._producer || '',
                 producer:       p._producer || '',
             };
+            // Add creation note before saving
+            const _ciNewNoteText = _buildIvansNoteText(p, 'IVANS new policy');
+            _ivansAppendPolicyNote(newPol, _ciNewNoteText);
             policies.push(newPol);
             created++;
             try {
                 const r = await fetch('/api/policies', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newPol) });
                 if (!r.ok) console.warn(`IVANS: POST /api/policies failed (${r.status})`);
             } catch(e) { console.warn('IVANS: server sync error (create):', e); }
-            // Upsert client record and link policy
+            // Upsert client record and link policy, then add client note
             await _ivansUpsertClient(newPol);
+            await _ivansAddClientNote(newPol.clientId, _ciNewNoteText);
         }
     }
 
@@ -22236,6 +22859,32 @@ function filterClients() {
     const tbody = document.getElementById('clientsTableBody');
     if (!tbody) return;
 
+    // Require 4+ characters before showing any clients (skip for admins)
+    const _csrSession = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsr = (_csrSession.role || '') === 'csr';
+    const _role = (_csrSession.role || '').toLowerCase();
+    const _isAdmin = ['master_admin', 'united_admin', 'vanguard_admin'].includes(_role) ||
+                     ['grant', 'maureen'].includes((_csrSession.username || '').toLowerCase());
+    const dataRows = tbody.querySelectorAll('tr:not(#csrClientSearchPrompt)');
+    let promptRow = document.getElementById('csrClientSearchPrompt');
+    if (!_isAdmin && searchValue.length < 4) {
+        dataRows.forEach(r => r.style.display = 'none');
+        if (!promptRow) {
+            promptRow = document.createElement('tr');
+            promptRow.id = 'csrClientSearchPrompt';
+            promptRow.innerHTML = `<td colspan="8" style="text-align:center;padding:40px;color:#6b7280;">
+                <i class="fas fa-search" style="font-size:48px;margin-bottom:16px;opacity:0.3;"></i>
+                <p style="font-size:16px;margin:0;">Search for clients in the top left</p>
+                <p style="font-size:14px;margin-top:8px;">Type 4 or more characters to display results</p>
+            </td>`;
+            tbody.appendChild(promptRow);
+        } else {
+            promptRow.style.display = '';
+        }
+        return;
+    }
+    if (promptRow) promptRow.style.display = 'none';
+
     // Remove existing warning banner rows
     tbody.querySelectorAll('.missing-data-warning-row').forEach(r => r.remove());
 
@@ -22262,7 +22911,10 @@ function filterClients() {
         const assignedAgent = row.cells[5] ? row.cells[5].textContent.trim() : '';
 
         let matchesAgent;
-        if (isMaureen) {
+        if (_isCsr) {
+            // CSR can see all clients regardless of agent assignment
+            matchesAgent = !selectedAgent || assignedAgent === selectedAgent;
+        } else if (isMaureen) {
             matchesAgent = !selectedAgent ? assignedAgent === 'Maureen' : assignedAgent === selectedAgent;
         } else {
             matchesAgent = !selectedAgent ? assignedAgent !== 'Maureen' : assignedAgent === selectedAgent;
@@ -22301,123 +22953,124 @@ function filterClients() {
 }
 
 // Policy Management Functions
-function viewPolicy(policyId) {
+async function viewPolicy(policyId) {
     console.log('Viewing policy:', policyId);
-    
-    // Get policy from localStorage (use insurance_policies)
-    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    
-    // Convert policyId to string for comparison
-    const idStr = String(policyId);
-    
-    // Try to find policy by exact ID match first, then exact policy number match
-    let policy = policies.find(p => {
-        // Check exact ID match (most precise)
-        if (String(p.id) === idStr) return true;
-        return false;
-    });
 
-    // If not found by ID, try exact policy number match
-    if (!policy) {
-        policy = policies.find(p => String(p.policyNumber) === idStr);
+    const idStr = String(policyId);
+
+    function _findInList(policies) {
+        return policies.find(p => String(p.id) === idStr || String(p.policyNumber) === idStr) || null;
     }
 
-    console.log('🔍 Policy lookup debug:', {
-        searchingFor: policyId,
-        foundPolicy: policy ? { id: policy.id, policyNumber: policy.policyNumber, client: policy.namedInsured?.name || policy.client || policy.clientName } : null
-    });
-    
+    // 1. Try localStorage first (fast path for already-loaded sessions)
+    let policy = _findInList(JSON.parse(localStorage.getItem('insurance_policies') || '[]'));
+
+    // 2. Fallback: fetch from API (covers fresh/magic-link sessions)
     if (!policy) {
-        console.error('Policy not found. Looking for ID:', policyId);
-        console.error('Available policies:', policies.map(p => ({ id: p.id, policyNumber: p.policyNumber })));
+        try {
+            const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+            const _jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const res = await fetch(`${API_URL}/api/policies?includeInactive=true&limit=500`, {
+                headers: { 'Cache-Control': 'no-cache', 'Bypass-Tunnel-Reminder': 'true', 'Authorization': `Bearer ${_jwt}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const list = Array.isArray(data) ? data : (data.policies || []);
+                // Cache for subsequent calls this session
+                if (list.length) localStorage.setItem('insurance_policies', JSON.stringify(list));
+                policy = _findInList(list);
+            }
+        } catch(e) {
+            console.warn('Policy API fetch failed:', e);
+        }
+    }
+
+    console.log('🔍 Policy lookup:', { searchingFor: policyId, found: !!policy });
+
+    if (!policy) {
+        console.error('Policy not found:', policyId);
         showNotification('Policy not found', 'error');
         return;
     }
-    
+
     // Show the policy details in a tabbed modal
     showPolicyDetailsModal(policy);
 }
 
 function showPolicyDetailsModal(policy) {
     const policyType = policy.policyType || 'general';
-    
-    // Generate tabs based on policy type
     const tabs = generateViewTabsForPolicyType(policyType);
-    
-    // Create modal
-    const modalOverlay = document.createElement('div');
-    modalOverlay.className = 'modal-overlay active';
-    modalOverlay.id = 'policyViewModal';
-    
-    // Determine policy type label for header badge
     const policyTypeLabel = policyType === 'commercial-auto' ? 'Commercial Auto' :
                             policyType === 'personal-auto' ? 'Personal Auto' :
-                            policyType ? policyType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
-    
-    modalOverlay.innerHTML = `
-        <div class="modal-container large" style="max-width: 100vw; width: 100vw; height: 100vh; padding: 0; box-shadow: none; border-radius: 0; margin: 0; display: flex; flex-direction: column;">
-            <div class="modal-header" style="padding: 32px 40px; border-bottom: 2px solid #e5e7eb; background: linear-gradient(135deg, #0066cc 0%, #004999 100%);">
-                <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
-                    ${policyTypeLabel ? `<span class="policy-type-badge" style="background: rgba(255, 255, 255, 0.2); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255, 255, 255, 0.3);">${policyTypeLabel}</span>` : ''}
-                    <h2 style="margin: 0; color: white; font-size: 28px; font-weight: 600; letter-spacing: -0.025em;">Policy Details - ${policy.policyNumber}</h2>
-                </div>
-                <button class="close-btn" onclick="document.getElementById('policyViewModal').remove()" style="background: rgba(255, 255, 255, 0.9); border: 2px solid white; color: #0066cc; font-size: 24px; font-weight: bold; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; transition: all 0.2s;">&times;</button>
-            </div>
-            <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 40px; background: #ffffff; min-height: calc(100vh - 200px);">
-                <!-- Policy Status Bar -->
-                <div style="background: linear-gradient(135deg, #f3f4f6 0%, #f9fafb 100%); padding: 24px 30px; border-radius: 12px; margin-bottom: 35px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);">
-                    <div>
-                        <span class="status-badge ${(policy.policyStatus || policy.status || 'active').toLowerCase()}" style="margin-right: 15px; padding: 10px 18px; font-size: 14px; border-radius: 6px; font-weight: 500;">
-                            ${policy.policyStatus || policy.status || 'Active'}
-                        </span>
-                        <span style="margin-left: 10px; color: #6b7280; font-size: 15px; font-weight: 500;">
-                            <i class="fas fa-building"></i> ${policy.carrier || 'N/A'}
-                        </span>
-                    </div>
-                    <div style="display: flex; gap: 12px;">
-                        <button class="btn-secondary" onclick="editPolicy('${policy.id || policy.policyNumber}')" style="padding: 12px 24px; font-size: 14px; border-radius: 8px; transition: all 0.2s;">
-                            <i class="fas fa-edit"></i> Edit
-                        </button>
-                        <button class="btn-secondary" onclick="printPolicy('${policy.id || policy.policyNumber}')" style="padding: 12px 24px; font-size: 14px; border-radius: 8px; transition: all 0.2s;">
-                            <i class="fas fa-print"></i> Print
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Tab Navigation -->
-                <div class="policy-tabs" style="margin-bottom: 30px; padding: 5px; background: #f3f4f6; border-radius: 10px;">
-                    ${tabs.map((tab, index) => `
-                        <button class="tab-btn ${index === 0 ? 'active' : ''}" data-tab="${tab.id}" onclick="switchViewTab('${tab.id}')" style="padding: 14px 24px; font-size: 14px; border-radius: 8px; transition: all 0.2s; margin: 2px;">
-                            <i class="${tab.icon}" style="margin-right: 6px;"></i> ${tab.name}
-                        </button>
-                    `).join('')}
-                </div>
-                
-                <!-- Tab Contents -->
-                <div class="tab-contents" style="padding: 35px; background: #ffffff; border: 2px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);">
-                    ${tabs.map((tab, index) => `
-                        <div id="${tab.id}-view-content" class="tab-content ${index === 0 ? 'active' : ''}" style="padding: 15px; display: ${index === 0 ? 'block' : 'none'};">
-                            ${generateViewTabContent(tab.id, policy)}
-                        </div>
-                    `).join('')}
-                </div>
+                            policyType ? policyType.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
+    const statusClass = (policy.policyStatus || policy.status || 'active').toLowerCase().replace(/\s+/g, '-');
+    const premium = policy.premium ? '$' + Number(String(policy.premium).replace(/[^0-9.]/g,'')).toLocaleString() + '/yr' : '';
 
-                <!-- Modal Footer with Action Buttons -->
-                <div class="modal-footer" style="padding: 25px 40px; border-top: 2px solid #e5e7eb; background: #f9fafb; border-radius: 0 0 12px 12px; display: flex; justify-content: space-between; align-items: center;">
-                    <div style="display: flex; gap: 15px;">
-                        <button class="btn-secondary" onclick="editPolicy('${policy.id}')" style="padding: 12px 24px; font-size: 14px; border-radius: 8px; background: #fff; border: 2px solid #d1d5db; color: #374151; font-weight: 500;">
-                            <i class="fas fa-edit"></i> Edit Policy
-                        </button>
-                        <button class="btn-danger" onclick="deletePolicy('${policy.id}')" style="padding: 12px 24px; font-size: 14px; border-radius: 8px; background: #fff; border: 2px solid #ef4444; color: #ef4444; font-weight: 500;">
-                            <i class="fas fa-trash"></i> Delete
-                        </button>
-                    </div>
+    const dashboardContent = document.querySelector('.dashboard-content');
+    if (!dashboardContent) return;
+
+    // Render policy detail page directly inside .dashboard-content
+    dashboardContent.innerHTML = `
+        <div class="policy-detail-page" id="policyDetailPage" style="min-height: 100vh; background: #f3f4f6;">
+
+            <!-- Page Header -->
+            <div style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
+                <div style="display: flex; align-items: center; gap: 16px; height: 64px;">
+                    <button onclick="loadPoliciesView()" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                        <i class="fas fa-arrow-left"></i> Back to Policies
+                    </button>
+                    ${policyTypeLabel ? `<span style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
+                    <h1 style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
+                        ${policy.policyNumber || policy.id}
+                    </h1>
+                    ${premium ? `<span style="color: rgba(255,255,255,0.9); font-size: 18px; font-weight: 700;">${premium}</span>` : ''}
                 </div>
+            </div>
+
+            <!-- Status + Action Bar -->
+            <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 14px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                    <span class="status-badge ${statusClass}" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; font-weight: 500;">
+                        ${policy.policyStatus || policy.status || 'Active'}
+                    </span>
+                    ${policy.carrier ? `<span style="color: #374151; font-size: 15px; font-weight: 600;"><i class="fas fa-building" style="color:#6b7280;margin-right:6px;"></i>${policy.carrier}</span>` : ''}
+                    ${policy.clientName ? `<span style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.clientName}</span>` : ''}
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
+                        <i class="fas fa-save"></i> Save Policy
+                    </button>
+                    <button onclick="editPolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#0066cc;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                    <button onclick="printPolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:white;color:#374151;border:1px solid #d1d5db;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
+                        <i class="fas fa-print"></i> Print
+                    </button>
+                    <button onclick="deletePolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:white;color:#dc2626;border:1px solid #fca5a5;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0 32px; overflow-x: auto; white-space: nowrap;">
+                ${tabs.map((tab, index) => `
+                    <button class="policy-view-tab-btn ${index === 0 ? 'pv-tab-active' : ''}" data-tab="${tab.id}" onclick="switchViewTab('${tab.id}')" style="display: inline-flex; align-items: center; gap: 7px; padding: 16px 20px; font-size: 14px; font-weight: 500; background: none; border: none; border-bottom: 3px solid ${index === 0 ? '#0066cc' : 'transparent'}; color: ${index === 0 ? '#0066cc' : '#6b7280'}; cursor: pointer; transition: all 0.15s; white-space: nowrap;">
+                        <i class="${tab.icon}"></i> ${tab.name}
+                    </button>
+                `).join('')}
+            </div>
+
+            <!-- Tab Contents -->
+            <div style="padding: 24px 32px;">
+                ${tabs.map((tab, index) => `
+                    <div id="${tab.id}-view-content" class="tab-content" style="display: ${index === 0 ? 'block' : 'none'};">
+                        ${generateViewTabContent(tab.id, policy)}
+                    </div>
+                `).join('')}
             </div>
         </div>
     `;
-
-    document.body.appendChild(modalOverlay);
 
     // Initialize ID cards display for this policy
     setTimeout(() => {
@@ -22515,26 +23168,24 @@ function showPolicyDetailsModal(policy) {
 function generateViewTabsForPolicyType(policyType) {
     const baseTabs = [
         { id: 'overview', name: 'Overview', icon: 'fas fa-info-circle' },
-        { id: 'insured', name: 'Named Insured', icon: 'fas fa-user' },
-        { id: 'contact', name: 'Contact Info', icon: 'fas fa-address-book' },
         { id: 'coverage', name: 'Coverage', icon: 'fas fa-shield-alt' },
-        { id: 'financial', name: 'Financial', icon: 'fas fa-dollar-sign' },
         { id: 'documents', name: 'Documents', icon: 'fas fa-file-alt' },
-        { id: 'notes', name: 'Notes', icon: 'fas fa-sticky-note' }
+        { id: 'financials', name: 'Financials', icon: 'fas fa-dollar-sign' }
     ];
     
     // Add type-specific tabs
-    if (policyType === 'personal-auto' || policyType === 'commercial-auto') {
-        baseTabs.splice(4, 0, 
+    // commercial-auto: vehicles/drivers are embedded in the coverage tab
+    if (policyType === 'personal-auto') {
+        baseTabs.splice(4, 0,
             { id: 'vehicles', name: 'Vehicles', icon: 'fas fa-car' },
             { id: 'drivers', name: 'Drivers', icon: 'fas fa-id-card' }
         );
     } else if (policyType === 'homeowners' || policyType === 'commercial-property') {
-        baseTabs.splice(4, 0, 
+        baseTabs.splice(4, 0,
             { id: 'property', name: 'Property', icon: 'fas fa-home' }
         );
     }
-    
+
     return baseTabs;
 }
 
@@ -22611,89 +23262,62 @@ function generateCOIContainerContent(policy) {
 
 function generateViewTabContent(tabId, policy) {
     switch(tabId) {
-        case 'overview':
+        case 'overview': {
+            const _eOV = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+            const _fOV = (id,lbl,val,type) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><input id="ov-${id}" type="${type||'text'}" value="${_eOV(val)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;"></div>`;
+            const _sOV = (id,lbl,val,opts) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><select id="ov-${id}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;">${opts.map(o=>typeof o==='string'?`<option value="${_eOV(o)}"${o===String(val||'')?'selected':''}>${o||'—'}</option>`:`<option value="${_eOV(o.v)}"${o.v===String(val||'')?'selected':''}>${o.l}</option>`).join('')}</select></div>`;
+            const _hOV = (lbl) => `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">${lbl}</div>`;
+            const _taOV = (id,lbl,val) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><textarea id="ov-${id}" rows="3" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;resize:vertical;">${_eOV(val)}</textarea></div>`;
+            const producers = policy.producers || [];
+            const prod1 = producers[0] || {}; const prod2 = producers[1] || {}; const prod3 = producers[2] || {};
+            const statusOpts = ['','Pending Quote','Submitted Quote','Quoted','Quote Declined','Active','Pending Cancel','Expired','Cancelled','Pending Renewal','Renewal Quote','Prior Generation','Deleted'];
+            const termOpts = ['','12 Months','6 Months','Custom'];
+            const payTypeOpts = ['','Agency Bill','Company Pay Plan','Direct Bill','Mortgagee Bill','Paid In Full','Premium Finance','Other'];
+            const payFreqOpts = ['','Annual','Semi-Annual','Quarterly','Bi-Monthly','Monthly'];
+            const cancelReasonOpts = ['','Insured Request','Non Payment','Underwriting','Policy Rewrite','Moving Out of State','Duplicate Policy','Business Closed','Other'];
+            const sourceOpts = ['','Cold Call','Email Blast','Hunter','Referral','Walk-in','Website','Social Media','Other'];
+            const newRenewalOpts = ['','New','Renewal','Rewrite'];
+            const policyId = policy.id || policy.policyNumber || '';
             return `
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                    <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Policy Overview</h3>
-                    <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Policy Number</label>
-                            <p style="font-size: 17px; font-weight: 600; margin: 0; color: #111827;">${policy.policyNumber || 'N/A'}</p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Policy Type</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${getPolicyTypeLabel(policy.policyType) || 'N/A'}</p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Carrier</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${policy.carrier || 'N/A'}</p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Status</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">
-                                <span class="status-badge ${(policy.policyStatus || 'active').toLowerCase()}">
-                                    ${policy.policyStatus || 'Active'}
-                                </span>
-                            </p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Effective Date</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${formatDate(policy.effectiveDate) || 'N/A'}</p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Expiration Date</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${formatDate(policy.expirationDate) || 'N/A'}</p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Premium</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151; font-weight: 600;">
-                                ${formatPolicyPremium(policy.premium)}
-                            </p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Agent</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${policy.agent || 'N/A'}</p>
-                        </div>
-                        ${(() => {
-                            // Get business name from Named Insured tab first, then fallback to clientName
-                            const businessName = policy.insured?.['Business Name'] ||
-                                                policy.contact?.['Business Name'] ||
-                                                policy.insured?.['Name/Business Name'] ||
-                                                policy.insured?.['Primary Named Insured'] ||
-                                                policy.namedInsured?.name ||
-                                                policy.clientName;
-                            return businessName ? `
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Business Name</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${businessName}</p>
-                        </div>
-                            ` : '';
-                        })()}
-                        ${policy.dotNumber ? `
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">DOT Number</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${policy.dotNumber}</p>
-                        </div>
-                        ` : ''}
-                        ${policy.mcNumber ? `
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">MC Number</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${policy.mcNumber}</p>
-                        </div>
-                        ` : ''}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                    <!-- Card 1: Policy -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hOV('Policy')}
+                        ${_fOV('policyNumber','Policy #', policy.policyNumber||'')}
+                        ${_fOV('carrier','Company', policy.carrier||'')}
+                        ${_fOV('parentCompany','Parent Company / Broker', policy.parentCompany||'')}
+                        ${_fOV('commissionPlan','Commission Plan', policy.commissionPlan||'')}
+                        ${_fOV('policyState','Policy State', policy.policyState||'')}
+                        ${_fOV('agent','User / Agent', policy.agent||'')}
                     </div>
-                    ${policy.united ? `
-                    <div style="margin-top: 28px; padding: 16px 20px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 1px solid #3b82f6; border-radius: 10px; display: flex; align-items: center; gap: 14px;">
-                        <div style="width: 36px; height: 36px; background: #3b82f6; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <i class="fas fa-star" style="color: white; font-size: 16px;"></i>
+                    <!-- Card 2: Term & Dates -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hOV('Term & Dates')}
+                        ${_sOV('term','Term', policy.term||'', termOpts)}
+                        ${_fOV('effectiveDate','Effective Date', policy.effectiveDate||'', 'date')}
+                        ${_fOV('expirationDate','Expiration Date', policy.expirationDate||'', 'date')}
+                        ${_fOV('termDatePaid','Term Date Paid', policy.termDatePaid||'', 'date')}
+                    </div>
+                    <!-- Card 3: Status (full width) -->
+                    <div style="grid-column:1/-1;padding:16px 20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hOV('Status')}
+                        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0 16px;">
+                            <div>${_sOV('policyStatus','Policy Status', policy.policyStatus||'', statusOpts)}</div>
+                            <div>${_sOV('newRenewal','New / Renewal', policy.newRenewal||'', newRenewalOpts)}</div>
+                            <div>${_fOV('rewrite','Rewrite Policy #', policy.rewrite||'')}</div>
+                            <div>${_sOV('source','Source', policy.source||'', sourceOpts)}</div>
+                            <div>${_fOV('referredBy','Referred By', policy.referredBy||'')}</div>
+                            <div>${_fOV('cancelDate','Cancel Date', policy.cancelDate||'', 'date')}</div>
+                            <div>${_sOV('cancelReason','Cancel Reason', policy.cancelReason||'', cancelReasonOpts)}</div>
+                            <div>${_fOV('downloadDate','Download Date', policy.downloadDate||'', 'date')}</div>
+                            <div>${_fOV('downloadPurpose','Download Purpose', policy.downloadPurpose||'')}</div>
+                            ${policy.dotNumber||policy.mcNumber ? `<div>${policy.dotNumber ? _fOV('dotNumber','DOT Number', policy.dotNumber) : ''}${policy.mcNumber ? _fOV('mcNumber','MC Number', policy.mcNumber) : ''}</div>` : '<div></div>'}
                         </div>
-                        <div>
-                            <p style="margin: 0; font-size: 15px; font-weight: 700; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">United</p>
-                            <p style="margin: 2px 0 0 0; font-size: 13px; color: #2563eb;">This policy is marked as United</p>
-                        </div>
-                    </div>` : ''}
+                        ${policy.united ? `<div style="margin-top:10px;padding:10px 14px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #3b82f6;border-radius:8px;display:inline-flex;align-items:center;gap:8px;"><div style="width:22px;height:22px;background:#3b82f6;border-radius:5px;display:flex;align-items:center;justify-content:center;"><i class="fas fa-star" style="color:white;font-size:10px;"></i></div><p style="margin:0;font-size:12px;font-weight:700;color:#1e40af;text-transform:uppercase;">United</p></div>` : ''}
+                    </div>
                 </div>
             `;
+        }
 
         case 'insured':
             const insuredData = policy.insured || {};
@@ -22712,147 +23336,352 @@ function generateViewTabContent(tabId, policy) {
                 </div>
             `;
             
-        case 'contact':
+        case 'contact': {
             const contactData = policy.contact || {};
             const isCommContact = policy.insured?.['Entity Type'] === 'Commercial' || !!contactData['Business Name'];
             const ownerName = contactData['Owner Name'] || '';
             const businessNameC = contactData['Business Name'] || (isCommContact ? (policy.insuredName || policy.clientName || '') : '');
-            const ownerDob  = contactData['Date of Birth'] || '';
-            const contactFields = Object.entries(contactData).filter(([k]) => !['Owner Name','Date of Birth','Business Name'].includes(k));
+            const ownerDob = contactData['Date of Birth'] || '';
+
+            // Address — check contact object, then top-level policy fields
+            const _pick = (...keys) => { for (const k of keys) { const v = contactData[k] || policy[k]; if (v) return v; } return ''; };
+            const addrStreet = _pick('Address','address','Street','street','streetAddress');
+            const addrCity   = _pick('City','city');
+            const addrState  = _pick('State','state');
+            const addrZip    = _pick('Zip','zip','ZipCode','zipCode','postalCode');
+            const addrFull   = [addrStreet, addrCity && addrState ? `${addrCity}, ${addrState}` : addrCity || addrState, addrZip].filter(Boolean).join(' · ');
+
+            // Remaining contact fields (exclude ones we handle explicitly)
+            const skipKeys = new Set(['Owner Name','Date of Birth','Business Name','Address','Street','streetAddress','City','State','Zip','ZipCode','zipCode','postalCode']);
+            const contactFields = Object.entries(contactData).filter(([k]) => !skipKeys.has(k));
+
+            const _row = (lbl, val) => `
+                <div style="padding:12px 0;border-bottom:1px solid #f3f4f6;display:grid;grid-template-columns:160px 1fr;gap:8px;align-items:start;">
+                    <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">${lbl}</span>
+                    <span style="font-size:14px;color:#111827;">${val || '<span style="color:#d1d5db;">—</span>'}</span>
+                </div>`;
+
             return `
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 20px;">
-                    <h3 style="margin-top: 0; margin-bottom: 24px; color: #111827; font-size: 22px; font-weight: 600;">Named Insured / Owner</h3>
-                    <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
-                        ${isCommContact && businessNameC ? `
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Business Name</label>
-                            <p style="font-size: 17px; font-weight: 600; margin: 0; color: #111827;">${businessNameC}</p>
-                        </div>` : ''}
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${isCommContact ? 'Owner / Principal' : 'Owner Name'}</label>
-                            <p style="font-size: 17px; font-weight: 600; margin: 0; color: #111827;">${ownerName || (isCommContact ? 'N/A' : (policy.insuredName || policy.clientName || 'N/A'))}</p>
-                        </div>
-                        <div class="view-item">
-                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Date of Birth</label>
-                            <p style="font-size: 17px; margin: 0; color: #374151;">${ownerDob || 'N/A'}</p>
-                        </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+                    <!-- Card: Named Insured / Owner -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">Named Insured</div>
+                        ${isCommContact && businessNameC ? _row('Business Name', `<strong>${businessNameC}</strong>`) : ''}
+                        ${_row(isCommContact ? 'Owner / Principal' : 'Owner Name', ownerName || policy.insuredName || policy.clientName || '')}
+                        ${_row('Date of Birth', ownerDob)}
                     </div>
-                </div>
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                    <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Contact Information</h3>
-                    <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
-                        ${contactFields.map(([key, value]) => `
-                            <div class="view-item">
-                                <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${key}</label>
-                                <p style="font-size: 17px; margin: 0; color: #374151;">${value || 'N/A'}</p>
-                            </div>
-                        `).join('')}
-                        ${contactFields.length === 0 ? '<p style="color: #6b7280;">No contact information available</p>' : ''}
+
+                    <!-- Card: Address -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">Address</div>
+                        ${_row('Street', addrStreet)}
+                        ${_row('City', addrCity)}
+                        ${_row('State', addrState)}
+                        ${_row('Zip', addrZip)}
+                        ${addrFull ? `<div style="margin-top:12px;padding:10px 14px;background:#f9fafb;border-radius:8px;font-size:13px;color:#374151;"><i class="fas fa-map-marker-alt" style="color:#6b7280;margin-right:6px;"></i>${addrFull}</div>` : ''}
                     </div>
+
+                    <!-- Card: Other Contact Fields (full width if any) -->
+                    ${contactFields.length > 0 ? `
+                    <div style="grid-column:1/-1;padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">Additional Contact Info</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 32px;">
+                            ${contactFields.map(([key, value]) => _row(key, value)).join('')}
+                        </div>
+                    </div>` : ''}
+
                 </div>
             `;
+        }
             
-        case 'vehicles':
+        case 'vehicles': {
             const vehicles = Array.isArray(policy.vehicles) ? policy.vehicles : [];
-            if (vehicles.length === 0) {
-                return `
-                    <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                        <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Vehicles & Trailers</h3>
-                        <p style="color: #6b7280; font-size: 16px;">No vehicles or trailers on this policy</p>
-                    </div>
-                `;
-            }
+            const _pIdV = policy.id || policy.policyNumber || '';
+            const _vehDataAttrV = vehicles.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(vehicles))}"` : '';
             return `
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                    <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Vehicles & Trailers</h3>
-                    ${vehicles.map((vehicle, index) => {
-                        // Determine if this is a vehicle or trailer
-                        const vehicleType = vehicle.type === 'trailer' || vehicle.Type === 'Trailer' ? 'Trailer' : 'Vehicle';
-
-                        // Extract the main vehicle/trailer fields with proper labels
-                        const vehicleFields = [
-                            { key: 'year', label: 'Year', value: vehicle.year || vehicle.Year || '' },
-                            { key: 'make', label: 'Make', value: vehicle.make || vehicle.Make || '' },
-                            { key: 'model', label: 'Model', value: vehicle.model || vehicle.Model || '' },
-                            { key: 'vin', label: 'VIN', value: vehicle.vin || vehicle.VIN || vehicle.id || '' }
-                        ];
-
-                        // For trailers, also check for additional trailer-specific fields
-                        if (vehicleType === 'Trailer') {
-                            vehicleFields.push(
-                                { key: 'length', label: 'Length', value: vehicle.length || vehicle.Length || '' },
-                                { key: 'trailerType', label: 'Type', value: vehicle.trailerType || vehicle['Trailer Type'] || '' }
-                            );
-                        }
-
-                        return `
-                            <div style="background: #ffffff; padding: 30px; border-radius: 12px; margin-bottom: 25px; border: 2px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);">
-                                <h4 style="margin-top: 0; color: #374151; font-size: 18px; font-weight: 600; margin-bottom: 20px;">
-                                    ${vehicleType} ${vehicle.vehicleNumber || index + 1}
-                                </h4>
-                                <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
-                                    ${vehicleFields.map(field => `
-                                        <div class="view-item">
-                                            <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 600; letter-spacing: 0.05em; display: block;">${field.label}</label>
-                                            <p style="font-size: 15px; margin: 0; color: #111827; font-weight: 500; padding: 8px 0; border-bottom: 1px solid #f3f4f6;">${field.value || 'N/A'}</p>
-                                        </div>
+                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                        <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
+                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                    </h3>
+                    ${vehicles.length === 0
+                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
+                        : `<div style="overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                                <thead>
+                                    <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                        <th style="padding:7px 8px;width:36px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${vehicles.map((v, i) => `
+                                        <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                            <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                            <td style="padding:4px 6px;text-align:center;">
+                                                <button onclick="showVehicleDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                                    <i class="fas fa-eye" style="font-size:12px;"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
                                     `).join('')}
-                                </div>
-
-                                <!-- Additional Vehicle Info -->
-                                ${vehicle[''] ? `
-                                    <div style="margin-top: 20px; padding: 15px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #0066cc;">
-                                        <label style="color: #6b7280; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; font-weight: 600; display: block;">Vehicle Description</label>
-                                        <p style="margin: 0; color: #374151; font-style: italic;">${vehicle['']}</p>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `;
-                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>`}
                 </div>
             `;
+        }
             
-        case 'drivers':
+        case 'drivers': {
             const drivers = Array.isArray(policy.drivers) ? policy.drivers : [];
-            if (drivers.length === 0) {
-                return `
-                    <div class="form-section" style="padding: 20px; background: #f9fafb; border-radius: 8px;">
-                        <h3 style="margin-top: 0; margin-bottom: 25px; color: #111827; font-size: 20px;">Drivers</h3>
-                        <p style="color: #6b7280; font-size: 15px;">No drivers on this policy</p>
+            const _pIdD = policy.id || policy.policyNumber || '';
+            const _drvDataAttrD = drivers.length > 0 ? `data-drivers="${encodeURIComponent(JSON.stringify(drivers))}"` : '';
+            return `
+                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttrD} data-policy-id="${_pIdD}">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                        <span><i class="fas fa-id-card" style="margin-right:7px;color:#374151;"></i>Drivers (${drivers.length})</span>
+                        ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                    </h3>
+                    ${drivers.length === 0
+                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No drivers on this policy</p>'
+                        : `<div style="overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                                <thead>
+                                    <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                        <th style="padding:7px 8px;width:36px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${drivers.map((d, i) => `
+                                        <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                            <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                            <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>`}
+                </div>
+            `;
+        }
+            
+        case 'coverage': {
+            const isCommercialAuto = policy.policyType === 'commercial-auto';
+            const coverageData = policy.coverage || {};
+            const alData = coverageData.automotiveLiability || {};
+            const alChecks = ['anyAuto','allOwned','allScheduled','allHired','allNonOwned'];
+            const alLabels = { anyAuto:'Any Auto', allOwned:'All Owned', allScheduled:'All Scheduled', allHired:'All Hired', allNonOwned:'All Non-Owned' };
+            const hasAL = alChecks.some(k => alData[k]);
+            const alSection = hasAL ? `
+                <div style="margin-bottom:18px;padding:12px 18px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+                    <span style="font-weight:600;color:#374151;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">
+                        <i class="far fa-check-square" style="margin-right:6px;color:#4f46e5;"></i>Automotive Liability:
+                    </span>
+                    ${alChecks.map(k => `
+                        <span style="display:flex;align-items:center;gap:5px;font-size:13px;color:${alData[k] ? '#111827' : '#9ca3af'};">
+                            <i class="fas fa-${alData[k] ? 'check-square' : 'square'}" style="color:${alData[k] ? '#4f46e5' : '#d1d5db'};"></i>
+                            ${alLabels[k]}
+                        </span>
+                    `).join('')}
+                </div>` : '';
+
+            const _fmtAmt = (val) => {
+                if (!val || val === '0' || val === '') return '—';
+                const s = String(val).trim();
+                if (s.includes('$')) return s;
+                const parts = s.split('/');
+                if (parts.every(p => /^\d+(\.\d+)?$/.test(p.trim()))) {
+                    return parts.map(p => '$' + parseFloat(p.trim()).toLocaleString()).join('/');
+                }
+                return s;
+            };
+
+            if (isCommercialAuto) {
+                // Build INTERACTIVE coverage table (left column)
+                const coveragesArray = coverageData.CoveragesArray;
+                const _pId = policy.id || policy.policyNumber || '';
+                const _eQ = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+                let initRows = '';
+
+                if (coveragesArray && typeof coveragesArray === 'object' && Object.keys(coveragesArray).length > 0) {
+                    Object.values(coveragesArray).filter(c => c && c.Code).forEach(cov => {
+                        initRows += `<tr data-code="${_eQ(cov.Code)}" data-desc="${_eQ(cov.Description||'')}">
+                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${cov.Code}</span>${cov.Description?`<br><span style="font-size:11px;color:#6b7280;">${cov.Description}</span>`:''}</td>
+                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(cov.Amount)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="${_eQ(cov.Deductible)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-prem" value="${_eQ(cov.Premium)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+                            <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>
+                        </tr>`;
+                    });
+                } else {
+                    // Legacy fields → editable rows
+                    const LMAP = {'coverage-liability-limits':'Liability Limits','coverage-general-aggregate':'General Liability','coverage-comp-deduct':'Comp Deductible','coverage-coll-deduct':'Collision Deductible','coverage-cargo-limit':'Cargo Limit','coverage-cargo-deduct':'Cargo Deductible','coverage-medical':'Medical Payments','coverage-um-uim':'UM/UIM','Liability Limits':'Liability Limits','General Liability':'General Liability','Comp Deductible':'Comp Deductible','Collision Deductible':'Collision Deductible','Cargo Limit':'Cargo Limit','Cargo Deductible':'Cargo Deductible','UM/UIM':'UM/UIM','Medical Payments':'Medical Payments','CSL':'Combined Single Limit','BISPL':'Bodily Injury Split Limit','MEDPM':'Medical Payments','UMCSL':'Uninsured Motorist CSL','COMP':'Comprehensive','COLL':'Collision','MTCARGO':'Motor Truck Cargo','GLCBI':'GL Bodily Injury','GLCPD':'GL Property Damage'};
+                    const LCODE = {'Liability Limits':'CSL','General Liability':'GLCBI','Comp Deductible':'COMP','Collision Deductible':'COLL','Cargo Limit':'MTCARGO','Cargo Deductible':'MTCARGO','UM/UIM':'UMCSL','Medical Payments':'MEDPM'};
+                    const LSKIP = new Set(['additionalCoverages','CoveragesArray','automotiveLiability']);
+                    const lSeen = new Set();
+                    Object.entries(coverageData).forEach(([key, val]) => {
+                        if (LSKIP.has(key) || typeof val !== 'string' || !val.trim() || val.toLowerCase() === 'n/a') return;
+                        const label = LMAP[key] || key;
+                        if (lSeen.has(label)) return;
+                        lSeen.add(label);
+                        const code = LCODE[label] || key.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,8) || 'COV';
+                        initRows += `<tr data-code="${_eQ(code)}" data-desc="${_eQ(label)}">
+                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${code}</span><br><span style="font-size:11px;color:#6b7280;">${label}</span></td>
+                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(val.trim())}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-prem" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+                            <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>
+                        </tr>`;
+                    });
+                }
+
+                const coverageTableHTML = `
+                    <div style="margin-bottom:10px;">
+                        <div style="margin-bottom:5px;">
+                            <input type="text" placeholder="Filter coverage codes..." oninput="window.viewCovFilter(this.value)"
+                                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 10px;font-size:12px;box-sizing:border-box;">
+                        </div>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <select id="view-coverage-add-select" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 7px;font-size:12px;min-width:0;">
+                                ${window._vcovOptsHTML||'<option value="">Loading...</option>'}
+                            </select>
+                            <button onclick="window.viewCovAdd()" style="background:#4f46e5;color:white;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                    <th style="padding:6px 8px;text-align:left;color:#374151;">Coverage</th>
+                                    <th style="padding:6px 8px;text-align:left;color:#374151;">Limit</th>
+                                    <th style="padding:6px 8px;text-align:left;color:#374151;">Deductible</th>
+                                    <th style="padding:6px 8px;text-align:left;color:#374151;">Premium</th>
+                                    <th style="width:30px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="view-covs-tbody">
+                                ${initRows||'<tr><td colspan="5" style="text-align:center;padding:18px;color:#9ca3af;font-size:13px;">No coverages — use selector above to add</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+                        <button id="view-cov-save-btn" onclick="window.viewCovSave('${_pId}')" style="background:#059669;color:white;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-size:13px;font-weight:500;">
+                            <i class="fas fa-save" style="margin-right:5px;"></i>Save Coverages
+                        </button>
                     </div>
                 `;
-            }
-            return `
-                <div class="form-section" style="padding: 20px; background: #f9fafb; border-radius: 8px;">
-                    <h3 style="margin-top: 0; margin-bottom: 25px; color: #111827; font-size: 20px;">Drivers</h3>
-                    ${drivers.map((driver, index) => `
-                        <div style="background: #ffffff; padding: 30px; border-radius: 12px; margin-bottom: 25px; border: 2px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);">
-                            <h4 style="margin-top: 0; color: #374151;">Driver ${index + 1}</h4>
-                            <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                                ${Object.entries(driver).filter(([key]) => key !== 'endorsements').map(([key, value]) => `
-                                    <div class="view-item">
-                                        <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${key}</label>
-                                        <p style="font-size: 14px; margin: 0;">${value || 'N/A'}</p>
-                                    </div>
+
+                // Vehicles (right column)
+                const vehicles = Array.isArray(policy.vehicles) ? policy.vehicles : [];
+                const _vehDataAttr = vehicles.length > 0
+                    ? `data-vehicles="${encodeURIComponent(JSON.stringify(vehicles))}"`
+                    : '';
+                const vehiclesHTML = vehicles.length === 0
+                    ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
+                    : `<div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;width:36px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${vehicles.map((v, i) => `
+                                    <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                        <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:4px 6px;text-align:center;">
+                                            <button onclick="showVehicleDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                                <i class="fas fa-eye" style="font-size:12px;"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
                                 `).join('')}
-                                ${driver.endorsements ? `
-                                    <div class="view-item" style="grid-column: span 2;">
-                                        <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">Endorsements</label>
-                                        <p style="font-size: 14px; margin: 0;">${driver.endorsements.join(', ')}</p>
-                                    </div>
-                                ` : ''}
+                            </tbody>
+                        </table>
+                    </div>`;
+
+                // Drivers (right column)
+                const drivers = Array.isArray(policy.drivers) ? policy.drivers : [];
+                const _drvDataAttr = drivers.length > 0 ? `data-drivers="${encodeURIComponent(JSON.stringify(drivers))}"` : '';
+                const driversHTML = drivers.length === 0
+                    ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No drivers on this policy</p>'
+                    : `<div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                    <th style="padding:7px 8px;width:36px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${drivers.map((d, i) => `
+                                    <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                        <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                        <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+
+                return `
+                    ${alSection}
+                    <div style="display:grid;grid-template-columns:44% 56%;gap:20px;align-items:start;">
+
+                        <!-- Left: Coverages -->
+                        <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;">
+                            <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;">
+                                <i class="far fa-check-square" style="margin-right:7px;color:#4f46e5;"></i>Coverages
+                            </h3>
+                            ${coverageTableHTML}
+                        </div>
+
+                        <!-- Right: Vehicles + Drivers -->
+                        <div>
+                            <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
+                                <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                                    <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
+                                    ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                </h3>
+                                ${vehiclesHTML}
+                            </div>
+                            <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttr} data-policy-id="${_eQ(_pId)}">
+                                <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                                    <span><i class="fas fa-id-card" style="margin-right:7px;color:#374151;"></i>Drivers (${drivers.length})</span>
+                                    ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all drivers"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                </h3>
+                                ${driversHTML}
                             </div>
                         </div>
-                    `).join('')}
-                </div>
-            `;
-            
-        case 'coverage':
-            const coverageData = policy.coverage || {};
+
+                    </div>
+                `;
+            }
+
+            // Non-commercial-auto: flat label/value grid (existing behavior)
             const additionalCoveragesList = coverageData.additionalCoverages || [];
-            // Normalize raw IVANS codes and internal field IDs to display labels
             const COVERAGE_DISPLAY_LABELS = {
-                // IVANS codes → display label
                 'MTGL': 'General Liability', 'MEDPM': 'Medical Payments',
                 'MTC': 'Cargo Limit', 'MTRTK': 'Cargo Limit',
                 'CSL': 'Liability Limits', 'Combined Single Limit': 'Liability Limits',
@@ -22860,14 +23689,12 @@ function generateViewTabContent(tabId, policy) {
                 'COLL': 'Collision Deductible', 'Collision': 'Collision Deductible',
                 'UMCSL': 'Uninsured/Underinsured Motorist', 'UNCSL': 'Uninsured/Underinsured Motorist',
                 'UMAUTO': 'Uninsured/Underinsured Motorist',
-                // Legacy key aliases (old IVANS imports used these keys)
                 'Uninsured Motorist CSL': 'Uninsured/Underinsured Motorist',
                 'Uninsured Motorist': 'Uninsured/Underinsured Motorist',
                 'Motor Truck Cargo': 'Cargo Limit',
                 'GLCBI': 'General Liability BI', 'GLCPD': 'General Liability PD',
                 'FIRDM': 'Fire Damage Liability', 'MDEXP': 'Medical Expense',
                 'UMPD': 'UM Property Damage', 'NOTRL': 'Non-Trucking Liability',
-                // Form field IDs
                 'coverage-liability-limits': 'Liability Limits',
                 'coverage-general-aggregate': 'General Liability',
                 'coverage-comp-deduct': 'Comprehensive Deductible',
@@ -22881,11 +23708,6 @@ function generateViewTabContent(tabId, policy) {
                 'coverage-non-trucking': 'Non-Trucking Liability',
                 'coverage-reefer': 'Reefer Breakdown',
             };
-            // Deduplicate: group by display label.
-            // Form-save entries have human-label keys (NOT in COVERAGE_DISPLAY_LABELS) and plain numeric values (e.g. "1000000").
-            // IVANS entries have code keys (IN COVERAGE_DISPLAY_LABELS) and formatted display strings (e.g. "$1,000,000").
-            // Always prefer form-save entries — they are what the edit form and COI generation rely on.
-            // Raw IVANS codes already normalized to human labels — hide them as raw keys
             const CVG_DISPLAY_SKIP = new Set([
                 'ADDIN','CARGO','WVSUB','ROAD','MTC','MTRTK','MTGL','CSL','COMP','COLL','MEDPM',
                 'UNCSL','UMCSL','UMAUTO','UMBI','UMPD',
@@ -22893,7 +23715,6 @@ function generateViewTabContent(tabId, policy) {
                 ...Array.from({length: 15}, (_, i) => `AIN${String(i+1).padStart(2,'0')}`),
                 ...Array.from({length: 15}, (_, i) => `AIN${i+1}`),
             ]);
-            // Canonical display order for coverage fields
             const CVG_ORDER = ['Liability Limits','Uninsured/Underinsured Motorist','Medical Payments',
                 'Comprehensive Deductible','Collision Deductible','General Liability',
                 'Cargo Limit','Cargo Deductible','Trailer Interchange','Non-Owned Trailer','Non-Trucking Liability',
@@ -22902,14 +23723,11 @@ function generateViewTabContent(tabId, policy) {
                 'Medical Expense','UM Property Damage'];
             const _deduped = new Map();
             Object.entries(coverageData).forEach(([key, value]) => {
-                if (key === 'additionalCoverages') return;
-                // Skip raw IVANS codes that are already normalized, and fee/add-on codes
+                if (key === 'additionalCoverages' || key === 'CoveragesArray' || key === 'automotiveLiability') return;
                 if (CVG_DISPLAY_SKIP.has(key) || /^AIN\d+$/.test(key)) return;
-                // Skip old-format IVANS strings that embed premium info (e.g. "$1,000 ($100/yr)")
                 if (typeof value === 'string' && value.includes('($')) return;
                 const displayLabel = COVERAGE_DISPLAY_LABELS[key] || key;
-                const isFormSave = !COVERAGE_DISPLAY_LABELS[key]; // key not in map = saved by form with human label
-                // For General Liability, skip if all parsed values are < $100,000 (those are premiums, not limits)
+                const isFormSave = !COVERAGE_DISPLAY_LABELS[key];
                 if (displayLabel === 'General Liability') {
                     const glParts = String(value).replace(/[$,]/g,'').split('/');
                     if (glParts.every(p => !isNaN(parseFloat(p)) && parseFloat(p) < 100000)) return;
@@ -22918,15 +23736,11 @@ function generateViewTabContent(tabId, policy) {
                 if (!existing) {
                     _deduped.set(displayLabel, { value, isFormSave });
                 } else if (isFormSave && !existing.isFormSave) {
-                    // Form-save beats IVANS
                     _deduped.set(displayLabel, { value, isFormSave: true });
                 } else if (isFormSave === existing.isFormSave && !existing.value && value) {
-                    // Same type, prefer non-empty
                     _deduped.set(displayLabel, { value, isFormSave });
                 }
             });
-            // Format a plain numeric value for display (e.g. "1000000" → "$1,000,000")
-            // For deductible labels with slash-format (stated_value/deductible), show only the deductible part
             const _fmtCovVal = (val, label) => {
                 if (!val) return val;
                 const s = String(val).trim();
@@ -22943,7 +23757,6 @@ function generateViewTabContent(tabId, policy) {
                 }
                 return s;
             };
-            // Filter out entries with no real value, then sort by canonical order
             const coverageEntries = [..._deduped.entries()]
                 .filter(([, entry]) => entry.value && String(entry.value).trim() !== '' && String(entry.value).trim().toLowerCase() !== 'n/a')
                 .sort(([a], [b]) => {
@@ -22954,24 +23767,37 @@ function generateViewTabContent(tabId, policy) {
                     return ai - bi;
                 });
             return `
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                    <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Coverage Details</h3>
-                    <div class="view-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 35px;">
-                        ${coverageEntries.map(([label, entry]) => `
-                            <div class="view-item">
-                                <label style="color: #6b7280; font-size: 13px; text-transform: uppercase; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.05em;">${label}</label>
-                                <p style="font-size: 17px; margin: 0; font-weight: 600; color: #059669;">${entry.isFormSave ? _fmtCovVal(entry.value, label) : entry.value}</p>
-                            </div>
-                        `).join('')}
-                        ${coverageEntries.length === 0 ? '<p style="color: #6b7280;">No coverage information available</p>' : ''}
+                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;">
+                        <i class="far fa-check-square" style="margin-right:7px;color:#4f46e5;"></i>Coverages
+                    </h3>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Coverage</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Limit / Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${coverageEntries.length === 0
+                                    ? '<tr><td colspan="2" style="text-align:center;padding:18px;color:#9ca3af;font-size:13px;">No coverage information available</td></tr>'
+                                    : coverageEntries.map(([label, entry], i) => `
+                                        <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                            <td style="padding:7px 8px;color:#374151;font-weight:500;">${label}</td>
+                                            <td style="padding:7px 8px;color:#059669;font-weight:600;">${entry.isFormSave ? _fmtCovVal(entry.value, label) : entry.value}</td>
+                                        </tr>
+                                    `).join('')}
+                            </tbody>
+                        </table>
                     </div>
                     ${additionalCoveragesList.length > 0 ? `
-                        <div style="margin-top: 30px; padding-top: 24px; border-top: 1px solid #e5e7eb;">
-                            <h4 style="margin: 0 0 16px 0; color: #374151; font-size: 16px; font-weight: 600;">Additional Coverages</h4>
-                            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        <div style="margin-top:16px;padding-top:14px;border-top:1px solid #e5e7eb;">
+                            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;margin-bottom:10px;">Additional Coverages</div>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
                                 ${additionalCoveragesList.map(cov => `
-                                    <span style="background: #d1fae5; color: #065f46; padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 500;">
-                                        <i class="fas fa-check-circle" style="margin-right: 6px;"></i>${cov}
+                                    <span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:500;">
+                                        <i class="fas fa-check-circle" style="margin-right:5px;"></i>${cov}
                                     </span>
                                 `).join('')}
                             </div>
@@ -22979,7 +23805,8 @@ function generateViewTabContent(tabId, policy) {
                     ` : ''}
                 </div>
             `;
-            
+        }
+
         case 'financial':
             const financialData = policy.financial || {};
             return `
@@ -23004,122 +23831,899 @@ function generateViewTabContent(tabId, policy) {
             
         case 'documents':
             return `
-                <!-- Certificate and ID Cards Section -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-                    <!-- Certificate Box -->
-                    <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-                            <h3 style="margin: 0; color: #111827; font-size: 22px; font-weight: 600;">Certificate of Insurance</h3>
-                            <div style="display: flex; gap: 8px;">
-                                <button onclick="window.sendCOIForPolicy('${policy.id}')" class="btn-secondary" style="padding: 8px 16px; font-size: 13px; border-radius: 8px; background: #3b82f6; border-color: #3b82f6; color: white;">
-                                    <i class="fas fa-envelope"></i> Send COI
-                                </button>
-                                <button onclick="window.generateCertificateForPolicy('${policy.id}')" class="btn-secondary" style="padding: 8px 16px; font-size: 13px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
-                                    <i class="fas fa-certificate"></i> Generate
-                                </button>
-                                <button onclick="window.uploadCOIForPolicy('${policy.id}')" class="btn-secondary" style="padding: 8px 16px; font-size: 13px; border-radius: 8px; background: #f59e0b; border-color: #f59e0b; color: white;">
+                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; align-items: start;">
+
+                    <!-- LEFT COLUMN (2fr): COI → ID Cards → App Submissions → Loss Runs -->
+                    <div style="display: flex; flex-direction: column; gap: 20px;">
+
+                        <!-- Certificate of Insurance -->
+                        <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Certificate of Insurance</h3>
+                                <div style="display: flex; gap: 6px;">
+                                    <button onclick="window.sendCOIForPolicy('${policy.id}')" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; border-radius: 8px; background: #3b82f6; border-color: #3b82f6; color: white;">
+                                        <i class="fas fa-envelope"></i> Send
+                                    </button>
+                                    <button onclick="window.generateCertificateForPolicy('${policy.id}')" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
+                                        <i class="fas fa-certificate"></i> Generate
+                                    </button>
+                                    <button onclick="window.uploadCOIForPolicy('${policy.id}')" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; border-radius: 8px; background: #f59e0b; border-color: #f59e0b; color: white;">
+                                        <i class="fas fa-upload"></i> Upload
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="coiFilesContainer-${policy.id}" style="min-height: 60px;">
+                                ${generateCOIContainerContent(policy)}
+                            </div>
+                        </div>
+
+                        <!-- ID Cards -->
+                        <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Insurance ID Cards</h3>
+                                <button onclick="window.uploadIdCardsForPolicy('${policy.id}')" class="btn-secondary" style="padding: 6px 14px; font-size: 12px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
                                     <i class="fas fa-upload"></i> Upload
                                 </button>
                             </div>
+                            <div id="idCardsContainer-${policy.id}" style="min-height: 60px;">
+                                <div style="text-align: center; padding: 24px 20px; color: #6b7280;">
+                                    <i class="fas fa-id-card" style="font-size: 32px; margin-bottom: 10px; opacity: 0.3;"></i>
+                                    <p style="margin: 0; font-size: 14px;">No ID cards uploaded yet</p>
+                                    <p style="margin: 6px 0 0 0; font-size: 12px; opacity: 0.7;">Click Upload to add ID cards</p>
+                                </div>
+                            </div>
                         </div>
-                        <div id="coiFilesContainer-${policy.id}" style="min-height: 100px;">
-                            ${generateCOIContainerContent(policy)}
+
+                        <!-- Application Submissions -->
+                        <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Application Submissions</h3>
+                                <button onclick="window.createQuoteApplicationForPolicy('${policy.id}')" class="btn-secondary" style="padding: 6px 14px; font-size: 12px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
+                                    <i class="fas fa-file-alt"></i> Quote Application
+                                </button>
+                            </div>
+                            <div id="policymodal-app-submissions-${policy.id}">
+                                <div style="text-align: center; padding: 24px 20px; color: #6b7280;">
+                                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px; opacity: 0.4;"></i>
+                                    <p style="margin: 0; font-size: 14px;">Loading applications...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Loss Runs -->
+                        <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Loss Runs</h3>
+                            </div>
+                            <div id="policymodal-loss-runs-${policy.clientId || policy._clientId || policy.id}">
+                                <div style="text-align: center; padding: 24px 20px; color: #6b7280;">
+                                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px; opacity: 0.4;"></i>
+                                    <p style="margin: 0; font-size: 14px;">Loading documents...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- MIDDLE COLUMN (1fr): Notes (IVANS, read-only) -->
+                    <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Notes</h3>
+                            <span style="font-size: 11px; color: #6b7280; background: #f3f4f6; padding: 3px 8px; border-radius: 12px;">IVANS</span>
+                        </div>
+                        <div id="policy-doc-notes-${policy.id}" style="min-height: 120px; max-height: 520px; overflow-y: auto;">
+                            ${(() => {
+                                const policyNotes = typeof policy.notes === 'string' ? policy.notes : (policy.notes?.content || '');
+                                if (!policyNotes) {
+                                    return `<div style="text-align:center;padding:32px 12px;color:#9ca3af;">
+                                        <i class="fas fa-sticky-note" style="font-size:28px;margin-bottom:10px;opacity:0.3;display:block;"></i>
+                                        <p style="margin:0;font-size:13px;">No endorsement notes</p>
+                                    </div>`;
+                                }
+                                return `<p style="margin:0;white-space:pre-wrap;font-size:13px;line-height:1.6;color:#374151;">${policyNotes}</p>`;
+                            })()}
                         </div>
                     </div>
 
-                    <!-- ID Cards Box -->
-                    <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-                            <h3 style="margin: 0; color: #111827; font-size: 22px; font-weight: 600;">Insurance ID Cards</h3>
-                            <button onclick="window.uploadIdCardsForPolicy('${policy.id}')" class="btn-secondary" style="padding: 10px 20px; font-size: 14px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
+                    <!-- RIGHT COLUMN (1fr): Media / Files -->
+                    <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Media / Files</h3>
+                            <button onclick="window.uploadPolicyDocument('${policy.id}')" style="padding: 5px 12px; font-size: 12px; border-radius: 8px; background: #10b981; border: none; color: white; cursor: pointer;">
                                 <i class="fas fa-upload"></i> Upload
                             </button>
                         </div>
-                        <div id="idCardsContainer-${policy.id}" style="min-height: 100px;">
-                            <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
-                                <i class="fas fa-id-card" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                                <p style="margin: 0; font-size: 16px;">No ID cards uploaded yet</p>
-                                <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.7;">Click Upload to add ID cards</p>
-                            </div>
-                        </div>
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead>
+                                <tr style="border-bottom:2px solid #e5e7eb;">
+                                    <th style="text-align:left;padding:6px 4px;color:#6b7280;font-weight:600;">Name</th>
+                                    <th style="text-align:left;padding:6px 4px;color:#6b7280;font-weight:600;">Type</th>
+                                    <th style="text-align:left;padding:6px 4px;color:#6b7280;font-weight:600;">Date</th>
+                                    <th style="padding:6px 4px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="policy-doc-files-${policy.id}">
+                                <tr><td colspan="4" style="text-align:center;padding:24px 8px;color:#9ca3af;font-size:12px;">
+                                    <i class="fas fa-folder-open" style="font-size:24px;display:block;margin-bottom:8px;opacity:0.3;"></i>
+                                    No files uploaded
+                                </td></tr>
+                            </tbody>
+                        </table>
                     </div>
-                </div>
 
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-                        <h3 style="margin: 0; color: #111827; font-size: 22px; font-weight: 600;">Policy Documents</h3>
-                        <button onclick="window.uploadPolicyDocument('${policy.id}')" class="btn-secondary" style="padding: 10px 20px; font-size: 14px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
-                            <i class="fas fa-upload"></i> Upload Document
-                        </button>
-                    </div>
-                    <div id="policy-documents-list">
-                        ${window.renderPolicyDocuments(policy.id)}
-                    </div>
-                </div>
-
-                <!-- Application Submissions Section -->
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb; margin-top: 30px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-                        <h3 style="margin: 0; color: #111827; font-size: 22px; font-weight: 600;">Application Submissions</h3>
-                        <button onclick="window.createQuoteApplicationForPolicy('${policy.id}')" class="btn-secondary" style="padding: 10px 20px; font-size: 14px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
-                            <i class="fas fa-file-alt"></i> Quote Application
-                        </button>
-                    </div>
-                    <div id="policymodal-app-submissions-${policy.id}">
-                        <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
-                            <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 16px; opacity: 0.4;"></i>
-                            <p style="margin: 0; font-size: 16px;">Loading applications...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Loss Runs & Other Documentation Section -->
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb; margin-top: 30px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-                        <h3 style="margin: 0; color: #111827; font-size: 22px; font-weight: 600;">Loss Runs &amp; Other Documentation</h3>
-                    </div>
-                    <div id="policymodal-loss-runs-${policy.clientId || policy._clientId || policy.id}">
-                        <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
-                            <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 16px; opacity: 0.4;"></i>
-                            <p style="margin: 0; font-size: 16px;">Loading documents...</p>
-                        </div>
-                    </div>
                 </div>
             `;
 
-        case 'notes':
-            const notes = policy.notes?.content || policy.notes || '';
+        case 'financials': {
+            const _eF = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+            const _fF = (id,lbl,val,type) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><input id="ov-${id}" type="${type||'text'}" value="${_eF(val)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;"></div>`;
+            const _sF = (id,lbl,val,opts) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><select id="ov-${id}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;">${opts.map(o=>typeof o==='string'?`<option value="${_eF(o)}"${o===String(val||'')?'selected':''}>${o||'—'}</option>`:`<option value="${_eF(o.v)}"${o.v===String(val||'')?'selected':''}>${o.l}</option>`).join('')}</select></div>`;
+            const _hF = lbl => `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">${lbl}</div>`;
+            const _taF = (id,lbl,val) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><textarea id="ov-${id}" rows="4" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;resize:vertical;">${_eF(val)}</textarea></div>`;
+            const payTypeOpts = ['','Agency Bill','Company Pay Plan','Direct Bill','Mortgagee Bill','Paid In Full','Premium Finance','Other'];
+            const payFreqOpts = ['','Annual','Semi-Annual','Quarterly','Bi-Monthly','Monthly'];
+            const prod1fin = (policy.producers||[])[0] || {};
             return `
-                <div class="form-section" style="padding: 30px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
-                    <h3 style="margin-top: 0; margin-bottom: 30px; color: #111827; font-size: 22px; font-weight: 600;">Policy Notes</h3>
-                    <div style="background: #ffffff; padding: 30px; border-radius: 12px; min-height: 150px; border: 2px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);">
-                        <p style="margin: 0; white-space: pre-wrap; font-size: 16px; line-height: 1.6; color: #374151;">${notes || 'No notes for this policy'}</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+                    <!-- Card: Premium -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hF('Premium')}
+                        ${_fF('premium','Premium', policy.premium||'')}
+                        ${_fF('companyFees','Company Fees', policy.companyFees||'')}
+                        ${_fF('agencyFees','Agency Fees', policy.agencyFees||'')}
+                        ${_fF('taxes','Taxes', policy.taxes||'')}
+                        ${_fF('grandTotal','Grand Total', policy.grandTotal||'')}
+                        ${_fF('eft','EFT', policy.eft||'')}
                     </div>
+
+                    <!-- Card: Payment -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hF('Payment')}
+                        ${_sF('payPlanType','Pay Plan Type', policy.payPlanType||'', payTypeOpts)}
+                        ${_sF('payPlanFrequency','Pay Frequency', policy.payPlanFrequency||'', payFreqOpts)}
+                        ${_fF('financeCompany','Finance Company', policy.financeCompany||'')}
+                        ${_fF('financeContract','Premium Contract #', policy.financeContract||'')}
+                    </div>
+
+                    <!-- Card: Producer -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hF('Producer')}
+                        <div style="display:grid;grid-template-columns:1fr auto;gap:0 8px;align-items:end;">
+                            <div>${_fF('producer1','Producer', prod1fin.name||prod1fin.agent||'')}</div>
+                            <div style="margin-bottom:10px;"><input id="ov-producer1Pct" type="text" value="${_eF(prod1fin.commission||prod1fin.pct||'')}" placeholder="%" style="width:52px;border:1px solid #d1d5db;border-radius:6px;padding:6px 7px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Card: Comments -->
+                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                        ${_hF('Comments')}
+                        ${_taF('comments','Comments', policy.comments||'')}
+                    </div>
+
                 </div>
             `;
+        }
             
         default:
             return '<p>No information available for this section</p>';
     }
 }
 
+// ─── Overview Tab Save ────────────────────────────────────────────────────────
+window.overviewSave = async function(policyId) {
+    const btn = document.getElementById('ov-save-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+    const g = id => (document.getElementById('ov-' + id) || {}).value || '';
+    const updates = {
+        policyNumber: g('policyNumber'), carrier: g('carrier'), parentCompany: g('parentCompany'),
+        commissionPlan: g('commissionPlan'), policyState: g('policyState'), agent: g('agent'),
+        producers: [
+            { name: g('producer1'), commission: g('producer1Pct') },
+            { name: g('producer2'), commission: g('producer2Pct') },
+            { name: g('producer3'), commission: g('producer3Pct') },
+        ].filter(p => p.name || p.commission),
+        comments: g('comments'),
+        term: g('term'), effectiveDate: g('effectiveDate'), expirationDate: g('expirationDate'),
+        termDatePaid: g('termDatePaid'), policyStatus: g('policyStatus'), newRenewal: g('newRenewal'),
+        rewrite: g('rewrite'), source: g('source'), referredBy: g('referredBy'),
+        cancelDate: g('cancelDate'), cancelReason: g('cancelReason'),
+        downloadDate: g('downloadDate'), downloadPurpose: g('downloadPurpose'),
+        premium: g('premium'), companyFees: g('companyFees'), agencyFees: g('agencyFees'),
+        taxes: g('taxes'), grandTotal: g('grandTotal'), eft: g('eft'),
+        payPlanType: g('payPlanType'), payPlanFrequency: g('payPlanFrequency'),
+        financeCompany: g('financeCompany'), financeContract: g('financeContract'),
+        dotNumber: g('dotNumber'), mcNumber: g('mcNumber'),
+    };
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
+    if (idx === -1) {
+        if (typeof showNotification === 'function') showNotification('Policy not found in local cache', 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Policy'; }
+        return;
+    }
+    Object.assign(policies[idx], updates);
+    localStorage.setItem('insurance_policies', JSON.stringify(policies));
+    try {
+        const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+        const r = await fetch(`${API}/api/policies/${policyId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+            body: JSON.stringify(policies[idx])
+        });
+        if (typeof showNotification === 'function') showNotification(r.ok ? 'Policy saved successfully' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
+    } catch(e) {
+        if (typeof showNotification === 'function') showNotification('Saved locally (offline)', 'warning');
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Policy'; }
+};
+
+// ─── View Page Interactive Coverage Table ────────────────────────────────────
+(function() {
+    const _grps = [
+        ['Liability', [
+            ['CSL','Combined Single Limit'],['CSL_AUTO','Combined Single Limit (Auto)'],['BISPL','Bodily Injury Split Limit'],['BISIL','Bodily Injury Single Limit'],['BI','Bodily Injury Liability'],['PD','Property Damage'],
+            ['BOBTL','Bobtail Operations'],['NOWND','Non Owned'],['NOWPD','Non Owned Property Damage'],['HNTL','Hired Non-Trucking Liability'],['HNPIP','Hired Non-Trucking PIP'],['HNTMP','Hired Non-Trucking Medical Payments'],['HRDBD','Hired/Borrowed'],['HRNOT','Non-Truckers Hired/Borrowed'],
+            ['HAC','Hired Auto Cargo'],['TRKEX','Truckers Excess Coverage'],['TRKEX_AUTO','Truckers Excess (Auto)'],['TRKEX_PD','Truckers Excess (PD)'],['CONTG','Contingent Liability'],['INLW','Coverage for Injury to Leased Workers'],
+            ['FELIA','Fellow Employee Coverage'],['EMPIN','Employees as Insureds'],['VOLIN','Volunteers as Insureds'],['DOC','Driver of Other Car'],['UNLIC','Unlicensed Liability'],['PULBB','Pollution Buy Back'],
+            ['SPOUS','Supplemental Spousal Liability'],['OPTBI','Optional Bodily Injury To Others (MA)'],['SMBI','Snowmobile Bodily Injury'],['SMRLO','Snowmobiles Rented or Leased to Others'],
+            ['DRACO','Drive-Away Contractors'],['DRVIN','Driving Schools'],['CODNA','Completed Operations Deductible N/A'],['FLC','Farm Labor Contractors'],['FLC_AUTO','Farm Labor Contractors (Auto)'],
+            ['LSPER','Limited Specified Perils'],['RMVL','Recreational Motor Vehicle Liability'],['EVIEB','Emergency Vehicles - Exclusion Buyback'],['VFWEB','Volunteer Firefighters Exclusion Buyback'],['VFWEE','Volunteer Firefighters Exclusion Endorsement'],
+        ]],
+        ['UM / UIM', [
+            ['UMCSL','Uninsured Motorist Combined Single Limit'],['UMISP','Uninsured Motorist BI Split Limit'],['UMISG','Uninsured Motorist BI Single Limit'],['UMPD','Uninsured Motorist Property Damage'],
+            ['UMCPD','Uninsured Motorists Combined BI/PD Single Limit'],['UMSUM','Supplementary Uninsured/Underinsured Motorist'],['UMUIM','Uninsured & Underinsured Motorist Combined'],
+            ['UNCSL','Underinsured Motorist Combined Single Limit'],['UNDSP','Underinsured Motorist BI Split Limit'],['UNDSG','Underinsured Motorist BI Single'],['UNDPD','Underinsured Motorist Property Damage'],
+        ]],
+        ['Medical Payments', [
+            ['MEDPM','Medical Payments'],['EXCMED','Excess Medical Payments'],['EXMED','Excess Medical Payments'],['OBEL','Optional Basic Economic Loss'],
+            ['DIS','Total Disability Benefits'],['DTH','Death Indemnity'],['ADDA','Automobile Death Indemnity Benefits'],['ADDG','Total Disability for Gainfully Employed'],['ADDN','Total Disability for Not Gainfully Employed'],['WLB','Work Loss Benefits'],['GAP','Lease/Loan Gap'],
+        ]],
+        ['Physical Damage', [
+            ['COMP','Comprehensive'],['COLL','Collision'],['BCOLL','Broadened Collision'],['LCOLL','Limited Collision'],['COMTI','Comprehensive with Trailer Interchange'],['COLTI','Collision with Trailer Interchange'],
+            ['CPD','Combined Physical Damages'],['CPDBC','Combined Physical Damages w/ Broadened Collision'],['CPDC','Combined Physical Damages w/ Collision'],['CPDLC','Combined Physical Damages w/ Limited Collision'],['OTC','Other Than Collision'],
+            ['CWAIV','Waiver of Collision Deductible'],['MEXCO','Mexico Coverage'],['NDCOL','Named Driver Collision Coverage'],['NYMA','New York Mutual Aid'],['OEM','Original Equipment Manufactured Parts'],['PDBY','Property Damage Buy Back'],
+            ['SRCOL','Sound Receiving Collision'],['SORCV','Sound Receiving'],['SORPE','Sound Reproducing Equipment'],['SROTC','Sound Receiving Other than Collision'],
+            ['AVD','Audio Visual and Data Equipment'],['CKEYR','Car Key Replacement'],['TR','Tapes and Records'],['VANIS','Vanishing Deductible / Forgiveness'],
+        ]],
+        ['Rental / Towing', [
+            ['RREIM','Rental Reimbursement'],['RRCOL','Rental Reimbursement - Collision'],['RROTC','Rental Reimbursement - Other than Collision'],['RRSP','Rental Reimbursement - Specified Cause of Loss'],['TL','Towing and Labor'],
+        ]],
+        ['Cargo & Specialty', [
+            ['MTCARGO','Motor Truck Cargo'],['REEFER','Refrigeration Breakdown'],['HOOK','Hook (On-Hook Towing)'],['AGTLR','Agricultural Produce Trailers - Seasonal'],['AGTLR_AUTO','Agricultural Produce Trailers (Auto)'],
+        ]],
+        ['General Liability', [
+            ['GLCBI','GL Combined Bodily Injury'],['GLCPD','GL Combined Property Damage'],['PRDCO','Products/Completed Operations'],['PIADV','Personal and Advertising Injury'],['FIRDM','Fire Damage'],['MDEXP','Medical Expense'],
+        ]],
+        ['Auto Business Interruption', [
+            ['ABICL','Auto BI Collision w/o Extra Expense'],['ABICO','Auto BI Comprehensive w/o Extra Expense'],['ABIEC','Auto BI Comprehensive with Extra Expense'],['ABIEL','Auto BI Collision with Extra Expense'],['ABIES','Auto BI Specified Causes w/ Extra Expense'],['ABISP','Auto BI Specified Causes w/o Extra Expense'],
+        ]],
+        ['Garage / Business', [
+            ['GBICL','Garage BI Collision w/o Extra Expense'],['GBICO','Garage BI Comprehensive w/o Extra Expense'],['GBIEC','Garage BI Comprehensive with Extra Expense'],['GBIEL','Garage BI Collision with Extra Expense'],['GBIES','Garage BI Specified Causes w/ Extra Expense'],['GBISP','Garage BI Specified Causes w/o Extra Expense'],
+        ]],
+        ['PIP', [
+            ['PIP','Personal Injury Protection'],['PIP_CO','PIP (CO)'],['PIP_CT','PIP (CT)'],['PIP_DC','PIP (DC)'],['PIP_DE','PIP (DE)'],['PIP_FL','PIP (FL)'],['PIP_HI','PIP (HI)'],['PIP_KS','PIP (KS)'],['PIP_KY','PIP (KY)'],['PIP_MA','PIP (MA)'],['PIP_MD','PIP (MD)'],['PIP_MI','PIP (MI)'],['PIP_MN','PIP (MN)'],['PIP_ND','PIP (ND)'],['PIP_NJ','PIP (NJ)'],['PIP_NY','PIP (NY)'],['PIP_OR','PIP (OR)'],['PIP_SC','PIP (SC)'],['PIP_SD','PIP (SD)'],['PIP_TX','PIP (TX)'],['PIP_UT','PIP (UT)'],['PIP_VI','PIP (VI)'],['PIP_WA','PIP (WA)'],
+            ['APIP','Additional PIP'],['APIP_CO','APIP (CO)'],['APIP_CT','APIP (CT)'],['APIP_DE','APIP (DE)'],['APIP_FL','APIP (FL)'],['APIP_HI','APIP (HI)'],['APIP_KS','APIP (KS)'],['APIP_KY','APIP (KY)'],['APIP_MD','APIP (MD)'],['APIP_MN','APIP (MN)'],['APIP_ND','APIP (ND)'],['APIP_NJ','APIP (NJ)'],['APIP_NY','APIP (NY)'],['APIP_OR','APIP (OR)'],['APIP_SC','APIP (SC)'],['APIP_UT','APIP (UT)'],['APIP_VI','APIP (VI)'],['APIP_WA','APIP (WA)'],
+            ['BPIP','Named Individual Broadened PIP'],['BPIP_FL','Broadened PIP (FL)'],['BPIP_KY','Broadened PIP (KY)'],['BPIP_NY','Broadened PIP (NY)'],
+            ['EPIP','Extended PIP'],['EPIP_FL','Extended PIP (FL)'],['MPIP','Motorcycle PIP (KY)'],['MPIP_KY','Motorcycle PIP (KY)'],['HNPIP','Hired Non-Trucking PIP'],['BAPIP','Broadened Additional PIP'],
+            ['LPD','Limited Property Damage Liability (MI)'],['LPD_MI','Limited Property Damage Liability (MI)'],['PPI','Property Protection Insurance (MI)'],['PPI_MI','Property Protection Insurance (MI)'],
+            ['WLB_AR','Work Loss Benefit (AR)'],['WLB_HI','Wage Loss Benefit (HI)'],['WLB_PA','Work Loss Benefits (PA)'],['WLB_VA','Work Loss Benefit (VA)'],
+            ['MEDEX_AR','Medical Expense (AR)'],['MEDEX_PA','Medical Benefits (PA)'],['MEDEX_SC','Medical Expense (SC)'],['MEDEX_VA','Extra Medical Expense (VA)'],['MEDEX_VI','Extra Medical Expense (VI)'],
+            ['ADB','Accidental Death Benefit'],['ADB_AR','AD Benefit (AR)'],['ADB_HI','Accidental Death (HI)'],['ADB_NY','Death Benefits (NY)'],['ADB_PA','First Party Death (PA)'],
+            ['FEB','Funeral Expense Benefit'],['FEB_DC','Funeral Expense (DC)'],['FEB_ND','Funeral Expense (ND)'],['FEB_PA','First Party Funeral (PA)'],['FEB_UT','Funeral Expense (UT)'],
+            ['FPB','First Party Benefits (PA)'],['FPB_PA','First Party Benefits (PA)'],['CFPB','Combined First Party Benefits (PA)'],['CFPB_PA','Combined First Party Benefits (PA)'],['CFFEB','Combined FPB Funeral Expense (PA)'],['CFFEB_PA','Combined FPB Funeral Expense (PA)'],
+            ['TORT','Tort Option (PA)'],['TORT_PA','Tort Option (PA)'],['TOTDB','Total Disability Benefits (TX)'],['TOTDB_TX','Total Disability Benefits (TX)'],
+            ['OBEL_NY','Optional Basic Economic Loss (NY)'],['OTEXP','Other Expense (NY)'],['OTEXP_NY','Other Expense (NY)'],['OTEXP_WA','Service Loss (WA)'],
+            ['REPSV','Replacement Services/Survivors (ND)'],['REPSV_ND','Replacement Services (ND)'],['REPSV_UT','Survivor Loss (UT)'],['SLLIM','Service Loss Limits per day/week'],['MCARE_HI','Managed Care Option (HI)'],
+            ['ACB','Additional Chiropractic Benefits (HI)'],['ACB_HI','Additional Chiropractic Benefits (HI)'],
+            ['EXMED_NJ','Extended Medical Expense (NJ)'],['EXMED_PA','Extraordinary Medical Benefits (PA)'],
+        ]],
+        ['Mobile Home', [
+            ['MHCF','Mobile Home Contents - Fire'],['MHCF_PD','Mobile Home Contents - Fire (PD)'],['MHCLS','Mobile Home Contents - Limited Specified Causes'],['MHCLS_PD','Mobile Home Contents - Limited (PD)'],['MHCSP_PD','Mobile Home Contents - Specified Causes (PD)'],
+        ]],
+    ];
+    window._vcovOptsHTML = '<option value="">— Select coverage to add —</option>' +
+        _grps.map(([g, opts]) =>
+            `<optgroup label="${g}">` + opts.map(([c,d]) => `<option value="${c}">${c} - ${d}</option>`).join('') + '</optgroup>'
+        ).join('');
+
+    // Store all options for filtering
+    window._vcovAllOpts = _grps.flatMap(([,opts]) => opts);
+
+    window.viewCovFilter = function(query) {
+        const sel = document.getElementById('view-coverage-add-select');
+        if (!sel) return;
+        const q = query.toLowerCase().trim();
+        Array.from(sel.options).forEach(opt => {
+            if (!opt.value) { opt.style.display = ''; return; }
+            opt.style.display = (!q || opt.text.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q)) ? '' : 'none';
+        });
+        Array.from(sel.querySelectorAll('optgroup')).forEach(grp => {
+            const visible = Array.from(grp.options).some(o => o.style.display !== 'none');
+            grp.style.display = visible ? '' : 'none';
+        });
+    };
+
+    window.viewCovAdd = function() {
+        const sel = document.getElementById('view-coverage-add-select');
+        if (!sel || !sel.value) { if(typeof showNotification==='function') showNotification('Select a coverage first', 'warning'); return; }
+        const code = sel.value;
+        const optText = sel.options[sel.selectedIndex].text;
+        const desc = optText.includes(' - ') ? optText.split(' - ').slice(1).join(' - ') : '';
+        const tbody = document.getElementById('view-covs-tbody');
+        if (!tbody) return;
+        // Remove placeholder row if present
+        const ph = tbody.querySelector('td[colspan="5"]');
+        if (ph) ph.closest('tr').remove();
+        // Prevent duplicates
+        if (tbody.querySelector(`tr[data-code="${code}"]`)) {
+            if(typeof showNotification==='function') showNotification(`${code} is already in the table`, 'warning'); return;
+        }
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-code', code);
+        tr.setAttribute('data-desc', desc);
+        tr.style.borderBottom = '1px solid #e5e7eb';
+        tr.innerHTML = `
+            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${code}</span>${desc?`<br><span style="font-size:11px;color:#6b7280;">${desc}</span>`:''}</td>
+            <td style="padding:3px 4px;"><input class="vcov-limit" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+            <td style="padding:3px 4px;"><input class="vcov-deduct" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+            <td style="padding:3px 4px;"><input class="vcov-prem" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+            <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>`;
+        tbody.appendChild(tr);
+        sel.value = '';
+        tr.querySelector('.vcov-limit').focus();
+    };
+
+    window.viewCovSave = async function(policyId) {
+        const tbody = document.getElementById('view-covs-tbody');
+        if (!tbody) return;
+        const btn = document.getElementById('view-cov-save-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+        const CoveragesArray = {};
+        tbody.querySelectorAll('tr[data-code]').forEach(tr => {
+            const code = tr.getAttribute('data-code');
+            const desc = tr.getAttribute('data-desc') || '';
+            const amount = tr.querySelector('.vcov-limit')?.value.trim() || '';
+            const deductible = tr.querySelector('.vcov-deduct')?.value.trim() || '';
+            const premium = tr.querySelector('.vcov-prem')?.value.trim() || '';
+            if (code) CoveragesArray[code] = { Code: code, Description: desc, Amount: amount, Deductible: deductible, Premium: premium };
+        });
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
+        if (idx === -1) {
+            if(typeof showNotification==='function') showNotification('Policy not found in local cache', 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Coverages'; }
+            return;
+        }
+        if (!policies[idx].coverage) policies[idx].coverage = {};
+        policies[idx].coverage.CoveragesArray = CoveragesArray;
+        localStorage.setItem('insurance_policies', JSON.stringify(policies));
+        try {
+            const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const r = await fetch(`${API}/api/policies/${policyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                body: JSON.stringify(policies[idx])
+            });
+            if(typeof showNotification==='function') showNotification(r.ok ? 'Coverages saved' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
+        } catch(e) {
+            if(typeof showNotification==='function') showNotification('Saved locally (offline)', 'warning');
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Coverages'; }
+    };
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Vehicle Detail Modal (Editable) ─────────────────────────────────────────
+window.showVehicleDetailModal = function(startIndex) {
+    const section = document.getElementById('vehiclesViewSection');
+    if (!section) return;
+    const raw = section.getAttribute('data-vehicles');
+    if (!raw) return;
+    let vehicles;
+    try { vehicles = JSON.parse(decodeURIComponent(raw)); } catch(e) { return; }
+    const policyId = section.getAttribute('data-policy-id') || '';
+    let currentIdx = typeof startIndex === 'number' ? startIndex : 0;
+
+    const _eH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+
+    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
+    const STATES = ['','AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','INTL'];
+
+    const IS = 'width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;';
+    const LS = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;';
+    const WS = 'margin-bottom:9px;';
+
+    function _inp(field, label, val) {
+        return `<div style="${WS}"><label style="${LS}">${label}</label><input id="veh-${field}" value="${_eH(val||'')}" style="${IS}"></div>`;
+    }
+    function _sel(field, label, val, opts) {
+        const options = opts.map(o => `<option value="${_eH(o)}"${String(o)===String(val||'')?'selected':''}>${o||'—'}</option>`).join('');
+        return `<div style="${WS}"><label style="${LS}">${label}</label><select id="veh-${field}" style="${IS}background:#fff;">${options}</select></div>`;
+    }
+    function _ta(field, label, val) {
+        return `<div style="${WS}"><label style="${LS}">${label}</label><textarea id="veh-${field}" rows="3" style="${IS}resize:vertical;">${_eH(val||'')}</textarea></div>`;
+    }
+    function _interests(field, label, val) {
+        const entries = Array.isArray(val) ? val : (val ? String(val).split('\n').filter(Boolean) : []);
+        if (entries.length === 0) entries.push('');
+        const rows = entries.map(e => `
+            <div class="interest-row" style="display:flex;gap:6px;align-items:center;margin-bottom:5px;">
+                <input value="${_eH(e)}" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;color:#111827;">
+                <button type="button" onclick="this.closest('.interest-row').remove()" style="background:#fee2e2;border:none;border-radius:6px;padding:5px 7px;cursor:pointer;color:#dc2626;flex-shrink:0;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button>
+            </div>`).join('');
+        return `<div style="${WS}">
+            <label style="${LS}">${label}</label>
+            <div id="veh-${field}-container">${rows}</div>
+            <button type="button" onclick="window.vehAddInterest('veh-${field}-container')" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;margin-top:2px;">
+                <i class="fas fa-plus" style="font-size:10px;margin-right:3px;"></i>Add
+            </button>
+        </div>`;
+    }
+
+    function _covRows(v) {
+        const covs = v.CoveragesArray || v.coverages;
+        if (!covs) return '';
+        const rows = Array.isArray(covs) ? covs : Object.values(covs);
+        return rows.filter(c => c && c.Code).map(c => `
+            <tr data-code="${_eH(c.Code)}" data-desc="${_eH(c.Description||'')}" style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${_eH(c.Code)}</span>${c.Description?`<br><span style="font-size:11px;color:#6b7280;">${_eH(c.Description)}</span>`:''}</td>
+                <td style="padding:3px 4px;"><input class="vc-limit" value="${_eH(c.Amount||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+                <td style="padding:3px 4px;"><input class="vc-deduct" value="${_eH(c.Deductible||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+                <td style="padding:3px 4px;"><input class="vc-prem" value="${_eH(c.Premium||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:50px;"></td>
+                <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>
+            </tr>`).join('');
+    }
+
+    function _sectionHeader(label, margin) {
+        return `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:6px;border-bottom:2px solid #e0e7ff;${margin||'margin-bottom:12px;'}">${label}</div>`;
+    }
+
+    function renderModal() {
+        const v = vehicles[currentIdx];
+        const get = (...keys) => { for(const k of keys){ const val=v[k]; if(val!==undefined && val!==null && val!=='') return String(val); } return ''; };
+        const title = [get('year','Year'), get('make','Make'), get('model','Model')].filter(Boolean).join(' ') || `Vehicle ${currentIdx+1}`;
+        const vin = get('vin','VIN','id');
+        const existing = document.getElementById('vehDetailModal');
+        if (existing) existing.remove();
+
+        const covRows = _covRows(v);
+        const placeholder = `<tr><td colspan="5" style="text-align:center;padding:14px;color:#9ca3af;font-size:13px;">No coverages — use selector above to add</td></tr>`;
+
+        const modal = document.createElement('div');
+        modal.id = 'vehDetailModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.innerHTML = `
+            <div style="background:#fff;border-radius:14px;width:100%;max-width:900px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+                <!-- Header -->
+                <div style="background:linear-gradient(135deg,#1e40af,#2563eb);border-radius:14px 14px 0 0;padding:18px 24px;display:flex;align-items:center;gap:12px;flex-shrink:0;">
+                    <button onclick="window._vehModalNav(-1)" ${currentIdx===0?'disabled':''} style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.35);color:white;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${currentIdx===0?'opacity:0.4;cursor:not-allowed;':''}">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <div style="flex:1;min-width:0;">
+                        <div style="color:rgba(255,255,255,0.75);font-size:12px;font-weight:500;">Vehicle ${currentIdx+1} of ${vehicles.length}</div>
+                        <div style="color:white;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_eH(title)}</div>
+                        ${vin ? `<div style="color:rgba(255,255,255,0.8);font-size:12px;font-family:monospace;">${_eH(vin)}</div>` : ''}
+                    </div>
+                    <button onclick="window._vehModalNav(1)" ${currentIdx===vehicles.length-1?'disabled':''} style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.35);color:white;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${currentIdx===vehicles.length-1?'opacity:0.4;cursor:not-allowed;':''}">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                    <button onclick="document.getElementById('vehDetailModal').remove()" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:white;border-radius:8px;width:34px;height:34px;cursor:pointer;margin-left:4px;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <!-- Body -->
+                <div style="overflow-y:auto;flex:1;padding:24px;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 32px;">
+                        <!-- Left: Vehicle Info -->
+                        <div>
+                            ${_sectionHeader('Vehicle Info')}
+                            ${_inp('vin','VIN', get('vin','VIN','id'))}
+                            ${_sel('vehicleType','Vehicle Type', get('vehicleType','vehicle_type','Vehicletype'), ['','PP','Spec','Coml'])}
+                            ${_inp('year','Year', get('year','Year'))}
+                            ${_inp('make','Make', get('make','Make'))}
+                            ${_inp('model','Model', get('model','Model'))}
+                            ${_sel('bodyType','Body Type', get('bodyType','body_type','Bodytype'), BODY_TYPES)}
+                            ${_inp('territory','Territory', get('territory','Territory'))}
+                            ${_inp('gvwGcw','GVW / GCW', get('gvwGcw','gvw','Gvwgcw'))}
+                            ${_inp('class','Class', get('class','Class'))}
+                            ${_sel('use','Use', get('use','Use'), ['','Pleasure','Farm','Comml','Retail','Service','For Hire','Other'])}
+                            ${_inp('radius','Radius', get('radius','Radius'))}
+                            ${_inp('symAge','Sym / Age', get('symAge','Symage'))}
+                            ${_inp('seatCapacity','Seat Capacity', get('seatCapacity','Seatcapacity'))}
+                            ${_inp('costNew','Cost New', get('costNew','Costnew'))}
+                            ${_inp('cargoLimit','Cargo Limit', get('cargoLimit','Cargolimit'))}
+                            ${_ta('comment','Comment', get('comment','Comment'))}
+                        </div>
+                        <!-- Right: Location / Regulatory / Interests -->
+                        <div>
+                            ${_sectionHeader('Garage / Location')}
+                            ${_inp('garageAddress','Garage Address', get('garageAddress','garageaddress','Garageaddress'))}
+                            ${_inp('garageCity','City', get('garageCity','garagecity','Garagecity'))}
+                            ${_sel('garageState','State', get('garageState','garagestate','Garagestate'), STATES)}
+                            ${_inp('garageZip','ZIP', get('garageZip','garagezip','Garagezip'))}
+                            ${_inp('garageCounty','County', get('garageCounty','garagecounty','Garagecounty'))}
+                            ${_sectionHeader('Regulatory','margin:16px 0 12px 0;')}
+                            ${_inp('dotNum','DOT #', get('dotNum','dot','DotNum'))}
+                            ${_inp('mcNum','MC #', get('mcNum','mc','McNum'))}
+                            ${_sectionHeader('Interests','margin:16px 0 12px 0;')}
+                            ${_interests('lienholder','Lienholder', get('lienholder','Lienholder'))}
+                            ${_interests('additionalInsured','Additional Insured', get('additionalInsured','AdditionalInsured'))}
+                            ${_interests('additionalInterest','Additional Interest', get('additionalInterest','AdditionalInterest'))}
+                        </div>
+                    </div>
+
+                    <!-- Per-Vehicle Coverages -->
+                    <div style="margin-top:24px;">
+                        ${_sectionHeader('Per-Vehicle Coverages')}
+                        <div style="margin-bottom:8px;">
+                            <input type="text" placeholder="Filter coverage codes..." oninput="window.vehCovFilter(this.value)"
+                                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 10px;font-size:12px;box-sizing:border-box;margin-bottom:5px;">
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <select id="veh-cov-add-select" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 7px;font-size:12px;min-width:0;background:#fff;">
+                                    ${window._vcovOptsHTML||'<option value="">Loading...</option>'}
+                                </select>
+                                <button onclick="window.vehCovAdd()" style="background:#4f46e5;color:white;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">
+                                    <i class="fas fa-plus"></i> Add
+                                </button>
+                            </div>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                                <thead>
+                                    <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                        <th style="padding:6px 8px;text-align:left;color:#374151;">Coverage</th>
+                                        <th style="padding:6px 8px;text-align:left;color:#374151;">Limit</th>
+                                        <th style="padding:6px 8px;text-align:left;color:#374151;">Deductible</th>
+                                        <th style="padding:6px 8px;text-align:left;color:#374151;">Premium</th>
+                                        <th style="width:30px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="veh-covs-tbody">${covRows||placeholder}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Footer buttons -->
+                    <div style="margin-top:20px;display:flex;justify-content:flex-end;gap:10px;padding-top:16px;border-top:1px solid #e5e7eb;">
+                        <button onclick="document.getElementById('vehDetailModal').remove()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;padding:8px 20px;cursor:pointer;font-size:13px;font-weight:500;">
+                            Cancel
+                        </button>
+                        <button id="veh-save-btn" onclick="window.vehModalSave('${_eH(policyId)}')" style="background:#059669;color:white;border:none;border-radius:8px;padding:8px 24px;cursor:pointer;font-size:13px;font-weight:600;">
+                            <i class="fas fa-save" style="margin-right:5px;"></i>Save Vehicle
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    }
+
+    window._vehModalNav = function(dir) {
+        currentIdx = Math.max(0, Math.min(vehicles.length - 1, currentIdx + dir));
+        renderModal();
+    };
+
+    window.vehAddInterest = function(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const div = document.createElement('div');
+        div.className = 'interest-row';
+        div.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:5px;';
+        div.innerHTML = `<input value="" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;color:#111827;"><button type="button" onclick="this.closest('.interest-row').remove()" style="background:#fee2e2;border:none;border-radius:6px;padding:5px 7px;cursor:pointer;color:#dc2626;flex-shrink:0;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button>`;
+        container.appendChild(div);
+        div.querySelector('input').focus();
+    };
+
+    window.vehCovFilter = function(query) {
+        const sel = document.getElementById('veh-cov-add-select');
+        if (!sel) return;
+        const q = query.toLowerCase().trim();
+        Array.from(sel.options).forEach(opt => {
+            if (!opt.value) { opt.style.display = ''; return; }
+            opt.style.display = (!q || opt.text.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q)) ? '' : 'none';
+        });
+        Array.from(sel.querySelectorAll('optgroup')).forEach(grp => {
+            grp.style.display = Array.from(grp.options).some(o => o.style.display !== 'none') ? '' : 'none';
+        });
+    };
+
+    window.vehCovAdd = function() {
+        const sel = document.getElementById('veh-cov-add-select');
+        if (!sel || !sel.value) { if(typeof showNotification==='function') showNotification('Select a coverage first','warning'); return; }
+        const code = sel.value;
+        const optText = sel.options[sel.selectedIndex].text;
+        const desc = optText.includes(' - ') ? optText.split(' - ').slice(1).join(' - ') : '';
+        const tbody = document.getElementById('veh-covs-tbody');
+        if (!tbody) return;
+        const ph = tbody.querySelector('td[colspan="5"]');
+        if (ph) ph.closest('tr').remove();
+        if (tbody.querySelector(`tr[data-code="${code}"]`)) {
+            if(typeof showNotification==='function') showNotification(`${code} already in table`,'warning'); return;
+        }
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-code', code);
+        tr.setAttribute('data-desc', desc);
+        tr.style.borderBottom = '1px solid #e5e7eb';
+        tr.innerHTML = `
+            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${code}</span>${desc?`<br><span style="font-size:11px;color:#6b7280;">${desc}</span>`:''}</td>
+            <td style="padding:3px 4px;"><input class="vc-limit" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+            <td style="padding:3px 4px;"><input class="vc-deduct" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
+            <td style="padding:3px 4px;"><input class="vc-prem" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:50px;"></td>
+            <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>`;
+        tbody.appendChild(tr);
+        sel.value = '';
+        tr.querySelector('.vc-limit').focus();
+    };
+
+    window.vehModalSave = async function(policyId) {
+        const btn = document.getElementById('veh-save-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+        const g = id => (document.getElementById('veh-' + id)||{}).value || '';
+        const gI = field => {
+            const c = document.getElementById('veh-' + field + '-container');
+            if (!c) return '';
+            const vals = Array.from(c.querySelectorAll('input')).map(i => i.value.trim()).filter(Boolean);
+            return vals.length <= 1 ? (vals[0]||'') : vals.join('\n');
+        };
+
+        const updated = Object.assign({}, vehicles[currentIdx], {
+            vin: g('vin'), vehicleType: g('vehicleType'), year: g('year'), make: g('make'),
+            model: g('model'), bodyType: g('bodyType'), territory: g('territory'),
+            gvwGcw: g('gvwGcw'), class: g('class'), use: g('use'), radius: g('radius'),
+            symAge: g('symAge'), seatCapacity: g('seatCapacity'), costNew: g('costNew'),
+            cargoLimit: g('cargoLimit'), comment: g('comment'),
+            garageAddress: g('garageAddress'), garageCity: g('garageCity'),
+            garageState: g('garageState'), garageZip: g('garageZip'), garageCounty: g('garageCounty'),
+            dotNum: g('dotNum'), mcNum: g('mcNum'),
+            lienholder: gI('lienholder'), additionalInsured: gI('additionalInsured'), additionalInterest: gI('additionalInterest'),
+        });
+
+        const tbody = document.getElementById('veh-covs-tbody');
+        if (tbody) {
+            const CoveragesArray = {};
+            tbody.querySelectorAll('tr[data-code]').forEach(tr => {
+                const code = tr.getAttribute('data-code');
+                const desc = tr.getAttribute('data-desc') || '';
+                const amount = tr.querySelector('.vc-limit')?.value.trim() || '';
+                const deductible = tr.querySelector('.vc-deduct')?.value.trim() || '';
+                const premium = tr.querySelector('.vc-prem')?.value.trim() || '';
+                if (code) CoveragesArray[code] = { Code: code, Description: desc, Amount: amount, Deductible: deductible, Premium: premium };
+            });
+            updated.CoveragesArray = CoveragesArray;
+        }
+
+        vehicles[currentIdx] = updated;
+        const sec = document.getElementById('vehiclesViewSection');
+        if (sec) sec.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
+        if (idx !== -1) {
+            policies[idx].vehicles = vehicles;
+            localStorage.setItem('insurance_policies', JSON.stringify(policies));
+            try {
+                const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+                const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+                const r = await fetch(`${API}/api/policies/${policyId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                    body: JSON.stringify(policies[idx])
+                });
+                if(typeof showNotification==='function') showNotification(r.ok ? 'Vehicle saved' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
+            } catch(e) {
+                if(typeof showNotification==='function') showNotification('Saved locally (offline)', 'warning');
+            }
+        } else {
+            if(typeof showNotification==='function') showNotification('Policy not found in local cache — saved to vehicles array only','warning');
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Vehicle'; }
+    };
+
+    renderModal();
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Driver Detail Modal (Editable) ──────────────────────────────────────────
+window.showDriverDetailModal = function(startIndex) {
+    const section = document.getElementById('driversViewSection');
+    if (!section) return;
+    const raw = section.getAttribute('data-drivers');
+    if (!raw) return;
+    let drivers;
+    try { drivers = JSON.parse(decodeURIComponent(raw)); } catch(e) { return; }
+    const policyId = section.getAttribute('data-policy-id') || '';
+    let currentIdx = typeof startIndex === 'number' ? startIndex : 0;
+
+    // Also grab vehicles list for the Vehicle assignment dropdown
+    const vehSection = document.getElementById('vehiclesViewSection');
+    let vehicles = [];
+    try { if (vehSection) vehicles = JSON.parse(decodeURIComponent(vehSection.getAttribute('data-vehicles')||'[]')); } catch(e){}
+
+    const _eH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    const STATES = ['','AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','INTL'];
+    const IS = 'width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;';
+    const LS = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;';
+    const WS = 'margin-bottom:9px;';
+
+    function _inp(id, label, val) {
+        return `<div style="${WS}"><label style="${LS}">${label}</label><input id="drv-${id}" value="${_eH(val||'')}" style="${IS}"></div>`;
+    }
+    function _sel(id, label, val, opts) {
+        const options = opts.map(o => `<option value="${_eH(o)}"${String(o)===String(val||'')?'selected':''}>${o||'—'}</option>`).join('');
+        return `<div style="${WS}"><label style="${LS}">${label}</label><select id="drv-${id}" style="${IS}background:#fff;">${options}</select></div>`;
+    }
+    function _ta(id, label, val) {
+        return `<div style="${WS}"><label style="${LS}">${label}</label><textarea id="drv-${id}" rows="3" style="${IS}resize:vertical;">${_eH(val||'')}</textarea></div>`;
+    }
+    function _sH(label, mt) {
+        return `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:6px;border-bottom:2px solid #e0e7ff;${mt?'margin:'+mt+';':''}margin-bottom:12px;">${label}</div>`;
+    }
+
+    function renderModal() {
+        const d = drivers[currentIdx];
+        const get = (...keys) => { for(const k of keys){ const v=d[k]; if(v!==undefined&&v!==null&&v!=='') return String(v); } return ''; };
+        const _fullNameRaw = get('Full Name','fullName','name','Name');
+        const _nameParts = _fullNameRaw ? _fullNameRaw.trim().split(/\s+/) : [];
+        const firstName = get('firstName','Firstname','first_name') || (_nameParts.length >= 1 ? _nameParts[0] : '');
+        const middleName = get('middleName','Middlename','middle_name') || (_nameParts.length > 2 ? _nameParts.slice(1,-1).join(' ') : '');
+        const lastName = get('lastName','Lastname','last_name') || (_nameParts.length > 1 ? _nameParts[_nameParts.length-1] : '');
+        const fullName = _fullNameRaw || [firstName, middleName, lastName].filter(Boolean).join(' ') || `Driver ${currentIdx+1}`;
+
+        // Vehicle options for this driver
+        const vehOpts = ['<option value="">— None —</option>', ...vehicles.map((v,i) => {
+            const label = [v.year||v.Year, v.make||v.Make, v.model||v.Model].filter(Boolean).join(' ') || `Vehicle ${i+1}`;
+            const vid = v.id || v.vin || String(i);
+            const sel = (get('vehicleId','VehicleId','vehicle_id') === vid) ? 'selected' : '';
+            return `<option value="${_eH(vid)}" ${sel}>${_eH(label)}</option>`;
+        })].join('');
+
+        const existing = document.getElementById('drvDetailModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'drvDetailModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.innerHTML = `
+            <div style="background:#fff;border-radius:14px;width:100%;max-width:860px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+                <!-- Header -->
+                <div style="background:linear-gradient(135deg,#065f46,#059669);border-radius:14px 14px 0 0;padding:18px 24px;display:flex;align-items:center;gap:12px;flex-shrink:0;">
+                    <button onclick="window._drvModalNav(-1)" ${currentIdx===0?'disabled':''} style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.35);color:white;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${currentIdx===0?'opacity:0.4;cursor:not-allowed;':''}">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <div style="flex:1;min-width:0;">
+                        <div style="color:rgba(255,255,255,0.75);font-size:12px;font-weight:500;">Driver ${currentIdx+1} of ${drivers.length}</div>
+                        <div style="color:white;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><i class="fas fa-user" style="margin-right:8px;"></i>${_eH(fullName)}</div>
+                    </div>
+                    <button onclick="window._drvModalNav(1)" ${currentIdx===drivers.length-1?'disabled':''} style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.35);color:white;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${currentIdx===drivers.length-1?'opacity:0.4;cursor:not-allowed;':''}">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                    <button onclick="document.getElementById('drvDetailModal').remove()" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:white;border-radius:8px;width:34px;height:34px;cursor:pointer;margin-left:4px;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <!-- Body -->
+                <div style="overflow-y:auto;flex:1;padding:24px;">
+                    <!-- Date row -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0 16px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #e5e7eb;">
+                        ${_inp('dateAdded','Date Added', get('dateAdded','date_added','Dateadded'))}
+                        ${_inp('effectiveDateAdded','Effective Date Added', get('effectiveDateAdded','effective_date_added','Effectivedateadded'))}
+                        ${_inp('dateDeleted','Date Deleted', get('dateDeleted','date_deleted','Datedeleted'))}
+                        ${_inp('effectiveDateDeleted','Eff. Date Deleted', get('effectiveDateDeleted','effective_date_deleted','Effectivedatedeleted'))}
+                    </div>
+                    <!-- Two column form -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 32px;">
+                        <!-- Left: Driver Info -->
+                        <div>
+                            ${_sH('Driver')}
+                            ${_inp('firstName','First Name', firstName)}
+                            ${_inp('middleName','Middle Name', middleName)}
+                            ${_inp('lastName','Last Name', lastName)}
+                            ${_sel('relationship','Relationship', get('relationship','Relationship'), ['','Applicant','Brother/Sister','Child','Co-Applicant','Coinsured','Domestic Partner','Employee','First Named Insured','Husband','Insured','Officer of Corporation','Other','Parent','Relative','Roommate','Resident Relative other than Spouse or Child','Significant Other','Spouse','Wife'])}
+                            ${_sel('maritalStatus','Marital Status', get('maritalStatus','Maritalstatus','marital_status'), ['','Married','Single','Separated','Widowed','Divorced','Domestic Partner (Unmarried)','Civil Union / Registered Domestic Partner','Fiance or Fiancee','Other','Unknown'])}
+                            ${_sel('gender','Gender', get('gender','Gender'), ['','Male','Female'])}
+                            ${_inp('dob','Date of Birth', get('dateOfBirth','Date of Birth','dob','Dateofbirth'))}
+                            ${_inp('ssn','SSN', get('ssn','Ssn','SSN'))}
+                        </div>
+                        <!-- Right: License / Other -->
+                        <div>
+                            ${_sH('Vehicle / License')}
+                            <div style="${WS}"><label style="${LS}">Assigned Vehicle</label><select id="drv-vehicleId" style="${IS}background:#fff;">${vehOpts}</select></div>
+                            ${_sel('licenseState','License State', get('licenseState','State','license_state','Licensestate'), STATES)}
+                            ${_inp('licenseNumber','License #', get('licenseNumber','License Number','license','Licensenumber'))}
+                            ${_inp('stateLicenseYear','State License Year', get('stateLicenseYear','Statelicenseyear','state_license_year'))}
+                            ${_inp('originalLicenseDate','Orig. License Date', get('originalLicenseDate','Originallicensedate','original_license_date'))}
+                            ${_sH('Other','16px 0')}
+                            ${_inp('yearsCommercialExperience','Years Commercial Exp', get('yearsCommercialExperience','Yearscommercialexperience','years_commercial_experience'))}
+                            ${_inp('percentUse','Percent Use', get('percentUse','Percentuse','percent_use'))}
+                            ${_ta('comment','Comment', get('comment','Comment'))}
+                        </div>
+                    </div>
+                    <!-- Footer buttons -->
+                    <div style="margin-top:20px;display:flex;justify-content:flex-end;gap:10px;padding-top:16px;border-top:1px solid #e5e7eb;">
+                        <button onclick="document.getElementById('drvDetailModal').remove()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;padding:8px 20px;cursor:pointer;font-size:13px;font-weight:500;">Cancel</button>
+                        <button id="drv-save-btn" onclick="window.drvModalSave('${_eH(policyId)}')" style="background:#059669;color:white;border:none;border-radius:8px;padding:8px 24px;cursor:pointer;font-size:13px;font-weight:600;"><i class="fas fa-save" style="margin-right:5px;"></i>Save Driver</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    }
+
+    window._drvModalNav = function(dir) {
+        currentIdx = Math.max(0, Math.min(drivers.length - 1, currentIdx + dir));
+        renderModal();
+    };
+
+    window.drvModalSave = async function(policyId) {
+        const btn = document.getElementById('drv-save-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+        const g = id => (document.getElementById('drv-' + id)||{}).value || '';
+
+        const updated = Object.assign({}, drivers[currentIdx], {
+            firstName: g('firstName'), middleName: g('middleName'), lastName: g('lastName'),
+            fullName: [g('firstName'), g('middleName'), g('lastName')].filter(Boolean).join(' '),
+            'Full Name': [g('firstName'), g('middleName'), g('lastName')].filter(Boolean).join(' '),
+            relationship: g('relationship'), maritalStatus: g('maritalStatus'), gender: g('gender'),
+            dob: g('dob'), dateOfBirth: g('dob'), ssn: g('ssn'),
+            vehicleId: g('vehicleId'), licenseState: g('licenseState'), licenseNumber: g('licenseNumber'),
+            'License Number': g('licenseNumber'),
+            stateLicenseYear: g('stateLicenseYear'), originalLicenseDate: g('originalLicenseDate'),
+            yearsCommercialExperience: g('yearsCommercialExperience'), percentUse: g('percentUse'),
+            comment: g('comment'),
+            dateAdded: g('dateAdded'), effectiveDateAdded: g('effectiveDateAdded'),
+            dateDeleted: g('dateDeleted'), effectiveDateDeleted: g('effectiveDateDeleted'),
+        });
+
+        drivers[currentIdx] = updated;
+        const sec = document.getElementById('driversViewSection');
+        if (sec) sec.setAttribute('data-drivers', encodeURIComponent(JSON.stringify(drivers)));
+
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
+        if (idx !== -1) {
+            policies[idx].drivers = drivers;
+            localStorage.setItem('insurance_policies', JSON.stringify(policies));
+            try {
+                const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+                const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+                const r = await fetch(`${API}/api/policies/${policyId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                    body: JSON.stringify(policies[idx])
+                });
+                if(typeof showNotification==='function') showNotification(r.ok ? 'Driver saved' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
+            } catch(e) {
+                if(typeof showNotification==='function') showNotification('Saved locally (offline)', 'warning');
+            }
+        } else {
+            if(typeof showNotification==='function') showNotification('Policy not found in local cache','warning');
+        }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Driver'; }
+    };
+
+    renderModal();
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 function switchViewTab(tabId) {
-    // Remove active class and hide all tabs and contents
-    document.querySelectorAll('#policyViewModal .tab-btn').forEach(btn => {
-        btn.classList.remove('active');
+    // Update all tab buttons
+    document.querySelectorAll('#policyDetailPage .policy-view-tab-btn').forEach(btn => {
+        const isActive = btn.getAttribute('data-tab') === tabId;
+        btn.classList.toggle('pv-tab-active', isActive);
+        btn.style.borderBottom = isActive ? '3px solid #0066cc' : '3px solid transparent';
+        btn.style.color = isActive ? '#0066cc' : '#6b7280';
     });
-    document.querySelectorAll('#policyViewModal .tab-content').forEach(content => {
-        content.classList.remove('active');
+
+    // Show/hide tab content panels
+    document.querySelectorAll('#policyDetailPage .tab-content').forEach(content => {
         content.style.display = 'none';
     });
 
-    // Activate selected tab button and show selected content
-    const selectedTab = document.querySelector(`#policyViewModal .tab-btn[data-tab="${tabId}"]`);
     const selectedContent = document.getElementById(`${tabId}-view-content`);
-
-    if (selectedTab) selectedTab.classList.add('active');
     if (selectedContent) {
-        selectedContent.classList.add('active');
         selectedContent.style.display = 'block';
     }
 }
@@ -23199,17 +24803,8 @@ async function deletePolicy(policyId) {
             const success = await window.DataSync.deletePolicy(policyId, policyData);
             if (success) {
                 console.log('Policy deleted from server via DataSync');
-
-                // Close modal
-                const modal = document.getElementById('policyViewModal');
-                if (modal) modal.remove();
-
                 showNotification('Policy deleted successfully', 'success');
-
-                // Refresh current view
-                if (document.querySelector('.policies-view')) {
-                    loadPoliciesView();
-                }
+                loadPoliciesView();
                 return;
             }
         }
@@ -23220,16 +24815,8 @@ async function deletePolicy(policyId) {
         const updatedPolicies = policies.filter(p => String(p.id) !== idStr && p.policyNumber !== idStr);
         localStorage.setItem('insurance_policies', JSON.stringify(updatedPolicies));
 
-        // Close modal
-        const modal = document.getElementById('policyViewModal');
-        if (modal) modal.remove();
-
         showNotification('Policy deleted successfully (server sync pending)', 'warning');
-
-        // Refresh current view
-        if (document.querySelector('.policies-view')) {
-            loadPoliciesView();
-        }
+        loadPoliciesView();
     }
 }
 
@@ -23327,19 +24914,21 @@ async function generatePolicyRows() {
     let currentUser = null;
     let isAdmin = false;
 
+    let isCsrUser = false;
     if (sessionData) {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
-            console.log(`🔍 Policy filtering - Current user: ${currentUser}, Is Admin: ${isAdmin}`);
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || (user.role || '').includes('admin');
+            isCsrUser = (user.role || '') === 'csr';
+            console.log(`🔍 Policy filtering - Current user: ${currentUser}, Is Admin: ${isAdmin}, Is CSR: ${isCsrUser}`);
         } catch (error) {
             console.error('Error parsing session data:', error);
         }
     }
 
-    // Filter policies based on user role
-    if (!isAdmin && currentUser) {
+    // Filter policies based on user role — CSR sees all policies (gated by search in UI)
+    if (!isAdmin && !isCsrUser && currentUser) {
         const originalCount = policies.length;
         policies = policies.filter(policy => {
             const assignedTo = policy.assignedTo ||
@@ -23352,6 +24941,8 @@ async function generatePolicyRows() {
         console.log(`🔒 Filtered policies: ${originalCount} -> ${policies.length} (showing only ${currentUser}'s policies)`);
     } else if (isAdmin) {
         console.log(`👑 Admin user - showing all ${policies.length} policies`);
+    } else if (isCsrUser) {
+        console.log(`🎧 CSR user - showing all ${policies.length} policies (search-gated)`);
     }
 
     if (policies.length === 0) {
@@ -26017,7 +27608,6 @@ function showAgentProfileModal(agentName) {
             ${card('Apps to Market', m.appsToMarket, avgs.appsToMarket, v => Math.round(v))}
             ${card('Sales (in range)', m.salesInRange, avgs.salesInRange, v => Math.round(v))}
             ${card('Premium (in range)', m.premiumInRange, avgs.premiumInRange, dollar)}
-            ${card('Total Premium (all time)', m.totalPremium, avgs.totalPremium, dollar)}
             ${card('Lead Callback %', m.totalLeads > 0 ? (m.callbackLeads / m.totalLeads) * 100 : 0, avgs.totalLeads > 0 ? (avgs.callbackLeads / avgs.totalLeads) * 100 : 0, v => parseFloat(v).toFixed(1) + '%')}
             ${card('Overdue Callback %', m.totalLeads > 0 ? (m.overdueCallbackLeads / m.totalLeads) * 100 : 0, avgs.totalLeads > 0 ? (avgs.overdueCallbackLeads / avgs.totalLeads) * 100 : 0, v => parseFloat(v).toFixed(1) + '%', false)}
         </div>`;
@@ -33313,6 +34903,7 @@ function loadNewPolicyCards(newPolicies) {
                         </div>
                     </div>
                     <div class="card-actions">
+                        ${item.clientId ? `<button class="btn-secondary btn-small" onclick="openClientFromComms('${item.clientId}')"><i class="fas fa-user"></i> View Client</button>` : ''}
                         ${!item.giftSent ? `
                             <button class="btn-primary btn-small" onclick="window.communicationsReminders.markGiftSent('${item.id}', '${item.clientName}')">
                                 <i class="fas fa-gift"></i> Mark Gift Sent
@@ -33330,8 +34921,6 @@ function loadNewPolicyCards(newPolicies) {
             `;
         } else {
             // Handle policies (existing logic)
-            const premium = typeof item.premium === 'number' ? item.premium.toLocaleString() : item.premium;
-
             return `
                 <div class="reminder-card new-policy-card ${item.giftSent ? 'completed' : ''}">
                     <div class="card-header">
@@ -33341,9 +34930,6 @@ function loadNewPolicyCards(newPolicies) {
                         <div class="card-info">
                             <h4>${item.clientName}</h4>
                             <p class="card-subtitle">${item.policyType}</p>
-                        </div>
-                        <div class="card-urgency">
-                            <span class="policy-premium">$${premium}</span>
                         </div>
                     </div>
                     <div class="card-body">
@@ -33357,6 +34943,7 @@ function loadNewPolicyCards(newPolicies) {
                         </div>
                     </div>
                     <div class="card-actions">
+                        ${item.clientId ? `<button class="btn-secondary btn-small" onclick="openClientFromComms('${item.clientId}')"><i class="fas fa-user"></i> View Client</button>` : ''}
                         ${!item.giftSent ? `
                             <button class="btn-primary btn-small" onclick="window.communicationsReminders.markGiftSent('${item.id}', '${item.clientName}')">
                                 <i class="fas fa-gift"></i> Mark Gift Sent
@@ -34306,6 +35893,11 @@ async function sendBirthdayMessageNow(clientName) {
         alert(`🎂 Birthday SMS sent to ${clientName} at ${to}!`);
         document.querySelector('.modal').remove();
     }
+}
+
+function openClientFromComms(clientId) {
+    window.location.hash = '#clients';
+    setTimeout(() => viewClient(clientId), 800);
 }
 
 function sendWelcomeMessage(clientName) {
@@ -36917,20 +38509,39 @@ window.sendCOIForPolicy = function(policyId) {
     modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex !important; align-items: center; justify-content: center; z-index: 10000; opacity: 1; visibility: visible;';
 
     modal.innerHTML = `
-        <div class="modal-content coi-modal" onclick="event.stopPropagation()" style="background: white; border-radius: 12px; width: 90%; max-width: 600px; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);">
+        <style>
+            #crmCOIModal .modal-body,
+            #crmCOIModal form,
+            #crmCOIModal .form-group,
+            #crmCOIModal #crmCoiEmailRecipientsContainer,
+            #crmCOIModal .crm-coi-email-recipient-row,
+            #crmCOIModal .policy-info-banner,
+            #crmCOIModal .form-actions {
+                display: block !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+            #crmCOIModal .crm-coi-email-recipient-row {
+                display: flex !important;
+            }
+            #crmCOIModal .form-actions {
+                display: flex !important;
+            }
+        </style>
+        <div class="modal-content coi-modal" onclick="event.stopPropagation()" style="background: white; border-radius: 12px; width: 90%; max-width: 750px; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);">
             <div class="modal-header" style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 20px; border-radius: 12px 12px 0 0; position: relative;">
                 <h3 style="margin: 0; font-size: 20px; display: flex; align-items: center; gap: 10px; color: white;">
                     <i class="fas fa-certificate" style="color: white;"></i> Request Certificate of Insurance
                 </h3>
                 <button class="modal-close-btn" onclick="closeCRMCOIModal()" style="position: absolute; top: 15px; right: 20px; background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; width: 30px; height: 30px;">×</button>
             </div>
-            <div class="modal-body" style="padding: 20px;">
-                <div class="policy-info-banner" style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 25px; color: #0c4a6e;">
+            <div class="modal-body" style="padding: 20px; width: 100%; box-sizing: border-box; display: block;">
+                <div class="policy-info-banner" style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 25px; color: #0c4a6e; width: 100%; box-sizing: border-box;">
                     <strong>Policy:</strong> ${policy.policyNumber || policy.id} - ${policy.clientName || policy.insured_name || 'Unknown Client'}
                 </div>
 
-                <form id="crmCOIModalForm">
-                    <div class="form-group" style="margin-bottom: 25px;">
+                <form id="crmCOIModalForm" style="width: 100%; box-sizing: border-box; display: block;">
+                    <div class="form-group" style="margin-bottom: 25px; width: 100%; box-sizing: border-box; display: block;">
                         <label style="display: block; margin-bottom: 12px; font-weight: 600; color: #374151;">Certificate Holder Type</label>
                         <div class="radio-group" style="display: flex; gap: 20px;">
                             <label class="radio-option" style="display: flex; align-items: center; cursor: pointer;">
@@ -36944,7 +38555,7 @@ window.sendCOIForPolicy = function(policyId) {
                         </div>
                     </div>
 
-                    <div id="crmThirdPartyFields" class="hidden" style="display: none;">
+                    <div id="crmThirdPartyFields" class="hidden" style="display: none; width: 100%; box-sizing: border-box;">
                         <!-- Saved Certificate Holders Button -->
                         <div style="margin-bottom: 20px; text-align: center;">
                             <button type="button" onclick="showCRMSavedCertificateHolders()" style="background: linear-gradient(135deg, #059669, #047857); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; box-shadow: 0 2px 4px rgba(5, 150, 105, 0.2); transition: all 0.3s ease;" onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(5, 150, 105, 0.3)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(5, 150, 105, 0.2)'">
@@ -36953,21 +38564,21 @@ window.sendCOIForPolicy = function(policyId) {
                             </button>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 20px;">
+                        <div class="form-group" style="margin-bottom: 20px; width: 100%; box-sizing: border-box; display: block;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 500;">Certificate Holder Name *</label>
-                            <input type="text" id="crmHolderName" placeholder="Business or individual name" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" required>
+                            <input type="text" id="crmHolderName" placeholder="Business or individual name" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" required>
                         </div>
-                        <div class="form-group" style="margin-bottom: 20px;">
+                        <div class="form-group" style="margin-bottom: 20px; width: 100%; box-sizing: border-box; display: block;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 500;">Certificate Holder Address *</label>
-                            <input type="text" id="crmHolderAddress" placeholder="Street address" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" required>
+                            <input type="text" id="crmHolderAddress" placeholder="Street address" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" required>
                         </div>
-                        <div class="form-group" style="margin-bottom: 20px;">
-                            <input type="text" id="crmHolderCity" placeholder="City, State ZIP" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="form-group" style="margin-bottom: 20px; width: 100%; box-sizing: border-box; display: block;">
+                            <input type="text" id="crmHolderCity" placeholder="City, State ZIP" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
                         </div>
                     </div>
 
-                    <div class="form-group" style="margin-bottom: 25px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div class="form-group" style="margin-bottom: 25px; width: 100%; box-sizing: border-box; display: block;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; width: 100%; box-sizing: border-box;">
                             <label style="font-weight: 600; color: #374151;"><strong>Email Recipients</strong></label>
                             <div style="display: flex; gap: 8px; align-items: center;">
                                 <div style="display: flex; align-items: center; gap: 4px; color: #666; font-size: 11px;">
@@ -36983,11 +38594,11 @@ window.sendCOIForPolicy = function(policyId) {
                                 </button>
                             </div>
                         </div>
-                        <div id="crmCoiEmailRecipientsContainer">
-                            <div class="crm-coi-email-recipient-row" style="display: flex; gap: 8px; margin-bottom: 8px;">
-                                <input type="email" class="crm-coi-email-recipient" required style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" placeholder="recipient@example.com" value="">
+                        <div id="crmCoiEmailRecipientsContainer" style="width: 100%; box-sizing: border-box;">
+                            <div class="crm-coi-email-recipient-row" style="display: flex; gap: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">
+                                <input type="email" class="crm-coi-email-recipient" required style="flex: 1; min-width: 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" placeholder="recipient@example.com" value="">
                                 <button type="button" onclick="removeCRMCOIEmailRecipient(this)" style="background: #dc3545; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                                    Remove
+                                    <i class="fas fa-trash"></i><span class="coi-remove-label"> Remove</span>
                                 </button>
                             </div>
                         </div>
@@ -37013,6 +38624,29 @@ window.sendCOIForPolicy = function(policyId) {
         const insuredCb = document.getElementById('addInsuredCheck');
         if (agentCb) { agentCb.checked = true; handleCheckboxChange('agent', true); }
         if (insuredCb) { insuredCb.checked = true; handleCheckboxChange('insured', true); }
+
+        // Force pixel widths — percentage-based widths fail due to CSS cascade issues.
+        // getBoundingClientRect() reads the actual rendered width of the modal box,
+        // then setProperty(..., 'important') writes inline !important styles which
+        // are the absolute highest CSS priority and cannot be overridden by any rule.
+        // Only apply pixel-width fix on mobile — desktop layout is handled by CSS alone
+        if (window.innerWidth <= 768) requestAnimationFrame(() => {
+            const m = document.getElementById('crmCOIModal');
+            if (!m) return;
+            const mb = m.querySelector('.modal-body');
+            if (!mb) return;
+            // clientWidth excludes scrollbar — gives true available content width
+            const fw = mb.clientWidth - 40; // subtract 20px padding × 2 sides
+            if (fw <= 0) return;
+            m.querySelectorAll('form, .form-group, #crmCoiEmailRecipientsContainer, .policy-info-banner, .form-actions, .crm-coi-email-recipient-row').forEach(el => {
+                const isFlex = el.classList.contains('crm-coi-email-recipient-row') || el.classList.contains('form-actions');
+                el.style.setProperty('display', isFlex ? 'flex' : 'block', 'important');
+                el.style.setProperty('width', fw + 'px', 'important');
+                el.style.setProperty('min-width', fw + 'px', 'important');
+                el.style.setProperty('box-sizing', 'border-box', 'important');
+                el.style.setProperty('flex-shrink', '0', 'important');
+            });
+        });
     }, 0);
 
     // Close modal when clicking outside - DISABLED per user request
@@ -37129,12 +38763,12 @@ window.addCRMCOIEmailRecipient = function() {
     const container = document.getElementById('crmCoiEmailRecipientsContainer');
     const newRow = document.createElement('div');
     newRow.className = 'crm-coi-email-recipient-row';
-    newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px;';
+    newRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 8px; width: 100%; box-sizing: border-box;';
 
     newRow.innerHTML = `
-        <input type="email" class="crm-coi-email-recipient" required style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" placeholder="recipient@example.com" value="">
+        <input type="email" class="crm-coi-email-recipient" required style="flex: 1; min-width: 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" placeholder="recipient@example.com" value="">
         <button type="button" onclick="removeCRMCOIEmailRecipient(this)" style="background: #dc3545; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-            Remove
+            <i class="fas fa-trash"></i><span class="coi-remove-label"> Remove</span>
         </button>
     `;
 
@@ -37905,7 +39539,7 @@ window.selectCRMSavedHolder = function(name, address, city, emailData) {
                            placeholder="recipient@example.com" value="${email.trim()}">
                     <button type="button" onclick="removeCRMCOIEmailRecipient(this)"
                             style="background: #dc3545; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                        Remove
+                        <i class="fas fa-trash"></i><span class="coi-remove-label"> Remove</span>
                     </button>
                 `;
 
@@ -37925,7 +39559,7 @@ window.selectCRMSavedHolder = function(name, address, city, emailData) {
                        placeholder="recipient@example.com" value="">
                 <button type="button" onclick="removeCRMCOIEmailRecipient(this)"
                         style="background: #dc3545; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                    Remove
+                    <i class="fas fa-trash"></i><span class="coi-remove-label"> Remove</span>
                 </button>
             `;
 
