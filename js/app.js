@@ -19860,6 +19860,31 @@ async function loadDownloadsView() {
 // Silently import parsed policies without a review modal — updates existing, creates new
 // ── IVANS note helpers ────────────────────────────────────────────────────────
 
+// Return "RPS" if carrier is one of the RPS-brokered companies
+function _ivansParentCompany(carrier) {
+    const c = (carrier || '').toLowerCase();
+    const rps = ['northland', 'canal', 'crum', 'nico', 'occidental', 'berkley'];
+    return rps.some(r => c.includes(r)) ? 'RPS' : '';
+}
+
+// Derive policy term from effective/expiration dates
+function _ivansCalcTerm(effDate, expDate) {
+    if (!effDate || !expDate) return '';
+    const days = Math.round((new Date(expDate) - new Date(effDate)) / 86400000);
+    if (days >= 355 && days <= 375) return '12 Months';
+    if (days >= 175 && days <= 185) return '6 Months';
+    return days > 0 ? 'Custom' : '';
+}
+
+// Map AL3 transaction code to New/Renewal/Rewrite
+function _ivansNewRenewal(txCode) {
+    const tc = (txCode || '').toUpperCase();
+    if (tc === 'NB') return 'New';
+    if (tc === 'RN') return 'Renewal';
+    if (tc === 'RW') return 'Rewrite';
+    return '';
+}
+
 // Return human-readable label for AL3 transaction code
 function _ivansTransactionLabel(code) {
     const map = { NB: 'New Business', EN: 'Endorsement', CN: 'Cancellation',
@@ -19925,6 +19950,12 @@ async function _jnSilentImport(parsedPolicies) {
             if (p.insuredName && !ep.clientName) ep.clientName = p.insuredName;
             if (p.phone && ep.contact && !ep.contact['Phone']) ep.contact['Phone'] = p.phone;
             if (p.email && ep.contact && !ep.contact['Email']) ep.contact['Email'] = p.email;
+            if (p.state && !ep.policyState) ep.policyState = p.state;
+            const _siPC = _ivansParentCompany(ep.carrier || p.carrier || '');
+            if (_siPC && !ep.parentCompany) ep.parentCompany = _siPC;
+            if (!ep.term) ep.term = _ivansCalcTerm(ep.effectiveDate, ep.expirationDate);
+            const _siNR = _ivansNewRenewal(p.transactionCode);
+            if (_siNR && !ep.newRenewal) ep.newRenewal = _siNR;
             ep.ivansUpdated = new Date().toISOString();
             ep.source = ep.source || 'jenesis';
             updated++;
@@ -19949,8 +19980,12 @@ async function _jnSilentImport(parsedPolicies) {
                 clientName:     p.insuredName || '',
                 client:         p.insuredName || '',
                 carrier:        p.carrier || '',
+                parentCompany:  _ivansParentCompany(p.carrier || ''),
+                policyState:    p.state || '',
                 effectiveDate:  p.effectiveDate || '',
                 expirationDate: p.expirationDate || '',
+                term:           _ivansCalcTerm(p.effectiveDate || '', p.expirationDate || ''),
+                newRenewal:     _ivansNewRenewal(p.transactionCode),
                 premium:        n ? `$${n.toLocaleString()}/yr` : '',
                 financial:      { 'Annual Premium': n || 0 },
                 lob:            p.lob || '',
@@ -22362,6 +22397,12 @@ async function confirmIvansImport() {
                     policies[idx].coverage = Object.assign({}, policies[idx].coverage || {}, p.coverages);
                 if (p.vehicles && p.vehicles.length) policies[idx].vehicles = p.vehicles;
                 if (p.drivers  && p.drivers.length)  policies[idx].drivers  = p.drivers;
+                if (p.state && !policies[idx].policyState) policies[idx].policyState = p.state;
+                const _ciPC = _ivansParentCompany(policies[idx].carrier || p.carrier || '');
+                if (_ciPC && !policies[idx].parentCompany) policies[idx].parentCompany = _ciPC;
+                if (!policies[idx].term) policies[idx].term = _ivansCalcTerm(policies[idx].effectiveDate, policies[idx].expirationDate);
+                const _ciNR = _ivansNewRenewal(p.transactionCode);
+                if (_ciNR && !policies[idx].newRenewal) policies[idx].newRenewal = _ciNR;
                 policies[idx].ivansUpdated = new Date().toISOString();
                 updated++;
                 // Upsert client record FIRST so clientId is set before server sync
@@ -22421,8 +22462,12 @@ async function confirmIvansImport() {
                 clientName:     p.insuredName||'',
                 client:         p.insuredName||'',
                 carrier:        p.carrier||'',
+                parentCompany:  _ivansParentCompany(p.carrier||''),
+                policyState:    p.state||'',
                 effectiveDate:  p.effectiveDate||'',
                 expirationDate: p.expirationDate||'',
+                term:           _ivansCalcTerm(p.effectiveDate||'', p.expirationDate||''),
+                newRenewal:     _ivansNewRenewal(p.transactionCode),
                 premium:        n ? `$${n.toLocaleString()}/yr` : '',
                 financial:      { 'Annual Premium': n||0 },
                 lob:            p.lob||'',
@@ -23014,29 +23059,29 @@ function showPolicyDetailsModal(policy) {
         <div class="policy-detail-page" id="policyDetailPage" style="min-height: 100vh; background: #f3f4f6;">
 
             <!-- Page Header -->
-            <div style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
-                <div style="display: flex; align-items: center; gap: 16px; height: 64px;">
-                    <button onclick="loadPoliciesView()" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+            <div class="pdp-header" style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
+                <div class="pdp-header-inner" style="display: flex; align-items: center; gap: 16px; height: 64px;">
+                    <button class="pdp-back-btn" onclick="loadPoliciesView()" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
                         <i class="fas fa-arrow-left"></i> Back to Policies
                     </button>
-                    ${policyTypeLabel ? `<span style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
-                    <h1 style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
+                    ${policyTypeLabel ? `<span class="pdp-type-badge" style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
+                    <h1 class="pdp-policy-num" style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
                         ${policy.policyNumber || policy.id}
                     </h1>
-                    ${premium ? `<span style="color: rgba(255,255,255,0.9); font-size: 18px; font-weight: 700;">${premium}</span>` : ''}
+                    ${premium ? `<span class="pdp-premium" style="color: rgba(255,255,255,0.9); font-size: 18px; font-weight: 700;">${premium}</span>` : ''}
                 </div>
             </div>
 
             <!-- Status + Action Bar -->
-            <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 14px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
-                <div style="display: flex; align-items: center; gap: 14px;">
+            <div class="pdp-status-bar" style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 14px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                <div class="pdp-status-info" style="display: flex; align-items: center; gap: 14px;">
                     <span class="status-badge ${statusClass}" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; font-weight: 500;">
                         ${policy.policyStatus || policy.status || 'Active'}
                     </span>
-                    ${policy.carrier ? `<span style="color: #374151; font-size: 15px; font-weight: 600;"><i class="fas fa-building" style="color:#6b7280;margin-right:6px;"></i>${policy.carrier}</span>` : ''}
-                    ${policy.clientName ? `<span style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.clientName}</span>` : ''}
+                    ${policy.carrier ? `<span class="pdp-carrier" style="color: #374151; font-size: 15px; font-weight: 600;"><i class="fas fa-building" style="color:#6b7280;margin-right:6px;"></i>${policy.carrier}</span>` : ''}
+                    ${policy.clientName ? `<span class="pdp-client" style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.clientName}</span>` : ''}
                 </div>
-                <div style="display: flex; gap: 10px;">
+                <div class="pdp-actions" style="display: flex; gap: 10px;">
                     <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-save"></i> Save Policy
                     </button>
@@ -23050,7 +23095,7 @@ function showPolicyDetailsModal(policy) {
             </div>
 
             <!-- Tab Navigation -->
-            <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0 32px; overflow-x: auto; white-space: nowrap;">
+            <div class="pdp-tabs" style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0 32px; overflow-x: auto; white-space: nowrap;">
                 ${tabs.map((tab, index) => `
                     <button class="policy-view-tab-btn ${index === 0 ? 'pv-tab-active' : ''}" data-tab="${tab.id}" onclick="switchViewTab('${tab.id}')" style="display: inline-flex; align-items: center; gap: 7px; padding: 16px 20px; font-size: 14px; font-weight: 500; background: none; border: none; border-bottom: 3px solid ${index === 0 ? '#0066cc' : 'transparent'}; color: ${index === 0 ? '#0066cc' : '#6b7280'}; cursor: pointer; transition: all 0.15s; white-space: nowrap;">
                         <i class="${tab.icon}"></i> ${tab.name}
@@ -23059,7 +23104,7 @@ function showPolicyDetailsModal(policy) {
             </div>
 
             <!-- Tab Contents -->
-            <div style="padding: 24px 32px;">
+            <div class="pdp-tab-contents" style="padding: 24px 32px;">
                 ${tabs.map((tab, index) => `
                     <div id="${tab.id}-view-content" class="tab-content" style="display: ${index === 0 ? 'block' : 'none'};">
                         ${generateViewTabContent(tab.id, policy)}
@@ -23276,9 +23321,9 @@ function generateViewTabContent(tabId, policy) {
             const newRenewalOpts = ['','New','Renewal','Rewrite'];
             const policyId = policy.id || policy.policyNumber || '';
             return `
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                <div class="pdp-overview-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
                     <!-- Card 1: Policy -->
-                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div class="pdp-card" style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         ${_hOV('Policy')}
                         ${_fOV('policyNumber','Policy #', policy.policyNumber||'')}
                         ${_fOV('carrier','Company', policy.carrier||'')}
@@ -23288,7 +23333,7 @@ function generateViewTabContent(tabId, policy) {
                         ${_fOV('agent','User / Agent', policy.agent||'')}
                     </div>
                     <!-- Card 2: Term & Dates -->
-                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div class="pdp-card" style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         ${_hOV('Term & Dates')}
                         ${_sOV('term','Term', policy.term||'', termOpts)}
                         ${_fOV('effectiveDate','Effective Date', policy.effectiveDate||'', 'date')}
@@ -23296,9 +23341,9 @@ function generateViewTabContent(tabId, policy) {
                         ${_fOV('termDatePaid','Term Date Paid', policy.termDatePaid||'', 'date')}
                     </div>
                     <!-- Card 3: Status (full width) -->
-                    <div style="grid-column:1/-1;padding:16px 20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div class="pdp-card pdp-status-card" style="grid-column:1/-1;padding:16px 20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         ${_hOV('Status')}
-                        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0 16px;">
+                        <div class="pdp-status-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:0 16px;">
                             <div>${_sOV('policyStatus','Policy Status', policy.policyStatus||'', statusOpts)}</div>
                             <div>${_sOV('newRenewal','New / Renewal', policy.newRenewal||'', newRenewalOpts)}</div>
                             <div>${_fOV('rewrite','Rewrite Policy #', policy.rewrite||'')}</div>
@@ -23359,10 +23404,10 @@ function generateViewTabContent(tabId, policy) {
                 </div>`;
 
             return `
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                <div class="pdp-contact-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
 
                     <!-- Card: Named Insured / Owner -->
-                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div class="pdp-card" style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">Named Insured</div>
                         ${isCommContact && businessNameC ? _row('Business Name', `<strong>${businessNameC}</strong>`) : ''}
                         ${_row(isCommContact ? 'Owner / Principal' : 'Owner Name', ownerName || policy.insuredName || policy.clientName || '')}
@@ -23644,7 +23689,7 @@ function generateViewTabContent(tabId, policy) {
 
                 return `
                     ${alSection}
-                    <div style="display:grid;grid-template-columns:44% 56%;gap:20px;align-items:start;">
+                    <div class="pdp-coverage-grid" style="display:grid;grid-template-columns:44% 56%;gap:20px;align-items:start;">
 
                         <!-- Left: Coverages -->
                         <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;">
@@ -23828,7 +23873,7 @@ function generateViewTabContent(tabId, policy) {
             
         case 'documents':
             return `
-                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; align-items: start;">
+                <div class="pdp-docs-grid" style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; align-items: start;">
 
                     <!-- LEFT COLUMN (2fr): COI → ID Cards → App Submissions → Loss Runs -->
                     <div style="display: flex; flex-direction: column; gap: 20px;">
@@ -23961,10 +24006,10 @@ function generateViewTabContent(tabId, policy) {
             const payFreqOpts = ['','Annual','Semi-Annual','Quarterly','Bi-Monthly','Monthly'];
             const prod1fin = (policy.producers||[])[0] || {};
             return `
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                <div class="pdp-financials-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
 
                     <!-- Card: Premium -->
-                    <div style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div class="pdp-card" style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         ${_hF('Premium')}
                         ${_fF('premium','Premium', policy.premium||'')}
                         ${_fF('companyFees','Company Fees', policy.companyFees||'')}

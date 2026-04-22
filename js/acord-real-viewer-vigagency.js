@@ -88,11 +88,11 @@ function getCompanyInfoForAgency(agency, agent, united) {
             email: 'Contact@uigagency.com',
             phone: '(330) 259-7438',
             fax: '(330) 259-7439',
-            address1: '2888 Nationwide Pkwy',
+            address1: '435 Abbeyville Rd. Unit F',
             address2: '',
-            city: 'Brunswick',
+            city: 'Medina',
             state: 'OH',
-            zip: '44212'
+            zip: '44256'
         };
     } else {
         console.log('🔄 Using Vanguard Insurance Group LLC company info');
@@ -310,7 +310,7 @@ window.createRealACORDViewer = async function(policyId, policyData = null) {
                 </span>
             </div>
             <div class="coi-action-buttons" style="display: flex; gap: 10px; align-items: center;">
-                <button type="button" class="coi-btn coi-btn-secondary" onclick="document.getElementById('acordViewerModal').remove()" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">
+                <button type="button" class="coi-btn coi-btn-secondary coi-cancel-btn" onclick="document.getElementById('acordViewerModal').remove()" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">
                     <i class="fas fa-times"></i>
                     Cancel
                 </button>
@@ -330,6 +330,16 @@ window.createRealACORDViewer = async function(policyId, policyData = null) {
         modalContent.appendChild(actionFooter);
         modal.appendChild(modalContent);
         document.body.appendChild(modal);
+
+        // Mobile: swap Cancel button → Sign As
+        if (window.innerWidth <= 768) {
+            const cancelBtn = modal.querySelector('.coi-cancel-btn');
+            if (cancelBtn) {
+                cancelBtn.style.background = '#8b5cf6';
+                cancelBtn.innerHTML = '<i class="fas fa-signature"></i> Sign As';
+                cancelBtn.onclick = function() { window.showSignAsModal && window.showSignAsModal(policyId); };
+            }
+        }
 
         console.log('✅ Created policy viewer modal');
     }
@@ -532,6 +542,11 @@ async function loadRealPDF(policyId, policyData) {
             }
         }
 
+        // Mobile: attach pinch-to-zoom exclusively to the PDF container
+        if (window.innerWidth <= 768) {
+            _initPdfPinchZoom();
+        }
+
     } catch (error) {
         console.error('Error loading PDF:', error);
         // Fallback to embedded PDF
@@ -539,6 +554,97 @@ async function loadRealPDF(policyId, policyData) {
             <embed src="/ACORD_25_fillable.pdf#zoom=125" type="application/pdf" width="100%" height="100%" style="min-height: 800px;">
         `;
     }
+}
+
+// ── Pinch-to-zoom for PDF container on mobile ────────────────────────────────
+function _initPdfPinchZoom() {
+    const container = document.querySelector('.acord-container .pdf-container');
+    const wrapper = container && container.querySelector(':scope > div');
+    if (!container || !wrapper) return;
+
+    let currentScale = 1;
+    let startDist = 0;
+    let startScale = 1;
+    let originX = 0, originY = 0;
+
+    function getDist(touches) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function getMidpoint(touches) {
+        const rect = container.getBoundingClientRect();
+        return {
+            x: ((touches[0].clientX + touches[1].clientX) / 2) - rect.left + container.scrollLeft,
+            y: ((touches[0].clientY + touches[1].clientY) / 2) - rect.top + container.scrollTop
+        };
+    }
+
+    let isPinching = false;
+
+    container.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            e.stopPropagation();
+            isPinching = true;
+            startDist = getDist(e.touches);
+            startScale = currentScale;
+            const mid = getMidpoint(e.touches);
+            originX = mid.x;
+            originY = mid.y;
+            wrapper.style.transition = 'none';
+        }
+    }, { passive: false });
+
+    container.addEventListener('touchmove', function(e) {
+        if (e.touches.length === 2 && isPinching) {
+            e.preventDefault();
+            e.stopPropagation();
+            const dist = getDist(e.touches);
+            const newScale = Math.min(3, Math.max(0.25, startScale * (dist / startDist)));
+            currentScale = newScale;
+            wrapper.style.transformOrigin = `${originX}px ${originY}px`;
+            wrapper.style.transform = `scale(${currentScale})`;
+        }
+    }, { passive: false });
+
+    container.addEventListener('touchend', function(e) {
+        if (isPinching && e.touches.length < 2) {
+            isPinching = false;
+            // No snap-back — stay at whatever zoom level the user set
+        }
+    }, { passive: false });
+
+    // Double-tap to toggle zoom
+    let lastTap = 0;
+    container.addEventListener('touchend', function(e) {
+        if (isPinching) return;
+        if (e.touches.length === 0 && e.changedTouches.length === 1) {
+            const now = Date.now();
+            if (now - lastTap < 300) {
+                e.preventDefault();
+                const targetScale = currentScale > 1.1 ? 1 : 2;
+                wrapper.style.transition = 'transform 0.25s ease';
+                if (targetScale === 1) {
+                    currentScale = 1;
+                    wrapper.style.transform = 'scale(1)';
+                    wrapper.style.transformOrigin = 'top left';
+                } else {
+                    const rect = container.getBoundingClientRect();
+                    const x = e.changedTouches[0].clientX - rect.left + container.scrollLeft;
+                    const y = e.changedTouches[0].clientY - rect.top + container.scrollTop;
+                    currentScale = targetScale;
+                    wrapper.style.transformOrigin = `${x}px ${y}px`;
+                    wrapper.style.transform = `scale(${currentScale})`;
+                }
+                setTimeout(() => { wrapper.style.transition = 'none'; }, 300);
+                lastTap = 0; // Reset to prevent triple-tap
+            } else {
+                lastTap = now;
+            }
+        }
+    }, { passive: false });
 }
 
 // Render a page of the PDF
@@ -700,8 +806,8 @@ function createRealFormFields(policyId, policyData) {
           value: (() => {
             const raw = policyData?.carrier || policyData?.overview?.['Carrier'] || '';
             const lc = raw.toLowerCase().replace(/\s+/g, '');
-            if (lc.startsWith('geico')) return 'GEICO';
-            if (lc.startsWith('progressive')) return 'Progressive';
+            if (lc.startsWith('geico')) return 'GEICO MARINE INSURANCE COMPANY';
+            if (lc.startsWith('progressive')) return 'Progressive Preferred Insurance Co.';
             if (lc.startsWith('northland')) return 'NORTHLAND INSURANCE COMPANY';
             return raw;
           })() },
@@ -1078,12 +1184,7 @@ function createRealFormFields(policyId, policyData) {
         { id: 'damageRented', x: 684, y: 406, width: 83, height: 16,
           value: hasGL ? '100,000' : '' },
         { id: 'medExp', x: 684, y: 421, width: 83, height: 16,
-          value: (function() {
-              if (!hasGL) return '';
-              const medicalValue = policyData?.coverage?.medical_payments || policyData?.coverage?.['Medical Payments'] || '5,000';
-              console.log('💊 Medical Payments value:', medicalValue, 'from coverage:', policyData?.coverage);
-              return medicalValue;
-          })() },
+          value: hasGL ? '5,000' : '' },
         { id: 'personalAdv', x: 684, y: 437, width: 83, height: 16,
           value: hasGL ? (() => {
               if (_glOcc > 0) return _glOcc.toLocaleString();
@@ -1862,7 +1963,11 @@ window.selectSignature = function(signatureName) {
             producer: 'United Insurance Group',
             email: 'Contact@uigagency.com',
             phone: '(330) 259-7438',
-            fax: '(330) 259-7439'
+            fax: '(330) 259-7439',
+            address1: '435 Abbeyville Rd. Unit F',
+            city: 'Medina',
+            state: 'OH',
+            zip: '44256'
         });
     } else {
         // Switch back to standard Vanguard info for Grant Corp or Hunter Brooks
@@ -1871,7 +1976,11 @@ window.selectSignature = function(signatureName) {
             producer: 'Vanguard Insurance Group LLC',
             email: 'contact@vigagency.com',
             phone: '(866) 628-9441',
-            fax: '(330) 779-1097'
+            fax: '(330) 779-1097',
+            address1: '2888 Nationwide Pkwy',
+            city: 'Brunswick',
+            state: 'OH',
+            zip: '44212'
         });
     }
 
@@ -1941,6 +2050,24 @@ window.updateCompanyInfo = function(companyData) {
         faxField.dispatchEvent(new Event('input', { bubbles: true }));
         window.realPdfState.formData['fax'] = companyData.fax;
         console.log('✅ Updated fax to:', companyData.fax);
+    }
+
+    // Update address line 1
+    const addr1Field = document.getElementById('field_producerAddress1');
+    if (addr1Field && companyData.address1) {
+        addr1Field.value = companyData.address1;
+        addr1Field.dispatchEvent(new Event('input', { bubbles: true }));
+        window.realPdfState.formData['producerAddress1'] = companyData.address1;
+        console.log('✅ Updated producerAddress1 to:', companyData.address1);
+    }
+
+    // Update zip
+    const zipField = document.getElementById('field_producerZip');
+    if (zipField && companyData.zip) {
+        zipField.value = companyData.zip;
+        zipField.dispatchEvent(new Event('input', { bubbles: true }));
+        window.realPdfState.formData['producerZip'] = companyData.zip;
+        console.log('✅ Updated producerZip to:', companyData.zip);
     }
 
     console.log('✅ Company information update complete');
