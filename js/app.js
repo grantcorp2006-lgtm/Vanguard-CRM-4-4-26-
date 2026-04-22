@@ -23040,9 +23040,6 @@ function showPolicyDetailsModal(policy) {
                     <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-save"></i> Save Policy
                     </button>
-                    <button onclick="editPolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#0066cc;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
-                        <i class="fas fa-edit"></i> Edit
-                    </button>
                     <button onclick="printPolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:white;color:#374151;border:1px solid #d1d5db;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-print"></i> Print
                     </button>
@@ -24752,42 +24749,6 @@ function getPolicyTypeLabel(policyType) {
 }
 
 
-async function editPolicy(policyId) {
-    const idStr = String(policyId);
-
-    // Always fetch fresh data from server so IVANS-imported fields are present
-    let policy = null;
-    try {
-        const resp = await fetch(`/api/policies/${encodeURIComponent(idStr)}`);
-        if (resp.ok) {
-            const data = await resp.json();
-            // Server returns the policy object directly (not wrapped)
-            if (data && typeof data === 'object' && !Array.isArray(data) && (data.id || data.policyNumber)) {
-                policy = data;
-                console.log('✅ editPolicy: loaded from server, vehicles:', policy.vehicles?.length || 0, 'drivers:', policy.drivers?.length || 0);
-            }
-        }
-    } catch (e) {
-        console.warn('Server fetch failed, falling back to localStorage:', e);
-    }
-
-    // Fallback to localStorage if server fetch failed or returned invalid data
-    if (!policy || typeof policy !== 'object' || (!policy.id && !policy.policyNumber)) {
-        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-        policy = policies.find(p => String(p.id) === idStr || p.policyNumber === idStr);
-    }
-
-    if (policy) {
-        // Open the policy modal in edit mode with the existing policy data
-        if (typeof showPolicyModal === 'function') {
-            showPolicyModal(policy);
-        } else {
-            showNotification('Edit feature coming soon', 'info');
-        }
-    } else {
-        showNotification('Policy not found', 'error');
-    }
-}
 
 async function deletePolicy(policyId) {
     if (confirm('Are you sure you want to delete this policy?')) {
@@ -25056,7 +25017,6 @@ async function generatePolicyRows() {
                 <td>
                     <div class="action-buttons">
                         <button class="btn-icon" onclick="viewPolicy('${policyId}')"><i class="fas fa-eye"></i></button>
-                        <button class="btn-icon" onclick="editPolicy('${policyId}')"><i class="fas fa-edit"></i></button>
                         <button class="btn-icon" onclick="renewPolicy('${policyId}')"><i class="fas fa-sync"></i></button>
                         <button class="btn-icon btn-icon-danger" onclick="deletePolicy('${policyId}')"><i class="fas fa-trash"></i></button>
                     </div>
