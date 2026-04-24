@@ -1560,6 +1560,24 @@ app.post('/api/id-cards', (req, res) => {
     });
 });
 
+// Delete an ID card
+app.delete('/api/id-cards/:cardId', (req, res) => {
+    const { cardId } = req.params;
+    console.log('🗑️ ID Cards API: Deleting ID card:', cardId);
+
+    db.run('DELETE FROM id_cards WHERE id = ?', [cardId], function(err) {
+        if (err) {
+            console.error('Error deleting ID card:', err);
+            return res.status(500).json({ error: 'Failed to delete ID card' });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'ID card not found' });
+        }
+        console.log('✅ ID Cards API: Deleted ID card:', cardId);
+        res.json({ success: true });
+    });
+});
+
 // Migrate COI documents from localStorage to database
 app.post('/api/coi/migrate', (req, res) => {
     const documents = req.body.documents;
@@ -8623,7 +8641,7 @@ app.post('/api/documents', uploadDocumentFiles.single('file'), (req, res) => {
         });
     }
 
-    const { clientId, policyId, uploadedBy } = req.body;
+    const { clientId, policyId, uploadedBy, docType } = req.body;
 
     if (!clientId) {
         // Clean up uploaded file if clientId is missing
@@ -8646,13 +8664,14 @@ app.post('/api/documents', uploadDocumentFiles.single('file'), (req, res) => {
         file_path: req.file.path,
         file_size: req.file.size,
         file_type: req.file.mimetype,
-        uploaded_by: uploadedBy || 'Unknown'
+        uploaded_by: uploadedBy || 'Unknown',
+        doc_type: docType || 'general'
     };
 
     // Save metadata to database
     db.run(
-        `INSERT INTO documents (id, client_id, policy_id, filename, original_name, file_path, file_size, file_type, uploaded_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO documents (id, client_id, policy_id, filename, original_name, file_path, file_size, file_type, uploaded_by, doc_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             documentData.id,
             documentData.client_id,
@@ -8662,7 +8681,8 @@ app.post('/api/documents', uploadDocumentFiles.single('file'), (req, res) => {
             documentData.file_path,
             documentData.file_size,
             documentData.file_type,
-            documentData.uploaded_by
+            documentData.uploaded_by,
+            documentData.doc_type
         ],
         function(err) {
             if (err) {
@@ -8704,12 +8724,12 @@ app.get('/api/documents', (req, res) => {
 
     if (clientId) {
         query = `SELECT id, original_name as name, file_type as type, file_size as size,
-                        upload_date as uploadDate, uploaded_by as uploadedBy
+                        upload_date as uploadDate, uploaded_by as uploadedBy, doc_type as docType
                  FROM documents WHERE client_id = ? ORDER BY upload_date DESC`;
         params = [clientId];
     } else {
         query = `SELECT id, original_name as name, file_type as type, file_size as size,
-                        upload_date as uploadDate, uploaded_by as uploadedBy
+                        upload_date as uploadDate, uploaded_by as uploadedBy, doc_type as docType
                  FROM documents WHERE policy_id = ? ORDER BY upload_date DESC`;
         params = [policyId];
     }

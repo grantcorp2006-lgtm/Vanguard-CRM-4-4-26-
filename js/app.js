@@ -23208,6 +23208,9 @@ function showPolicyDetailsModal(policy) {
         if (window.loadIdCardsFromServer) {
             loadIdCardsFromServer(policy.id);
         }
+        if (typeof loadTypedDocs === 'function') {
+            loadTypedDocs(policy.id);
+        }
     }, 100);
 
     // Load application submissions and loss runs into modal-specific containers.
@@ -24001,6 +24004,40 @@ function generateViewTabContent(tabId, policy) {
                                     <i class="fas fa-id-card" style="font-size: 32px; margin-bottom: 10px; opacity: 0.3;"></i>
                                     <p style="margin: 0; font-size: 14px;">No ID cards uploaded yet</p>
                                     <p style="margin: 6px 0 0 0; font-size: 12px; opacity: 0.7;">Click Upload to add ID cards</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dec Page -->
+                        <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Dec Page</h3>
+                                <button onclick="window.uploadPolicyDocType('${policy.id}', 'dec_page')" class="btn-secondary" style="padding: 6px 14px; font-size: 12px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
+                                    <i class="fas fa-upload"></i> Upload
+                                </button>
+                            </div>
+                            <div id="decPageContainer-${policy.id}" style="min-height: 60px;">
+                                <div style="text-align: center; padding: 24px 20px; color: #6b7280;">
+                                    <i class="fas fa-file-contract" style="font-size: 32px; margin-bottom: 10px; opacity: 0.3;"></i>
+                                    <p style="margin: 0; font-size: 14px;">No dec page uploaded yet</p>
+                                    <p style="margin: 6px 0 0 0; font-size: 12px; opacity: 0.7;">Click Upload to add a declarations page</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Payment Schedule -->
+                        <div class="form-section" style="padding: 20px; background: linear-gradient(to bottom, #f9fafb, #ffffff); border-radius: 12px; border: 1px solid #e5e7eb;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Payment Schedule</h3>
+                                <button onclick="window.uploadPolicyDocType('${policy.id}', 'payment_schedule')" class="btn-secondary" style="padding: 6px 14px; font-size: 12px; border-radius: 8px; background: #10b981; border-color: #10b981; color: white;">
+                                    <i class="fas fa-upload"></i> Upload
+                                </button>
+                            </div>
+                            <div id="paymentScheduleContainer-${policy.id}" style="min-height: 60px;">
+                                <div style="text-align: center; padding: 24px 20px; color: #6b7280;">
+                                    <i class="fas fa-calendar-alt" style="font-size: 32px; margin-bottom: 10px; opacity: 0.3;"></i>
+                                    <p style="margin: 0; font-size: 14px;">No payment schedule uploaded yet</p>
+                                    <p style="margin: 6px 0 0 0; font-size: 12px; opacity: 0.7;">Click Upload to add a payment schedule</p>
                                 </div>
                             </div>
                         </div>
@@ -37875,11 +37912,116 @@ window.uploadPolicyDocument = function(policyId) {
     input.click();
 };
 
+// Upload a typed document (dec_page, payment_schedule) for a policy
+window.uploadPolicyDocType = function(policyId, docType) {
+    const labels = { dec_page: 'Dec Page', payment_schedule: 'Payment Schedule' };
+    const label = labels[docType] || docType;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.tif,.tiff';
+
+    input.onchange = async function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        showNotification(`Uploading ${label}...`, 'info');
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('policyId', policyId);
+            formData.append('clientId', policyId); // use policyId as fallback clientId
+            formData.append('docType', docType);
+            formData.append('uploadedBy', sessionStorage.getItem('vanguard_user') || 'User');
+
+            const response = await fetch('/api/documents', { method: 'POST', body: formData });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || `HTTP ${response.status}`);
+            }
+
+            showNotification(`${label} uploaded successfully`, 'success');
+            loadTypedDocs(policyId);
+        } catch (error) {
+            console.error(`Upload ${docType} error:`, error);
+            showNotification(`Error uploading ${label}`, 'error');
+        }
+    };
+
+    input.click();
+};
+
+// Load dec_page and payment_schedule docs into their containers
+async function loadTypedDocs(policyId) {
+    try {
+        const response = await fetch(`/api/documents?policyId=${policyId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const docs = data.documents || [];
+
+        renderTypedDocContainer(policyId, 'dec_page', 'decPageContainer', docs, 'fa-file-contract', 'Dec Page');
+        renderTypedDocContainer(policyId, 'payment_schedule', 'paymentScheduleContainer', docs, 'fa-calendar-alt', 'Payment Schedule');
+    } catch (e) {
+        console.error('Error loading typed docs:', e);
+    }
+}
+
+function renderTypedDocContainer(policyId, docType, containerPrefix, allDocs, icon, label) {
+    const container = document.getElementById(`${containerPrefix}-${policyId}`);
+    if (!container) return;
+
+    const typed = allDocs.filter(d => d.docType === docType);
+    if (typed.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 24px 20px; color: #6b7280;">
+                <i class="fas ${icon}" style="font-size: 32px; margin-bottom: 10px; opacity: 0.3;"></i>
+                <p style="margin: 0; font-size: 14px;">No ${label.toLowerCase()} uploaded yet</p>
+                <p style="margin: 6px 0 0 0; font-size: 12px; opacity: 0.7;">Click Upload to add a ${label.toLowerCase()}</p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = typed.map(doc => {
+        const uploadDate = doc.uploadDate ? new Date(doc.uploadDate).toLocaleDateString() : '';
+        return `
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center;">
+                    <i class="fas ${doc.type && doc.type.includes('pdf') ? 'fa-file-pdf' : 'fa-file-image'}" style="color: ${doc.type && doc.type.includes('pdf') ? '#ef4444' : '#10b981'}; font-size: 20px; margin-right: 12px;"></i>
+                    <div>
+                        <div style="font-weight: 500; color: #111827; font-size: 13px;">${doc.name || 'Document'}</div>
+                        <div style="font-size: 11px; color: #6b7280;">${uploadDate}${doc.uploadedBy ? ' • ' + doc.uploadedBy : ''}</div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                    <button onclick="window.downloadPolicyDocument('${policyId}', '${doc.id}')" style="padding: 5px 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <button onclick="window.deleteTypedDoc('${policyId}', '${doc.id}', '${docType}')" style="padding: 5px 10px; background: #ef4444; color: white; border: none; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+window.deleteTypedDoc = async function(policyId, docId, docType) {
+    if (!confirm('Delete this document?')) return;
+    try {
+        await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+        showNotification('Document deleted', 'success');
+        loadTypedDocs(policyId);
+    } catch (e) {
+        showNotification('Error deleting document', 'error');
+    }
+};
+
 // Upload single policy file to server
 async function uploadPolicyFileToServer(file, policyId) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('policyId', policyId);
+    formData.append('clientId', policyId);
     formData.append('uploadedBy', sessionStorage.getItem('vanguard_user') || 'User');
 
     const response = await fetch('/api/documents', {
@@ -40684,18 +40826,28 @@ async function loadIdCardsFromServer(policyId) {
             console.log(`📥 Loaded ${serverIdCards.length} ID cards from server`);
 
             // Merge with localStorage (server is source of truth)
+            // Strip dataUrl from cards before localStorage — the binary data
+            // is served from the server on demand and blows the quota
             if (serverIdCards.length > 0) {
-                // Get existing localStorage cards
-                let localIdCards = JSON.parse(localStorage.getItem('id_cards') || '[]');
+                const lightCards = serverIdCards.map(card => {
+                    const { dataUrl, data_url, ...rest } = card;
+                    return rest;
+                });
+
+                let localIdCards = [];
+                try { localIdCards = JSON.parse(localStorage.getItem('id_cards') || '[]'); } catch { localIdCards = []; }
 
                 // Remove any existing cards for this policy from localStorage
                 localIdCards = localIdCards.filter(card => card.policyId !== policyId);
 
-                // Add server cards to localStorage
-                localIdCards.push(...serverIdCards);
+                // Add lightweight server cards to localStorage
+                localIdCards.push(...lightCards);
 
-                // Update localStorage
-                localStorage.setItem('id_cards', JSON.stringify(localIdCards));
+                try {
+                    localStorage.setItem('id_cards', JSON.stringify(localIdCards));
+                } catch (e) {
+                    console.warn('⚠️ QUOTA: Could not save id_cards to localStorage, using server-only mode');
+                }
             }
 
             // Refresh the display
@@ -40780,12 +40932,35 @@ window.refreshIdCardsDisplay = function(policyId) {
 };
 
 // Function to view an ID card
-window.viewIdCard = function(cardId) {
+window.viewIdCard = async function(cardId) {
     const idCards = JSON.parse(localStorage.getItem('id_cards') || '[]');
     const card = idCards.find(c => c.id === cardId);
 
     if (!card) {
         showNotification('ID card not found', 'error');
+        return;
+    }
+
+    // If dataUrl not in localStorage, fetch from server
+    let dataUrl = card.dataUrl || card.data_url;
+    if (!dataUrl) {
+        try {
+            const API_URL = window.location.hostname.includes('nip.io')
+                ? `https://${window.location.hostname.split('.')[0]}.nip.io/api`
+                : window.location.hostname === 'localhost'
+                ? 'http://localhost:3001/api'
+                : 'https://162-220-14-239.nip.io/api';
+            const resp = await fetch(`${API_URL}/id-cards/${card.policyId}`);
+            if (resp.ok) {
+                const serverCards = await resp.json();
+                const serverCard = serverCards.find(c => c.id === cardId);
+                if (serverCard) dataUrl = serverCard.dataUrl || serverCard.data_url;
+            }
+        } catch (e) { console.error('Error fetching ID card from server:', e); }
+    }
+
+    if (!dataUrl) {
+        showNotification('ID card image not available', 'error');
         return;
     }
 
@@ -40802,8 +40977,8 @@ window.viewIdCard = function(cardId) {
             </div>
             <div style="text-align: center; height: calc(100% - 80px);">
                 ${card.type.includes('pdf')
-                    ? `<iframe src="${card.dataUrl}" style="width: 100%; height: 100%; border: 2px solid #e5e7eb; border-radius: 8px;"></iframe>`
-                    : `<img src="${card.dataUrl}" style="max-width: 100%; max-height: 100%; object-fit: contain; border: 2px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">`
+                    ? `<iframe src="${dataUrl}" style="width: 100%; height: 100%; border: 2px solid #e5e7eb; border-radius: 8px;"></iframe>`
+                    : `<img src="${dataUrl}" style="max-width: 100%; max-height: 100%; object-fit: contain; border: 2px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">`
                 }
             </div>
         </div>
@@ -40813,7 +40988,7 @@ window.viewIdCard = function(cardId) {
 };
 
 // Function to download an ID card
-window.downloadIdCard = function(cardId) {
+window.downloadIdCard = async function(cardId) {
     const idCards = JSON.parse(localStorage.getItem('id_cards') || '[]');
     const card = idCards.find(c => c.id === cardId);
 
@@ -40822,9 +40997,32 @@ window.downloadIdCard = function(cardId) {
         return;
     }
 
+    // If dataUrl not in localStorage, fetch from server
+    let dataUrl = card.dataUrl || card.data_url;
+    if (!dataUrl) {
+        try {
+            const API_URL = window.location.hostname.includes('nip.io')
+                ? `https://${window.location.hostname.split('.')[0]}.nip.io/api`
+                : window.location.hostname === 'localhost'
+                ? 'http://localhost:3001/api'
+                : 'https://162-220-14-239.nip.io/api';
+            const resp = await fetch(`${API_URL}/id-cards/${card.policyId}`);
+            if (resp.ok) {
+                const serverCards = await resp.json();
+                const serverCard = serverCards.find(c => c.id === cardId);
+                if (serverCard) dataUrl = serverCard.dataUrl || serverCard.data_url;
+            }
+        } catch (e) { console.error('Error fetching ID card from server:', e); }
+    }
+
+    if (!dataUrl) {
+        showNotification('ID card data not available', 'error');
+        return;
+    }
+
     // Create download link
     const link = document.createElement('a');
-    link.href = card.dataUrl;
+    link.href = dataUrl;
     link.download = card.name;
     link.style.display = 'none';
 
@@ -40836,15 +41034,33 @@ window.downloadIdCard = function(cardId) {
 };
 
 // Function to delete an ID card
-window.deleteIdCard = function(cardId, policyId) {
+window.deleteIdCard = async function(cardId, policyId) {
     if (!confirm('Are you sure you want to delete this ID card?')) {
         return;
     }
 
-    const idCards = JSON.parse(localStorage.getItem('id_cards') || '[]');
-    const filteredCards = idCards.filter(c => c.id !== cardId);
+    // Delete from server first
+    try {
+        const API_URL = window.location.hostname.includes('nip.io')
+            ? `https://${window.location.hostname.split('.')[0]}.nip.io/api`
+            : window.location.hostname === 'localhost'
+            ? 'http://localhost:3001/api'
+            : 'https://162-220-14-239.nip.io/api';
 
-    localStorage.setItem('id_cards', JSON.stringify(filteredCards));
+        const resp = await fetch(`${API_URL}/id-cards/${cardId}`, { method: 'DELETE' });
+        if (!resp.ok) {
+            console.error('Server delete failed:', resp.status);
+        }
+    } catch (e) {
+        console.error('Error deleting ID card from server:', e);
+    }
+
+    // Also remove from localStorage
+    try {
+        const idCards = JSON.parse(localStorage.getItem('id_cards') || '[]');
+        const filteredCards = idCards.filter(c => c.id !== cardId);
+        localStorage.setItem('id_cards', JSON.stringify(filteredCards));
+    } catch (e) { /* quota or parse error, ignore */ }
 
     // Refresh the display
     refreshIdCardsDisplay(policyId);
