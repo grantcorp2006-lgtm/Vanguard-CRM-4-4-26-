@@ -24249,7 +24249,8 @@ function generateViewTabContent(tabId, policy) {
                                         <p style="margin:0;font-size:13px;">No endorsement notes</p>
                                     </div>`;
                                 }
-                                return `<p style="margin:0;white-space:pre-wrap;font-size:13px;line-height:1.6;color:#374151;">${policyNotes}</p>`;
+                                const escaped = policyNotes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                                return `<p style="margin:0;white-space:pre-wrap;font-size:13px;line-height:1.6;color:#374151;">${escaped}</p>`;
                             })()}
                         </div>
                     </div>
