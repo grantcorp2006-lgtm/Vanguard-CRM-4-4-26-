@@ -23297,9 +23297,14 @@ function showPolicyDetailsModal(policy) {
                     <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-save"></i> Save Policy
                     </button>
-                    <button id="jn-sync-btn" onclick="window.syncFromJenesis('${policy.id}','${(policy.policyNumber||'').replace(/'/g,'')}','${[policy.insured?.['Business Name'],policy.contact?.['Business Name'],policy.clientName,policy.insuredName,policy.client].filter(Boolean).map(s=>s.replace(/'/g,'')).join('||')}')" style="display:flex;align-items:center;gap:6px;background:#0284c7;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;" title="Sync live data from JenesisNow">
-                        <i class="fas fa-cloud-download-alt"></i> Sync JenesisNow
-                    </button>
+                    ${(() => {
+                        const syncDate = policy.jnSyncedAt ? new Date(policy.jnSyncedAt) : null;
+                        const syncLabel = syncDate ? 'Synced ' + syncDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + syncDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : 'Sync JenesisNow';
+                        const syncIcon = syncDate ? 'fa-check-circle' : 'fa-cloud-download-alt';
+                        const syncBg = syncDate ? '#059669' : '#0284c7';
+                        const syncTitle = syncDate ? 'Last synced: ' + syncDate.toLocaleString() + '. Click to sync again.' : 'Sync live data from JenesisNow';
+                        return `<button id="jn-sync-btn" onclick="window.syncFromJenesis('${policy.id}','${(policy.policyNumber||'').replace(/'/g,'')}','${[policy.insured?.['Business Name'],policy.contact?.['Business Name'],policy.clientName,policy.insuredName,policy.client].filter(Boolean).map(s=>s.replace(/'/g,'')).join('||')}')" style="display:flex;align-items:center;gap:6px;background:${syncBg};color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;" title="${syncTitle}"><i class="fas ${syncIcon}"></i> ${syncLabel}</button>`;
+                    })()}
                     <button onclick="printPolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:white;color:#374151;border:1px solid #d1d5db;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-print"></i> Print
                     </button>
@@ -24595,6 +24600,16 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
         // Reload the policy view to show updated data
         if (typeof viewPolicy === 'function') viewPolicy(policyId);
 
+        // Update button to show last sync time
+        if (btn) {
+            const now = new Date();
+            const fmt = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            btn.disabled = false;
+            btn.style.background = '#059669';
+            btn.innerHTML = `<i class="fas fa-check-circle"></i> Synced ${fmt}`;
+            btn.title = 'Last synced from JenesisNow: ' + fmt + '. Click to sync again.';
+        }
+        return;
     } catch(e) {
         console.error('JenesisNow sync error:', e);
         if (typeof showNotification === 'function') showNotification('JenesisNow sync failed: ' + e.message, 'error');
