@@ -23297,6 +23297,9 @@ function showPolicyDetailsModal(policy) {
                     <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-save"></i> Save Policy
                     </button>
+                    <button id="jn-sync-btn" onclick="window.syncFromJenesis('${policy.id}','${(policy.policyNumber||'').replace(/'/g,'')}','${[policy.insured?.['Business Name'],policy.contact?.['Business Name'],policy.clientName,policy.insuredName,policy.client].filter(Boolean).map(s=>s.replace(/'/g,'')).join('||')}')" style="display:flex;align-items:center;gap:6px;background:#0284c7;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;" title="Sync live data from JenesisNow">
+                        <i class="fas fa-cloud-download-alt"></i> Sync JenesisNow
+                    </button>
                     <button onclick="printPolicy('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:white;color:#374151;border:1px solid #d1d5db;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
                         <i class="fas fa-print"></i> Print
                     </button>
@@ -24375,6 +24378,163 @@ window.overviewSave = async function(policyId) {
     }
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Policy'; }
 };
+
+// ─── Sync from JenesisNow (Puppeteer scraper) ────────────────────────────────
+window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
+    if (!policyNumber) { if (typeof showNotification === 'function') showNotification('No policy number to look up', 'warning'); return; }
+    const btn = document.getElementById('jn-sync-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...'; }
+
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+        const clientParam = clientName ? '&client=' + encodeURIComponent(clientName) : '';
+        const resp = await fetch(`/api/jenesis/scrape-policy/${encodeURIComponent(policyNumber.trim())}?t=${Date.now()}${clientParam}`, {
+            headers: { 'Authorization': 'Bearer ' + jwt }
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || 'Policy not found in JenesisNow');
+        }
+        const jn = await resp.json();
+        if (jn.error) throw new Error(jn.error);
+
+        // Map JenesisNow scraped fields to our policy fields
+        const f = jn.fields || {};
+        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const idx = policies.findIndex(p => String(p.id) === String(policyId));
+        if (idx === -1) throw new Error('Policy not in local cache');
+        const pol = policies[idx];
+
+        // Overview fields
+        if (f.Company || f.CompanyId) pol.carrier = f.Company || pol.carrier;
+        if (f.policyState) pol.policyState = f.policyState;
+        if (f.Term) pol.term = f.Term;
+        if (f.Effectivedate) { const d = _jnDateToISO(f.Effectivedate); if (d) pol.effectiveDate = d; }
+        if (f.Expirationdate) { const d = _jnDateToISO(f.Expirationdate); if (d) pol.expirationDate = d; }
+        if (f.Status) pol.policyStatus = f.Status;
+        if (f.Newrenewal) pol.newRenewal = f.Newrenewal;
+        if (f.Datedownloaded) pol.downloadDate = _jnDateToISO(f.Datedownloaded) || '';
+        if (f.Downloadpurpose) pol.downloadPurpose = f.Downloadpurpose;
+        if (f.Premium) {
+            const prem = parseFloat(f.Premium.replace(/[^0-9.]/g, ''));
+            if (!isNaN(prem)) {
+                pol.premium = '$' + prem.toLocaleString() + '/yr';
+                if (!pol.financial) pol.financial = {};
+                pol.financial['Annual Premium'] = prem;
+                pol.financial['Premium'] = prem;
+            }
+        }
+        if (f.Policyfees) pol.companyFees = f.Policyfees;
+        if (f.Agencyfees) pol.agencyFees = f.Agencyfees;
+        if (f.Policytaxes) pol.taxes = f.Policytaxes;
+        if (f.Grandtotalpremium) pol.grandTotal = f.Grandtotalpremium;
+        if (f.Eft && f.Eft !== '1') pol.eft = f.Eft;
+
+        // Contact / client info
+        const instaCheck = f.instaCheckInsuredInfo || '';
+        if (instaCheck) {
+            const lines = instaCheck.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines[0]) {
+                pol.clientName = lines[0];
+                pol.insuredName = lines[0];
+                if (!pol.insured) pol.insured = {};
+                pol.insured['Business Name'] = lines[0];
+                if (!pol.contact) pol.contact = {};
+                pol.contact['Business Name'] = lines[0];
+            }
+            if (lines[1]) {
+                if (!pol.contact) pol.contact = {};
+                pol.contact['Address'] = lines[1];
+            }
+            if (lines[2]) {
+                const cityStateZip = lines[2].match(/^(.+),\s*([A-Z]{2})\s*(\d{5})/);
+                if (cityStateZip) {
+                    pol.contact['City'] = cityStateZip[1];
+                    pol.contact['State'] = cityStateZip[2];
+                    pol.contact['Zip Code'] = cityStateZip[3];
+                }
+            }
+        }
+
+        // JenesisNow ID
+        if (jn.jenesisId) pol.jenesisId = jn.jenesisId;
+
+        // Vehicles
+        if (jn.vehicles && jn.vehicles.length) {
+            pol.vehicles = jn.vehicles.map(v => {
+                const parts = (v.makeModel || v.description || '').split(/\s+/);
+                const make = parts[0] || '';
+                const model = parts.slice(1).join(' ') || '';
+                return { year: v.year || '', make, model, vin: v.vin || '' };
+            });
+        }
+
+        // Drivers
+        if (jn.drivers && jn.drivers.length) {
+            pol.drivers = jn.drivers.map(d => ({
+                name: d.name || '',
+                licenseNumber: '',
+                licenseState: '',
+                dateOfBirth: '',
+            }));
+        }
+
+        // Coverages
+        if (jn.coverages && jn.coverages.length) {
+            const covObj = {};
+            for (const c of jn.coverages) {
+                if (!c.code || c.code === 'EFTD' || c.code === 'FILFE') continue;
+                covObj[c.code] = { limit: (c.limit || '').replace(/[^0-9,/]/g, ''), deductible: (c.deductible || '').replace(/[^0-9,/]/g, ''), premium: c.premium || '' };
+            }
+            pol.coverage = Object.assign({}, pol.coverage || {}, covObj);
+        }
+
+        // Notes from JenesisNow
+        if (jn.notes && jn.notes.length) {
+            const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            const jnNotes = jn.notes.map(n => `[${n.date || timestamp} — JenesisNow] ${n.text}`).join('\n\n');
+            const existing = pol.notes || '';
+            // Prepend new JenesisNow notes
+            pol.notes = `[${timestamp} — JenesisNow Sync]\n${jnNotes}\n\n${existing}`;
+        }
+
+        pol.jnSyncedAt = new Date().toISOString();
+
+        // Save locally
+        policies[idx] = pol;
+        localStorage.setItem('insurance_policies', JSON.stringify(policies));
+
+        // Save to server
+        try {
+            await fetch(`/api/policies/${policyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+                body: JSON.stringify(pol)
+            });
+        } catch(e) { console.warn('JN sync: server save failed:', e); }
+
+        if (typeof showNotification === 'function') showNotification('Synced from JenesisNow successfully!', 'success');
+
+        // Reload the policy view to show updated data
+        if (typeof viewPolicy === 'function') viewPolicy(policyId);
+
+    } catch(e) {
+        console.error('JenesisNow sync error:', e);
+        if (typeof showNotification === 'function') showNotification('JenesisNow sync failed: ' + e.message, 'error');
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> Sync JenesisNow'; }
+};
+
+function _jnDateToISO(jnDate) {
+    if (!jnDate) return '';
+    // JenesisNow uses MM-DD-YYYY format — convert to MM/DD/YYYY for display
+    const m = jnDate.match(/(\d{2})-(\d{2})-(\d{4})/);
+    if (m) return `${m[1]}/${m[2]}/${m[3]}`;
+    // Also handle MM/DD/YYYY already in that format
+    const m2 = jnDate.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m2) return `${m2[1]}/${m2[2]}/${m2[3]}`;
+    return jnDate;
+}
 
 // ─── View Page Interactive Coverage Table ────────────────────────────────────
 (function() {

@@ -5102,6 +5102,29 @@ app.use('/api/coi', coiPdfRoutes);
 const jenesisRoutes = require('./jenesis-routes');
 app.use('/api/jenesis', jenesisRoutes);
 
+// JenesisNow live policy scraper (Puppeteer-based)
+app.get('/api/jenesis/scrape-policy/:policyNumber', async (req, res) => {
+    const { policyNumber } = req.params;
+    if (!policyNumber || policyNumber.length < 4) {
+        return res.status(400).json({ error: 'Invalid policy number' });
+    }
+    try {
+        const { scrapePolicyByNumber } = require('./jenesis-scraper');
+        const clientName = req.query.client || '';
+        console.log(`[JenesisNow Scraper] Looking up policy ${policyNumber} (client: ${clientName || 'unknown'})...`);
+        const data = await scrapePolicyByNumber(policyNumber.trim(), clientName);
+        if (data.error) {
+            console.warn(`[JenesisNow Scraper] ${data.error}`);
+            return res.status(404).json(data);
+        }
+        console.log(`[JenesisNow Scraper] Found policy ${policyNumber} (JN ID: ${data.jenesisId})`);
+        res.json(data);
+    } catch (err) {
+        console.error('[JenesisNow Scraper] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // COI Request Email endpoint will be defined after multer configuration
 
 // Quote submission endpoints
