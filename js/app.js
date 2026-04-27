@@ -24470,14 +24470,21 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
 
         // Vehicles — use modal details (make, model, body type, garage, per-vehicle coverages)
         if (jn.vehicles && jn.vehicles.length) {
-            const allVehCoverages = [];
             pol.vehicles = jn.vehicles.map(v => {
                 const make = v.make || (v.makeModel || '').split(/\s+/)[0] || '';
                 const model = v.model || (v.makeModel || '').split(/\s+/).slice(1).join(' ') || '';
-                // Collect per-vehicle coverages for the CoveragesArray
+                // Build per-vehicle CoveragesArray in the format the vehicle detail modal expects
+                const vehCovArr = {};
                 if (v.coverages && v.coverages.length) {
                     v.coverages.forEach(c => {
-                        if (c.code) allVehCoverages.push({ ...c, vehicle: `${v.year || ''} ${make} ${model}`.trim() });
+                        if (!c.code) return;
+                        vehCovArr[c.code] = {
+                            Code: c.code,
+                            Description: c.description || c.code,
+                            Amount: c.limit || '',
+                            Deductible: c.deductible || '',
+                            Premium: c.premium || '',
+                        };
                     });
                 }
                 return {
@@ -24486,23 +24493,11 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
                     garageState: v.garageState || '', garageZip: v.garageZip || '',
                     garageAddress: v.garageAddress || '', garageCity: v.garageCity || '',
                     use: v.use || '', radius: v.radius || '',
+                    dotNum: v.dotNumber || '', mcNum: v.mcNumber || '',
+                    costNew: v.costNew || '', cargoLimit: v.cargoLimit || '',
+                    CoveragesArray: Object.keys(vehCovArr).length ? vehCovArr : undefined,
                 };
             });
-            // Merge per-vehicle coverages into CoveragesArray (with vehicle tag)
-            if (allVehCoverages.length) {
-                if (!pol.coverage) pol.coverage = {};
-                if (!pol.coverage.CoveragesArray) pol.coverage.CoveragesArray = {};
-                for (const c of allVehCoverages) {
-                    const key = c.vehicle ? `${c.code}_${c.vehicle.replace(/\s+/g,'_')}` : c.code;
-                    pol.coverage.CoveragesArray[key] = {
-                        Code: c.code,
-                        Description: `${c.description || c.code}${c.vehicle ? ' (' + c.vehicle + ')' : ''}`,
-                        Amount: c.limit || '',
-                        Deductible: c.deductible || '',
-                        Premium: c.premium || '',
-                    };
-                }
-            }
         }
 
         // Drivers — use detail data from JenesisNow modal (DOB, license, etc.)
