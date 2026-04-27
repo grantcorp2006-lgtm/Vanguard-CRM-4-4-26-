@@ -24533,13 +24533,25 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
             pol.coverage.CoveragesArray = covArr;
         }
 
-        // Notes from JenesisNow
+        // Notes from JenesisNow — deduplicate and only keep real notes
         if (jn.notes && jn.notes.length) {
-            const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-            const jnNotes = jn.notes.map(n => `[${n.date || timestamp} — JenesisNow] ${n.text}`).join('\n\n');
             const existing = pol.notes || '';
-            // Prepend new JenesisNow notes
-            pol.notes = `[${timestamp} — JenesisNow Sync]\n${jnNotes}\n\n${existing}`;
+            const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            // Filter: only keep notes that have real text (not just numbers/dates/payment junk)
+            const realNotes = jn.notes.filter(n => {
+                const t = (n.text || '').trim();
+                if (!t || t.length < 5) return false;
+                if (/^\d[\d\s,.\-()/$]+$/.test(t)) return false; // pure numbers/dates
+                return true;
+            });
+            if (realNotes.length) {
+                // Deduplicate: skip notes already present in existing text
+                const newNotes = realNotes.filter(n => !existing.includes(n.text.substring(0, 40)));
+                if (newNotes.length) {
+                    const jnNotes = newNotes.map(n => `[${n.date || timestamp} — JenesisNow] ${n.text}`).join('\n\n');
+                    pol.notes = `[${timestamp} — JenesisNow Sync]\n${jnNotes}\n\n${existing}`;
+                }
+            }
         }
 
         pol.jnSyncedAt = new Date().toISOString();

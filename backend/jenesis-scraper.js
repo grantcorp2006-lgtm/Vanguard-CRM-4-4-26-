@@ -242,30 +242,33 @@ async function scrapePolicy(page) {
                     }
                 });
 
-                // Notes - find notes by content pattern
-                document.querySelectorAll('table tbody tr').forEach(r => {
-                    const text = r.textContent.trim();
-                    if ((text.includes('Downloaded:') || text.includes('Corp:') || text.includes('Support:') || text.includes('Endorsement')) && text.match(/\d{2}-\d{2}-\d{4}/)) {
-                        const cells = Array.from(r.querySelectorAll('td')).map(c => c.textContent.trim());
-                        if (cells.length >= 2) {
-                            result.notes.push({ text: cells[0], date: cells[1] || '' });
-                        }
-                    }
-                });
+                // Notes - only from actual note tables, filtered for real content
+                // JenesisNow note tables have rows with "Downloaded:", "Corp:", "Support:" patterns
+                const noteKeywords = ['Downloaded:', 'Corp:', 'Support:', 'Endorsement', 'added', 'deleted', 'changed', 'removed', 'Vehicle', 'insured'];
+                const noteSkip = ['Policy Type', 'Payment', 'Invoice', 'Receipt', 'Commission', 'Statement'];
+                const seenNotes = new Set();
 
-                // Also try getting more notes by showing all
-                const notesTables = document.querySelectorAll('table');
-                for (const t of notesTables) {
-                    if (t.id && t.id.toLowerCase().includes('note')) {
-                        t.querySelectorAll('tbody tr').forEach(r => {
-                            const cells = Array.from(r.querySelectorAll('td')).map(c => c.textContent.trim());
-                            if (cells.length >= 2 && cells.join(' ').length > 10) {
-                                const exists = result.notes.some(n => n.text === cells[0] && n.date === cells[1]);
-                                if (!exists) result.notes.push({ text: cells[0], date: cells[1] || '' });
-                            }
-                        });
-                    }
-                }
+                document.querySelectorAll('table').forEach(t => {
+                    // Skip tables that are clearly not notes (payments, invoices, etc.)
+                    const headerText = (t.querySelector('thead') || t.querySelector('tr'))?.textContent || '';
+                    if (noteSkip.some(s => headerText.includes(s))) return;
+
+                    t.querySelectorAll('tbody tr').forEach(r => {
+                        const cells = Array.from(r.querySelectorAll('td')).map(c => c.textContent.trim());
+                        if (cells.length < 2) return;
+                        const noteText = cells[0];
+                        const noteDate = cells[1] || '';
+                        // Must have a date-like pattern and a keyword
+                        if (!noteDate.match(/\d{2}-\d{2}-\d{4}/)) return;
+                        if (!noteKeywords.some(k => noteText.includes(k))) return;
+                        // Skip if too short or pure numbers
+                        if (noteText.length < 10 || /^\d[\d\s,.\-()/$]+$/.test(noteText)) return;
+                        const key = noteText.substring(0, 50) + noteDate;
+                        if (seenNotes.has(key)) return;
+                        seenNotes.add(key);
+                        result.notes.push({ text: noteText, date: noteDate });
+                    });
+                });
 
                 resolve(result);
             }, 2000);
