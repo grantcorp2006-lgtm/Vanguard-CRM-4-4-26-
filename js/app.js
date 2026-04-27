@@ -24211,7 +24211,33 @@ window.overviewSave = async function(policyId) {
         return;
     }
     Object.assign(policies[idx], updates);
+    // Keep financial sub-object in sync so table row shows updated premium
+    if (updates.premium) {
+        if (!policies[idx].financial) policies[idx].financial = {};
+        policies[idx].financial['Annual Premium'] = updates.premium;
+        policies[idx].financial['Premium'] = updates.premium;
+    }
     localStorage.setItem('insurance_policies', JSON.stringify(policies));
+
+    // Update the policy list table row premium without full reload
+    const policyRow = document.querySelector(`tr[data-policy-id="${policyId}"]`);
+    if (policyRow) {
+        const cells = policyRow.querySelectorAll('td');
+        // Premium is typically the 7th column (index 6)
+        if (cells.length >= 7 && updates.premium) {
+            const raw = updates.premium.replace(/[^0-9.]/g, '');
+            const num = parseFloat(raw);
+            cells[6].textContent = isNaN(num) ? updates.premium : `$${num.toLocaleString()}/yr`;
+        }
+    }
+    // Update the header premium display on the detail page
+    const headerPrem = document.querySelector('.pdp-premium');
+    if (headerPrem && updates.premium) {
+        const raw = updates.premium.replace(/[^0-9.]/g, '');
+        const num = parseFloat(raw);
+        headerPrem.textContent = isNaN(num) ? updates.premium : `$${num.toLocaleString()}/yr`;
+    }
+
     try {
         const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
         const jwt = sessionStorage.getItem('vanguard_jwt') || '';
