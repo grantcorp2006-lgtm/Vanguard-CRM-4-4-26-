@@ -352,6 +352,105 @@ async function scrapePolicyByNumber(policyNumber, clientName) {
             }
         }
 
+        // Step 3: Click each vehicle row to open modal and extract details + per-vehicle coverages
+        if (data.vehicles && data.vehicles.length > 0) {
+            for (let i = 0; i < data.vehicles.length; i++) {
+                const veh = data.vehicles[i];
+                try {
+                    const clicked = await page.evaluate((idx) => {
+                        const rows = document.querySelectorAll('#commercialAutoVehicleDatatable tbody tr, .vehicles table tbody tr');
+                        if (rows[idx]) { rows[idx].click(); return true; }
+                        return false;
+                    }, i);
+
+                    if (!clicked) continue;
+                    await new Promise(r => setTimeout(r, 1500));
+
+                    const details = await page.evaluate(() => {
+                        const g = (id) => {
+                            const el = document.getElementById(id);
+                            if (!el) return '';
+                            if (el.tagName === 'SELECT') {
+                                const opt = el.options[el.selectedIndex];
+                                return opt ? (opt.text || opt.value || '') : '';
+                            }
+                            return el.value || '';
+                        };
+                        const result = {
+                            vin: g('Vin'),
+                            year: g('Year'),
+                            make: g('Make'),
+                            model: g('Model'),
+                            bodyType: g('Bodytype'),
+                            territory: g('Territory'),
+                            gvw: g('Gvwgcw'),
+                            vehicleClass: g('Class'),
+                            garageAddress: g('Garageaddress'),
+                            garageCity: g('Garagecity'),
+                            garageState: g('Garagestate'),
+                            garageZip: g('Garagezip'),
+                            garageCounty: g('Garagecounty'),
+                            dotNumber: g('DotNum'),
+                            mcNumber: g('McNum'),
+                            costNew: g('Costnew'),
+                            use: g('Use'),
+                            radius: g('Radius'),
+                            cargoLimit: g('Cargolimit'),
+                        };
+                        // Per-vehicle coverages from the modal's coverage table
+                        result.coverages = [];
+                        document.querySelectorAll('#commercialAutoPolicyVehicleCoveragesDatatable tbody tr').forEach(r => {
+                            const codeEl = r.querySelector('.coverageCode');
+                            const code = codeEl ? codeEl.textContent.trim() : '';
+                            if (!code) return;
+                            const limitInp = r.querySelector('input[data-id^="cov_"]');
+                            const dedInp = r.querySelector('input[data-id^="ded_"]') || r.querySelector('select[id*="_Deductible_"]');
+                            const premInp = r.querySelector('input[data-id^="prem_"]');
+                            const descInp = r.querySelector('input[id*="_Description_"]');
+                            const limit = limitInp ? limitInp.value : '';
+                            let deductible = '';
+                            if (dedInp) {
+                                deductible = dedInp.tagName === 'SELECT'
+                                    ? (dedInp.options[dedInp.selectedIndex]?.text || '')
+                                    : dedInp.value;
+                            }
+                            const premium = premInp ? premInp.value : '';
+                            const description = descInp ? descInp.value : '';
+                            result.coverages.push({ code, limit, deductible, premium, description });
+                        });
+                        return result;
+                    });
+
+                    // Merge vehicle details
+                    if (details.vin) veh.vin = details.vin;
+                    if (details.year) veh.year = details.year;
+                    if (details.make) veh.make = details.make;
+                    if (details.model) veh.model = details.model;
+                    if (details.bodyType) veh.bodyType = details.bodyType;
+                    if (details.gvw) veh.gvw = details.gvw;
+                    if (details.garageState) veh.garageState = details.garageState;
+                    if (details.garageZip) veh.garageZip = details.garageZip;
+                    if (details.garageAddress) veh.garageAddress = details.garageAddress;
+                    if (details.garageCity) veh.garageCity = details.garageCity;
+                    if (details.dotNumber) veh.dotNumber = details.dotNumber;
+                    if (details.mcNumber) veh.mcNumber = details.mcNumber;
+                    if (details.use) veh.use = details.use;
+                    if (details.radius) veh.radius = details.radius;
+                    if (details.costNew) veh.costNew = details.costNew;
+                    if (details.coverages && details.coverages.length) veh.coverages = details.coverages;
+
+                    // Close modal
+                    await page.evaluate(() => {
+                        const cancelBtn = document.querySelector('#ModalCancelButton, .ModalCancelButton');
+                        if (cancelBtn) cancelBtn.click();
+                    });
+                    await new Promise(r => setTimeout(r, 500));
+                } catch (e) {
+                    console.warn(`[JenesisNow Scraper] Failed to get vehicle ${i} details:`, e.message);
+                }
+            }
+        }
+
         await page.close();
         return data;
     } catch (err) {
