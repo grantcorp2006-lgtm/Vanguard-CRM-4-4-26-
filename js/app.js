@@ -22127,10 +22127,33 @@ function _ivansLobLabel(code) {
         TRK:'Trucking',         MC:'Motor Carrier',         OO:'Owner Operator',
         NTL:'Non-Trucking Liability', BTL:'Bobtail',        CARGO:'Cargo',
         PD:'Physical Damage',   CA:'Commercial Auto',
+        AUTOB:'Commercial Auto', BAP:'Commercial Auto',  BOP:'Commercial Auto',
+        BUSAU:'Commercial Auto', BSAUT:'Commercial Auto', AUTOP:'Personal Auto',
     })[code] || code || '';
 }
 function _ivansLobToType(lob) {
-    if (!lob) return 'personal-auto';
+    if (!lob) return 'commercial-auto';
+    // Direct raw LOB code mapping (IVANS/JenesisNow AL3 codes)
+    const codeMap = {
+        AUTOB:'commercial-auto', BAP:'commercial-auto', BOP:'commercial-auto',
+        BUSAU:'commercial-auto', BSAUT:'commercial-auto', CAUTO:'commercial-auto',
+        SYNBN:'commercial-auto', CA:'commercial-auto',
+        PAUTO:'personal-auto',   PRTBN:'personal-auto',  AUTOP:'personal-auto',
+        HOME:'homeowners',       HO:'homeowners',
+        COMMP:'commercial-property',
+        GL:'general-liability',
+        WC:'workers-comp',
+        UMBRL:'umbrella',
+        BOAT:'boat',
+        TRUCK:'trucking', TRCK:'trucking', TRK:'trucking', CT:'trucking',
+        MC:'motor-carrier',
+        OO:'owner-operator',
+        NTL:'non-trucking', BTL:'bobtail',
+        CARGO:'cargo',
+        PD:'physical-damage',
+    };
+    if (codeMap[lob.toUpperCase()]) return codeMap[lob.toUpperCase()];
+    // Label-based mapping
     const mapped = ({
         'Personal Auto':            'personal-auto',
         'Commercial Auto':          'commercial-auto',
@@ -22163,13 +22186,13 @@ function _ivansLobToType(lob) {
     if (l.includes('bobtail'))                           return 'bobtail';
     if (l.includes('cargo'))                             return 'cargo';
     if (l.includes('physical damage'))                   return 'physical-damage';
-    if (l.includes('commercial'))                        return 'commercial-auto';
+    if (l.includes('commercial') || l.includes('business auto')) return 'commercial-auto';
     if (l.includes('general liab'))                      return 'general-liability';
     if (l.includes('workers'))                           return 'workers-comp';
-    if (l.includes('home') || l.includes('ho'))          return 'homeowners';
+    if (l.includes('home'))                              return 'homeowners';
     if (l.includes('umbrella'))                          return 'umbrella';
-    if (l.includes('personal auto') || l.includes('pauto')) return 'personal-auto';
-    return 'personal-auto'; // final fallback
+    if (l.includes('personal auto'))                     return 'personal-auto';
+    return 'commercial-auto'; // default to commercial (most VIG policies are commercial)
 }
 
 function parseAcordXML(content) {
