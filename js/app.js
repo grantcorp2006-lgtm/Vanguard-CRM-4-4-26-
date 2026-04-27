@@ -24478,18 +24478,18 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
             });
         }
 
-        // Drivers — merge with existing data to preserve license/DOB when names match
+        // Drivers — use detail data from JenesisNow modal (DOB, license, etc.)
         if (jn.drivers && jn.drivers.length) {
             const oldDrivers = pol.drivers || [];
             pol.drivers = jn.drivers.map(d => {
                 const name = (d.name || '').trim();
-                // Find existing driver with matching name to preserve license/DOB
                 const existing = oldDrivers.find(od => (od.name || '').trim().toLowerCase() === name.toLowerCase());
                 return {
-                    name,
-                    licenseNumber: existing?.licenseNumber || existing?.license || '',
-                    licenseState: existing?.licenseState || '',
-                    dateOfBirth: existing?.dateOfBirth || '',
+                    name: d.firstName && d.lastName ? `${d.firstName} ${d.middleName || ''} ${d.lastName}`.replace(/\s+/g, ' ').trim() : name,
+                    licenseNumber: d.licenseNumber || existing?.licenseNumber || existing?.license || '',
+                    licenseState: d.licenseState || existing?.licenseState || '',
+                    dateOfBirth: d.dateOfBirth ? _jnDateToISO(d.dateOfBirth) : (existing?.dateOfBirth || ''),
+                    gender: d.gender || existing?.gender || '',
                 };
             });
         }

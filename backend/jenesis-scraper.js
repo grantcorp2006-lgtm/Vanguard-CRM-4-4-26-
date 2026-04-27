@@ -227,14 +227,16 @@ async function scrapePolicy(page) {
                     }
                 });
 
-                // Drivers
+                // Drivers — just collect row count and data-itemid for now
+                // (detail extraction happens in a separate step by clicking each row)
                 document.querySelectorAll('table').forEach(t => {
                     const h = t.textContent.substring(0, 100);
                     if (h.includes('Name') && h.includes('Add/Del') && h.includes('Effective')) {
                         t.querySelectorAll('tbody tr').forEach(r => {
                             const cells = Array.from(r.querySelectorAll('td')).map(c => c.textContent.trim());
+                            const itemId = r.getAttribute('data-itemid') || '';
                             if (cells.length >= 1 && cells[0]) {
-                                result.drivers.push({ name: cells[0], addDel: cells[1] || '', effective: cells[2] || '' });
+                                result.drivers.push({ name: cells[0], addDel: cells[1] || '', effective: cells[2] || '', _itemId: itemId });
                             }
                         });
                     }
@@ -284,6 +286,72 @@ async function scrapePolicyByNumber(policyNumber, clientName) {
             return { error: 'Policy not found in JenesisNow' };
         }
         const data = await scrapePolicy(page);
+
+        // Step 2: Click each driver row to open modal and extract DOB, license, etc.
+        if (data.drivers && data.drivers.length > 0) {
+            for (let i = 0; i < data.drivers.length; i++) {
+                const drv = data.drivers[i];
+                try {
+                    // Click the driver row to open the detail modal
+                    const clicked = await page.evaluate((idx) => {
+                        const rows = document.querySelectorAll('#commercialAutoDriverDatatable tbody tr, .drivers table tbody tr');
+                        if (rows[idx]) { rows[idx].click(); return true; }
+                        return false;
+                    }, i);
+
+                    if (!clicked) continue;
+                    // Wait for modal to appear
+                    await new Promise(r => setTimeout(r, 1500));
+
+                    // Extract driver details from the modal
+                    const details = await page.evaluate(() => {
+                        const g = (id) => {
+                            const el = document.getElementById(id);
+                            if (!el) return '';
+                            if (el.tagName === 'SELECT') return el.options[el.selectedIndex]?.text || el.value || '';
+                            return el.value || '';
+                        };
+                        return {
+                            firstName: g('Firstname'),
+                            middleName: g('Middlename'),
+                            lastName: g('Lastname'),
+                            dateOfBirth: g('Dateofbirth'),
+                            licenseNumber: g('Licensenumber'),
+                            licenseState: g('State'),
+                            gender: g('Gender'),
+                            maritalStatus: g('Maritalstatus'),
+                            relationship: g('Relationship'),
+                            stateLicYear: g('Statelicenseyear'),
+                            origLicDate: g('Originallicensedate'),
+                            yearsCommExp: g('Yearscommercialexperience'),
+                            ssn: '', // don't scrape SSN
+                        };
+                    });
+
+                    // Merge into driver record
+                    if (details.firstName || details.lastName) {
+                        drv.firstName = details.firstName;
+                        drv.middleName = details.middleName;
+                        drv.lastName = details.lastName;
+                    }
+                    if (details.dateOfBirth) drv.dateOfBirth = details.dateOfBirth;
+                    if (details.licenseNumber) drv.licenseNumber = details.licenseNumber;
+                    if (details.licenseState) drv.licenseState = details.licenseState;
+                    if (details.gender) drv.gender = details.gender;
+                    if (details.stateLicYear) drv.stateLicYear = details.stateLicYear;
+
+                    // Close modal
+                    await page.evaluate(() => {
+                        const cancelBtn = document.querySelector('#ModalCancelButton, .ModalCancelButton');
+                        if (cancelBtn) cancelBtn.click();
+                    });
+                    await new Promise(r => setTimeout(r, 500));
+                } catch (e) {
+                    console.warn(`[JenesisNow Scraper] Failed to get driver ${i} details:`, e.message);
+                }
+            }
+        }
+
         await page.close();
         return data;
     } catch (err) {
