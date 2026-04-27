@@ -719,10 +719,27 @@ function createRealFormFields(policyId, policyData) {
     const _glAgg = _glBIParts[1] ? parseFloat(_glBIParts[1]) : (_glOcc ? _glOcc * 2 : 0);
 
     // Pre-compute cargo and physical damage presence
-    const _cargoLimitRaw = policyData?.coverage?.cargo_limit || policyData?.coverage?.['Cargo Limit'] || '';
+    // Check flat keys, CoveragesArray (policy-level), and vehicle-level coverages
+    const _covArr = policyData?.coverage?.CoveragesArray || {};
+    const _vehs = Array.isArray(policyData?.vehicles) ? policyData.vehicles : [];
+    // Helper: find a coverage by code in CoveragesArray or vehicle CoveragesArrays
+    function _findCov(code) {
+        if (_covArr[code]) return _covArr[code];
+        for (const v of _vehs) {
+            const vc = v.CoveragesArray || {};
+            if (vc[code]) return vc[code];
+        }
+        return null;
+    }
+    const _mtcCov = _findCov('MTC') || _findCov('MTRTK') || _findCov('MTCARGO');
+    const _compCov = _findCov('COMP');
+    const _collCov = _findCov('COLL');
+
+    const _cargoLimitRaw = policyData?.coverage?.cargo_limit || policyData?.coverage?.['Cargo Limit'] || (_mtcCov?.Amount || _mtcCov?.Limit || '') || '';
+    const _cargoDeductRaw = policyData?.coverage?.cargo_deductible || policyData?.coverage?.['Cargo Deductible'] || (_mtcCov?.Deductible || '') || '';
     const hasCargoRow = !!_cargoLimitRaw && _cargoLimitRaw !== '0' && _cargoLimitRaw !== 'None';
-    const _compDedRaw = policyData?.coverage?.comprehensive_deductible || policyData?.coverage?.['Comprehensive Deductible'] || '0';
-    const _collDedRaw = policyData?.coverage?.collision_deductible || policyData?.coverage?.['Collision Deductible'] || '0';
+    const _compDedRaw = policyData?.coverage?.comprehensive_deductible || policyData?.coverage?.['Comprehensive Deductible'] || (_compCov?.Deductible || '') || '0';
+    const _collDedRaw = policyData?.coverage?.collision_deductible || policyData?.coverage?.['Collision Deductible'] || (_collCov?.Deductible || '') || '0';
     const hasPhysDmg = _compDedRaw !== 'None' && _collDedRaw !== 'None' &&
                        parseFloat(String(_compDedRaw).replace(/[$,]/g,'')) > 0 &&
                        parseFloat(String(_collDedRaw).replace(/[$,]/g,'')) > 0;
@@ -1019,7 +1036,7 @@ function createRealFormFields(policyId, policyData) {
           skip: !hasCargoRow && !hasPhysDmg,
           value: (function() {
               if (hasCargoRow) {
-                  const cargoDeductible = policyData?.coverage?.cargo_deductible || policyData?.coverage?.['Cargo Deductible'] || '';
+                  const cargoDeductible = _cargoDeductRaw || '';
                   if (cargoDeductible && cargoDeductible !== 'None') {
                       const dedNum = parseFloat(cargoDeductible.toString().replace(/[$,]/g,''));
                       return `DED. $${isNaN(dedNum) ? cargoDeductible : dedNum.toLocaleString()}`;
