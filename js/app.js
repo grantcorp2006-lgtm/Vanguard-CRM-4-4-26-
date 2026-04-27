@@ -23524,7 +23524,16 @@ function generateViewTabContent(tabId, policy) {
     switch(tabId) {
         case 'overview': {
             const _eOV = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-            const _fOV = (id,lbl,val,type) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><input id="ov-${id}" type="${type||'text'}" value="${_eOV(val)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;"></div>`;
+            const _normDate = (v) => {
+                if (!v) return '';
+                // Convert MM/DD/YYYY or MM-DD-YYYY to YYYY-MM-DD for <input type="date">
+                const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+                if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+                // Already YYYY-MM-DD
+                if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+                return v;
+            };
+            const _fOV = (id,lbl,val,type) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><input id="ov-${id}" type="${type||'text'}" value="${_eOV(type==='date' ? _normDate(val) : val)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;"></div>`;
             const _sOV = (id,lbl,val,opts) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><select id="ov-${id}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;">${opts.map(o=>typeof o==='string'?`<option value="${_eOV(o)}"${o===String(val||'')?'selected':''}>${o||'—'}</option>`:`<option value="${_eOV(o.v)}"${o.v===String(val||'')?'selected':''}>${o.l}</option>`).join('')}</select></div>`;
             const _hOV = (lbl) => `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin:0 0 12px;">${lbl}</div>`;
             const _taOV = (id,lbl,val) => `<div style="margin-bottom:10px;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">${lbl}</label><textarea id="ov-${id}" rows="3" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 9px;font-size:13px;box-sizing:border-box;color:#111827;background:#fff;resize:vertical;">${_eOV(val)}</textarea></div>`;
@@ -24469,24 +24478,37 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
             });
         }
 
-        // Drivers
+        // Drivers — merge with existing data to preserve license/DOB when names match
         if (jn.drivers && jn.drivers.length) {
-            pol.drivers = jn.drivers.map(d => ({
-                name: d.name || '',
-                licenseNumber: '',
-                licenseState: '',
-                dateOfBirth: '',
-            }));
+            const oldDrivers = pol.drivers || [];
+            pol.drivers = jn.drivers.map(d => {
+                const name = (d.name || '').trim();
+                // Find existing driver with matching name to preserve license/DOB
+                const existing = oldDrivers.find(od => (od.name || '').trim().toLowerCase() === name.toLowerCase());
+                return {
+                    name,
+                    licenseNumber: existing?.licenseNumber || existing?.license || '',
+                    licenseState: existing?.licenseState || '',
+                    dateOfBirth: existing?.dateOfBirth || '',
+                };
+            });
         }
 
-        // Coverages
+        // Coverages — write in CoveragesArray format so the coverage tab renders them
         if (jn.coverages && jn.coverages.length) {
-            const covObj = {};
+            if (!pol.coverage) pol.coverage = {};
+            const covArr = {};
             for (const c of jn.coverages) {
-                if (!c.code || c.code === 'EFTD' || c.code === 'FILFE') continue;
-                covObj[c.code] = { limit: (c.limit || '').replace(/[^0-9,/]/g, ''), deductible: (c.deductible || '').replace(/[^0-9,/]/g, ''), premium: c.premium || '' };
+                if (!c.code || c.code === 'EFTD' || c.code === 'FILFE' || c.code === 'AIN01') continue;
+                covArr[c.code] = {
+                    Code: c.code,
+                    Description: c.description || '',
+                    Amount: (c.limit || '').replace(/[^0-9,/]/g, ''),
+                    Deductible: (c.deductible || '').replace(/[^0-9,/]/g, ''),
+                    Premium: c.premium || '',
+                };
             }
-            pol.coverage = Object.assign({}, pol.coverage || {}, covObj);
+            pol.coverage.CoveragesArray = covArr;
         }
 
         // Notes from JenesisNow
