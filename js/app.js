@@ -22291,6 +22291,101 @@ function parseAcordAL3(content) {
     return policies.filter(p => p.policyNumber || p.insuredName);
 }
 
+// Toggle IVANS diff detail row
+window._toggleIvansDiff = function(idx) {
+    const row = document.getElementById('ivans-diff-' + idx);
+    const chev = document.getElementById('ivans-chev-' + idx);
+    if (!row) return;
+    const show = row.style.display === 'none';
+    row.style.display = show ? 'table-row' : 'none';
+    if (chev) chev.style.transform = show ? 'rotate(180deg)' : '';
+};
+
+// Build diff HTML comparing existing policy vs incoming data (red=removed, green=new)
+function _buildIvansDiff(existing, incoming) {
+    const lines = [];
+    const s = (label, oldVal, newVal) => {
+        const o = (oldVal || '').toString().trim();
+        const n = (newVal || '').toString().trim();
+        if (!o && !n) return;
+        if (o === n) return; // no change
+        if (!o && n) {
+            lines.push(`<div style="margin:2px 0;"><span style="color:#6b7280;font-size:11px;font-weight:600;min-width:120px;display:inline-block;">${label}:</span> <span style="color:#16a34a;font-weight:600;">+ ${n}</span></div>`);
+        } else if (o && !n) {
+            // incoming doesn't have this field — not a removal, skip
+        } else {
+            lines.push(`<div style="margin:2px 0;"><span style="color:#6b7280;font-size:11px;font-weight:600;min-width:120px;display:inline-block;">${label}:</span> <span style="color:#dc2626;text-decoration:line-through;">${o}</span> <span style="color:#6b7280;margin:0 4px;">→</span> <span style="color:#16a34a;font-weight:600;">${n}</span></div>`);
+        }
+    };
+    // Basic fields
+    s('Effective Date', existing.effectiveDate, incoming.effectiveDate);
+    s('Expiration Date', existing.expirationDate, incoming.expirationDate);
+    const ePrem = existing.premium || (existing.financial && existing.financial['Annual Premium']) || '';
+    const iPrem = incoming.premium ? '$' + parseFloat(incoming.premium).toLocaleString() : '';
+    s('Premium', ePrem, iPrem);
+    s('Carrier', existing.carrier, incoming.carrier);
+    s('Email', existing.contact?.Email || existing.contact?.['Email Address'] || '', incoming.email);
+    s('Phone', existing.contact?.Phone || existing.contact?.['Phone Number'] || '', incoming.phone);
+    s('Address', existing.contact?.Address || '', incoming.address);
+    s('City', existing.contact?.City || '', incoming.city);
+    s('State', existing.contact?.State || '', incoming.state);
+    s('Zip', existing.contact?.['Zip Code'] || existing.contact?.ZIP || '', incoming.zip);
+
+    // Vehicles diff
+    const oldVehs = (existing.vehicles || []).map(v => `${v.year||''} ${v.make||''} ${v.model||''} ${v.vin||''}`.trim());
+    const newVehs = (incoming.vehicles || []).map(v => `${v.year||''} ${v.make||''} ${v.model||''} ${v.vin||''}`.trim());
+    const removedVehs = oldVehs.filter(v => !newVehs.some(nv => nv.includes(v.split(' ').pop()))); // match by VIN (last word)
+    const addedVehs = newVehs.filter(v => !oldVehs.some(ov => ov.includes(v.split(' ').pop())));
+    if (removedVehs.length || addedVehs.length) {
+        lines.push(`<div style="margin:6px 0 2px;font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.05em;">Vehicles</div>`);
+        removedVehs.forEach(v => lines.push(`<div style="margin:1px 0;color:#dc2626;font-size:12px;"><i class="fas fa-minus-circle" style="margin-right:4px;font-size:10px;"></i><span style="text-decoration:line-through;">${v}</span></div>`));
+        addedVehs.forEach(v => lines.push(`<div style="margin:1px 0;color:#16a34a;font-size:12px;font-weight:600;"><i class="fas fa-plus-circle" style="margin-right:4px;font-size:10px;"></i>${v}</div>`));
+    }
+
+    // Drivers diff
+    const oldDrvs = (existing.drivers || []).map(d => `${d.name||''} (${d.licenseNumber||d.license||''})`);
+    const newDrvs = (incoming.drivers || []).map(d => `${d.name||''} (${d.license||d.licenseNumber||''})`);
+    const removedDrvs = oldDrvs.filter(d => !newDrvs.some(nd => nd.split('(')[0].trim().toLowerCase() === d.split('(')[0].trim().toLowerCase()));
+    const addedDrvs = newDrvs.filter(d => !oldDrvs.some(od => od.split('(')[0].trim().toLowerCase() === d.split('(')[0].trim().toLowerCase()));
+    if (removedDrvs.length || addedDrvs.length) {
+        lines.push(`<div style="margin:6px 0 2px;font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.05em;">Drivers</div>`);
+        removedDrvs.forEach(d => lines.push(`<div style="margin:1px 0;color:#dc2626;font-size:12px;"><i class="fas fa-minus-circle" style="margin-right:4px;font-size:10px;"></i><span style="text-decoration:line-through;">${d}</span></div>`));
+        addedDrvs.forEach(d => lines.push(`<div style="margin:1px 0;color:#16a34a;font-size:12px;font-weight:600;"><i class="fas fa-plus-circle" style="margin-right:4px;font-size:10px;"></i>${d}</div>`));
+    }
+
+    // Remarks
+    if (incoming.remarks) {
+        lines.push(`<div style="margin:6px 0 2px;font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.05em;">Notes / Remarks</div>`);
+        incoming.remarks.split('\n').filter(Boolean).forEach(r => {
+            lines.push(`<div style="margin:1px 0;color:#16a34a;font-size:12px;"><i class="fas fa-plus-circle" style="margin-right:4px;font-size:10px;"></i>${r}</div>`);
+        });
+    }
+
+    if (!lines.length) lines.push(`<div style="color:#9ca3af;font-size:12px;font-style:italic;">No field changes detected</div>`);
+
+    return `<div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:12px 16px 12px 42px;font-size:12px;line-height:1.6;">${lines.join('')}</div>`;
+}
+
+// Build detail for NEW policies (all green)
+function _buildIvansNewDetail(p) {
+    const lines = [];
+    const a = (label, val) => { if (val) lines.push(`<div style="margin:1px 0;"><span style="color:#6b7280;font-size:11px;font-weight:600;min-width:120px;display:inline-block;">${label}:</span> <span style="color:#16a34a;font-weight:600;">+ ${val}</span></div>`); };
+    a('Policy #', p.policyNumber);
+    a('Insured', p.insuredName);
+    a('Carrier', p.carrier);
+    a('Effective', p.effectiveDate);
+    a('Expires', p.expirationDate);
+    a('Premium', p.premium ? '$' + parseFloat(p.premium).toLocaleString() : '');
+    a('Email', p.email);
+    a('Phone', p.phone);
+    a('Address', [p.address, p.city, p.state, p.zip].filter(Boolean).join(', '));
+    (p.vehicles || []).forEach(v => a('Vehicle', `${v.year||''} ${v.make||''} ${v.model||''} ${v.vin||''}`));
+    (p.drivers || []).forEach(d => a('Driver', `${d.name||''} (${d.license||d.licenseNumber||''})`));
+    if (p.remarks) a('Notes', p.remarks.split('\n')[0]);
+    if (!lines.length) lines.push(`<div style="color:#9ca3af;font-size:12px;font-style:italic;">New policy — no existing data</div>`);
+    return `<div style="background:#f0fdf4;border-top:1px solid #bbf7d0;padding:12px 16px 12px 42px;font-size:12px;line-height:1.6;">${lines.join('')}</div>`;
+}
+
 function showIvansReview(parsedPolicies) {
     const reviewEl = document.getElementById('ivans-review-area');
     if (!reviewEl) return;
@@ -22365,8 +22460,10 @@ function showIvansReview(parsedPolicies) {
                             <option value=""${!existAgent?'selected':''}>Unassigned</option>
                             ${agentOpts.map(a=>`<option${existAgent===a?' selected':''}>${a}</option>`).join('')}
                         </select>`;
-                        return `<tr style="${rowBg}border-bottom:1px solid #f1f5f9;">
-                            <td style="padding:8px 10px;"><input type="checkbox" class="ivans-row-cb" data-idx="${i}" checked style="width:14px;height:14px;accent-color:#0284c7;cursor:pointer;"></td>
+                        // Build diff detail for UPDATE rows
+                        const diffHtml = isUpd ? _buildIvansDiff(p._match, p) : _buildIvansNewDetail(p);
+                        return `<tr style="${rowBg}border-bottom:1px solid #f1f5f9;cursor:pointer;" onclick="window._toggleIvansDiff(${i})">
+                            <td style="padding:8px 10px;" onclick="event.stopPropagation()"><input type="checkbox" class="ivans-row-cb" data-idx="${i}" checked style="width:14px;height:14px;accent-color:#0284c7;cursor:pointer;"></td>
                             <td style="padding:8px 10px;font-weight:700;color:#1e40af;font-family:monospace;font-size:11px;">${p.policyNumber||'—'}</td>
                             <td style="padding:8px 10px;color:#111827;font-weight:500;">${p.insuredName||'—'}</td>
                             <td style="padding:8px 10px;color:#374151;">${p.carrier||'—'}</td>
@@ -22374,7 +22471,10 @@ function showIvansReview(parsedPolicies) {
                             <td style="padding:8px 10px;color:#374151;">${p.expirationDate||'—'}</td>
                             <td style="padding:8px 10px;font-weight:600;color:#059669;">${prem}</td>
                             <td style="padding:8px 10px;">${badge}</td>
-                            <td style="padding:8px 10px;">${producerSel}</td>
+                            <td style="padding:8px 10px;display:flex;align-items:center;gap:6px;" onclick="event.stopPropagation()">${producerSel}<button onclick="event.stopPropagation();window._toggleIvansDiff(${i})" style="background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;padding:2px 5px;color:#6b7280;font-size:11px;" title="View changes"><i id="ivans-chev-${i}" class="fas fa-chevron-down" style="transition:transform 0.2s;"></i></button></td>
+                        </tr>
+                        <tr id="ivans-diff-${i}" style="display:none;">
+                            <td colspan="9" style="padding:0;">${diffHtml}</td>
                         </tr>`;
                     }).join('')}
                 </tbody>
