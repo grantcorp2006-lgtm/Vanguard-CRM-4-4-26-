@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>United Client Portal</title>
-  <link rel="icon" href="/images/v-logo.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Vanguard Client Portal</title>
+  <link rel="icon" href="/images/V-Logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -88,21 +88,17 @@
     .logo-banner {
       background: white;
       border-radius: var(--r-xl);
-      padding: 0 12px;
+      padding: 8px 12px;
       display: flex;
       align-items: center;
       justify-content: center;
       width: 100%;
-      overflow: hidden;
-      height: 106px;
     }
     .logo-banner img {
-      width: 100%;
-      height: 220px;
-      object-fit: cover;
-      object-position: center 45%;
+      max-height: 88px;
+      max-width: 100%;
+      object-fit: contain;
       display: block;
-      flex-shrink: 0;
     }
     .logo-banner-fallback {
       font-weight: 700;
@@ -491,7 +487,6 @@
     .empty-card-sub { font-size: 15px; color: var(--text-sec); line-height: 1.5; }
 
     /* ── Documents List ── */
-    #documents-list { display: flex; flex-direction: column; gap: 10px; }
     .doc-list-item {
       background: rgba(247,250,255,0.97);
       border-radius: var(--r-lg);
@@ -1098,10 +1093,6 @@
       to   { background-position: -200% 0; }
     }
 
-    /* ── Desktop-only elements: hidden on mobile by default ── */
-    .login-brand-panel { display: none; }
-    .sidebar-brand { display: none; }
-
     /* ── Responsive tweaks ── */
     @media (min-height: 812px) {
       .login-scroll { padding: 40px 24px; }
@@ -1110,265 +1101,6 @@
       #app { border-left: 1px solid rgba(0,0,0,0.08); border-right: 1px solid rgba(0,0,0,0.08); }
       html, body { background: #d0dce8; }
     }
-
-    /* ══════════════════════════════════════════════════
-       TABLET  (768px – 1023px)
-    ══════════════════════════════════════════════════ */
-    @media (min-width: 768px) {
-      html, body { overflow: auto; background: #C5D5E5; }
-
-      #app { max-width: 100%; border: none; }
-
-      /* Login: centered card, no split yet */
-      #screen-login { overflow-y: auto; }
-      .login-brand-panel { display: none; }
-      /* Reset logo-banner to normal on tablet+ */
-      .logo-banner { overflow: visible; height: auto; padding: 8px 12px; min-height: unset; }
-      .logo-banner img { width: auto; height: auto; max-height: 88px; max-width: 100%; object-fit: contain; }
-      .login-scroll { padding: 56px 32px; background: linear-gradient(160deg, rgba(74,144,196,0.88) 0%, rgba(110,176,216,0.82) 50%, rgba(168,208,236,0.78) 100%), url('/images/login-truck-bg.jpg') center/cover no-repeat; }
-      .login-inner { max-width: 520px; }
-      /* auth-flow-card color scheme for login-card on tablet+ */
-      .login-card { background: #EEF4FB; }
-      .login-card .field-label { color: var(--text-sec); }
-      .login-card .portal-input { background: rgba(255,255,255,0.95); color: var(--text-dark); }
-      .login-card .portal-input::placeholder { color: rgba(84,102,125,0.55); }
-      .login-card .portal-input:focus { background: white; }
-      .login-card .toggle-row { color: var(--text-dark); }
-      .login-card .btn-ghost { color: var(--primary); }
-      .login-card .btn-primary { background: var(--primary); color: white; }
-
-      /* Modals: centered pop-up instead of bottom sheet */
-      .modal-overlay { align-items: center; }
-      .modal-sheet {
-        border-radius: var(--r-xl);
-        max-width: 540px;
-        max-height: 88vh;
-      }
-      .modal-sheet.fullscreen {
-        border-radius: var(--r-xl);
-        max-height: 88vh;
-        height: auto;
-        max-width: 680px;
-      }
-      @keyframes slideUp {
-        from { transform: translateY(20px) scale(0.98); opacity: 0; }
-        to   { transform: translateY(0)    scale(1);    opacity: 1; }
-      }
-      .auth-flow-inner { max-width: 520px; }
-
-      /* Content panels wider */
-      .tab-scroll-inner { max-width: 700px; padding: 28px 32px; }
-      .doc-viewer-inner { max-width: 700px; }
-      .doc-viewer-scroll { padding: 28px 32px; }
-    }
-
-    /* ══════════════════════════════════════════════════
-       DESKTOP  (1024px+)
-    ══════════════════════════════════════════════════ */
-    @media (min-width: 1024px) {
-      html, body { overflow: hidden; background: #B8CCE0; height: 100%; }
-
-      #app {
-        max-width: 100%;
-        width: 100%;
-        flex-direction: row;
-        height: 100vh;
-        border: none;
-        border-radius: 0;
-        box-shadow: none;
-      }
-
-      /* ─── LOGIN: Two-panel split ─── */
-      #screen-login {
-        flex-direction: row;
-        overflow: hidden;
-      }
-
-      /* Left brand panel */
-      .login-brand-panel {
-        display: flex;
-        flex: 0 0 440px;
-        background: linear-gradient(160deg, var(--login-from) 0%, var(--login-to) 100%);
-        flex-direction: column;
-        align-items: stretch;
-        justify-content: center;
-        padding: 0;
-        overflow: hidden;
-      }
-      .login-brand-inner {
-        padding: 56px 48px;
-        display: flex;
-        flex-direction: column;
-        gap: 36px;
-        height: 100%;
-        justify-content: center;
-      }
-      .login-brand-logo {
-        background: #ffffff;
-        border-radius: var(--r-xl);
-        padding: 10px;
-      }
-      .login-brand-logo img {
-        width: 100%;
-        height: auto;
-        display: block;
-      }
-      .login-brand-title {
-        font-size: 34px;
-        font-weight: 800;
-        color: white;
-        line-height: 1.2;
-      }
-      .login-brand-sub {
-        font-size: 16px;
-        color: rgba(255,255,255,0.78);
-        line-height: 1.6;
-        margin-top: 10px;
-      }
-      .login-brand-features {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-      }
-      .login-brand-feat {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        font-size: 15px;
-        font-weight: 500;
-        color: rgba(255,255,255,0.88);
-      }
-      .login-brand-feat svg { flex-shrink: 0; }
-
-      /* Right form panel */
-      .login-scroll {
-        flex: 1;
-        background: linear-gradient(160deg, rgba(74,144,196,0.85) 0%, rgba(110,176,216,0.80) 50%, rgba(168,208,236,0.75) 100%), url('/images/login-truck-bg.jpg') center/cover no-repeat;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        overflow-y: auto;
-        padding: 48px 48px;
-      }
-      .login-inner {
-        max-width: 420px;
-        width: 100%;
-        gap: 28px;
-      }
-      /* Hide left-panel duplicates on the right */
-      .login-inner .login-header { display: none; }
-      .login-inner .login-features { display: none; }
-
-      /* ─── APP: Sidebar layout ─── */
-      #screen-app {
-        flex-direction: row;
-        overflow: hidden;
-      }
-
-      /* Sidebar */
-      .tab-bar {
-        flex-direction: column;
-        width: 220px;
-        flex-shrink: 0;
-        height: 100%;
-        border-top: none;
-        border-right: 1px solid rgba(0,0,0,0.08);
-        padding: 0;
-        justify-content: flex-start;
-        align-items: stretch;
-        background: white;
-        overflow: hidden;
-      }
-      .sidebar-brand {
-        display: flex !important;
-        align-items: center;
-        justify-content: center;
-        padding: 20px 16px 16px;
-        border-bottom: 1px solid rgba(0,0,0,0.07);
-        flex-shrink: 0;
-      }
-      .sidebar-brand img { max-height: 52px; max-width: 100%; object-fit: contain; display: block; }
-
-      .tab-btn {
-        flex: none;
-        flex-direction: row;
-        justify-content: flex-start;
-        padding: 13px 18px;
-        font-size: 14px;
-        font-weight: 600;
-        gap: 12px;
-        border-radius: var(--r-sm);
-        margin: 3px 10px;
-        width: calc(100% - 20px);
-        color: var(--text-sec);
-      }
-      .tab-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
-      .tab-btn.active {
-        color: var(--primary);
-        background: rgba(8,87,140,0.08);
-      }
-      .tab-btn:hover:not(.active) { background: rgba(0,0,0,0.04); }
-
-      /* Content area */
-      .tab-content-area {
-        flex: 1;
-        overflow: hidden;
-        background: var(--bg-home);
-      }
-      #tab-docs { background: var(--bg-docs); }
-
-      .tab-scroll-inner {
-        max-width: 900px;
-        padding: 32px 40px;
-      }
-
-      /* Policies: 2-column grid */
-      #policies-list {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 16px;
-      }
-
-      /* Profile tab: 2-column grid for cards */
-      #tab-profile .tab-scroll-inner { flex-direction: column; }
-
-      /* Documents: 3-column grid */
-      #documents-list {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 14px;
-      }
-
-      /* Doc viewer: wider, centered */
-      #modal-doc-viewer .doc-viewer-inner { max-width: 900px; }
-      #modal-doc-viewer .doc-viewer-scroll { padding: 32px 40px; }
-      .embedded-doc-frame { min-height: 680px; }
-
-      /* Modals: centered dialog */
-      .modal-overlay { align-items: center; }
-      .modal-sheet {
-        border-radius: var(--r-xl);
-        max-width: 580px;
-        max-height: 82vh;
-      }
-      .modal-sheet.fullscreen {
-        border-radius: var(--r-xl);
-        max-width: 720px;
-        max-height: 88vh;
-        height: auto;
-      }
-      @keyframes slideUp {
-        from { transform: translateY(16px) scale(0.97); opacity: 0; }
-        to   { transform: translateY(0)    scale(1);    opacity: 1; }
-      }
-
-      /* Toast adjusts for no bottom tab bar */
-      .toast { bottom: 32px; }
-    }
-
-    /* ─── Sidebar brand hidden on mobile ─── */
-    .sidebar-brand { display: none; }
   </style>
 </head>
 <body>
@@ -1376,40 +1108,15 @@
 
   <!-- ══════════ LOGIN SCREEN ══════════ -->
   <div id="screen-login" class="screen active">
-    <!-- Desktop-only left branding panel -->
-    <div class="login-brand-panel">
-      <div class="login-brand-inner">
-        <div class="login-brand-logo">
-          <img src="/images/united-insurance.webp" alt="United Insurance Group"
-               onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
-          <span style="display:none;font-weight:800;font-size:20px;color:white">United Insurance Group</span>
-        </div>
-        <div class="login-brand-text">
-          <p class="login-brand-title">Your Insurance,<br>All in One Place</p>
-          <p class="login-brand-sub">Access your policies, request certificates, and manage your coverage — anytime, anywhere.</p>
-        </div>
-        <div class="login-brand-features">
-          <div class="login-brand-feat">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
-            <span>Policy summaries &amp; status</span>
-          </div>
-          <div class="login-brand-feat">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg>
-            <span>Digital ID cards &amp; COIs</span>
-          </div>
-          <div class="login-brand-feat">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
-            <span>Certificate requests in seconds</span>
-          </div>
-        </div>
-      </div>
-    </div>
     <div class="login-scroll">
       <div class="login-inner">
         <!-- Header -->
         <div class="login-header">
-
-          <p class="login-title">United Client Portal</p>
+          <div class="logo-banner">
+            <img src="/images/vanguard-logo.png" alt="Vanguard Insurance Group"
+                 onerror="this.parentNode.innerHTML='<div class=\'logo-banner-fallback\'>Vanguard Insurance Group</div>'">
+          </div>
+          <p class="login-title">Client Portal</p>
           <p class="login-sub">Review policies, request certificates, and manage your profile after sign in.</p>
         </div>
 
@@ -1439,7 +1146,6 @@
 
           <button class="btn-primary" id="btn-sign-in">Sign In</button>
           <button class="btn-ghost" id="btn-forgot">Forgot Password?</button>
-          <button class="btn-ghost" id="btn-create-password-open">Create Password</button>
         </div>
 
         <!-- Feature bullets -->
@@ -1479,8 +1185,8 @@
           <!-- Header Card -->
           <div class="logo-banner-app" id="home-header-card">
             <div class="logo-strip">
-              <img src="/images/uig-logo.png" alt="United Insurance Group"
-                   onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:12px 0\'>United Insurance Group</div>'">
+              <img src="/images/vanguard-logo.png" alt="Vanguard Insurance Group"
+                   onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:12px 0\'>Vanguard Insurance Group</div>'">
             </div>
             <p class="welcome-title" id="welcome-name">Welcome back</p>
             <p class="welcome-sub">Manage your active commercial policies, billing, and client requests from one place.</p>
@@ -1539,11 +1245,7 @@
 
       <!-- PROFILE TAB -->
       <div id="tab-profile" class="tab-panel">
-        <div class="tab-scroll-inner" style="position:relative">
-          <button onclick="logout()" style="position:absolute;top:0;right:0;background:none;border:none;padding:4px 0 4px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--text-sec)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
-            Sign Out
-          </button>
+        <div class="tab-scroll-inner">
           <!-- Profile Card -->
           <div class="profile-card" id="profile-card">
             <div class="loading-center" style="padding:20px">
@@ -1560,13 +1262,8 @@
 
     </div>
 
-    <!-- Bottom Tab Bar / Desktop Sidebar -->
+    <!-- Bottom Tab Bar -->
     <div class="tab-bar">
-      <div class="sidebar-brand">
-        <img src="/images/uig-logo.png" alt="United"
-             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
-        <span style="display:none;font-weight:700;font-size:14px;color:var(--text-dark)">United</span>
-      </div>
       <button class="tab-btn active" data-tab="home" onclick="switchTab('home', this)">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h1v7c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-7h1l-9-9-9 9zm7 7v-5h4v5h-4z"/></svg>
         Home
@@ -1594,8 +1291,8 @@
     <div class="auth-flow">
       <div class="auth-flow-inner">
         <div class="auth-logo-banner">
-          <img src="/images/uig-logo.png" alt="United"
-               onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:10px 0\'>United Insurance Group</div>'">
+          <img src="/images/vanguard-logo.png" alt="Vanguard"
+               onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:10px 0\'>Vanguard Insurance Group</div>'">
         </div>
         <div class="auth-flow-head">
           <p class="auth-flow-title">Create Password</p>
@@ -1603,10 +1300,6 @@
           <p class="auth-flow-email" id="create-pw-email"></p>
         </div>
         <div class="auth-flow-card">
-          <div class="field-group" id="create-pw-email-row" style="display:none">
-            <label class="field-label dark" for="create-pw-email-input">Email</label>
-            <input id="create-pw-email-input" class="portal-input dark" type="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="you@example.com">
-          </div>
           <div class="field-group">
             <label class="field-label dark" for="create-pw-new">New Password</label>
             <input id="create-pw-new" class="portal-input dark" type="password" autocomplete="new-password" placeholder="New Password">
@@ -1630,8 +1323,8 @@
     <div class="auth-flow">
       <div class="auth-flow-inner">
         <div class="auth-logo-banner">
-          <img src="/images/uig-logo.png" alt="United"
-               onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:10px 0\'>United Insurance Group</div>'">
+          <img src="/images/vanguard-logo.png" alt="Vanguard"
+               onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:10px 0\'>Vanguard Insurance Group</div>'">
         </div>
         <div class="auth-flow-head">
           <p class="auth-flow-title">Reset Password</p>
@@ -1837,19 +1530,6 @@ async function apiCall(method, path, body, token) {
 (async () => {
   const stored = localStorage.getItem('portal_token');
   if (stored) {
-    // Validate token hasn't expired before showing app
-    try {
-      const parts = stored.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(atob(parts[1]));
-        if (payload.exp && payload.exp * 1000 < Date.now()) {
-          // Token expired — go straight to login
-          localStorage.removeItem('portal_token');
-          return;
-        }
-      }
-    } catch { localStorage.removeItem('portal_token'); return; }
-
     State.token = stored;
     showApp();
     await loadPortalData();
@@ -1885,10 +1565,6 @@ async function handleLogin() {
     setLoginLoading(false);
     if (err.code === 'PASSWORD_NOT_SET') {
       document.getElementById('create-pw-email').textContent = email;
-      document.getElementById('create-pw-email-row').style.display = 'none';
-      document.getElementById('create-pw-new').value = '';
-      document.getElementById('create-pw-confirm').value = '';
-      document.getElementById('create-pw-error').style.display = 'none';
       openModal('modal-create-password');
     } else if (err.code === 'EMAIL_NOT_FOUND') {
       showLoginError('No account found for that email.');
@@ -1944,30 +1620,14 @@ function clearLoginError() {
   document.getElementById('login-error').style.display = 'none';
 }
 
-/* ── Open Create Password from login button ── */
-document.getElementById('btn-create-password-open').addEventListener('click', () => {
-  document.getElementById('create-pw-email').textContent = '';
-  document.getElementById('create-pw-email-row').style.display = 'flex';
-  document.getElementById('create-pw-email-input').value = '';
-  document.getElementById('create-pw-new').value = '';
-  document.getElementById('create-pw-confirm').value = '';
-  document.getElementById('create-pw-error').style.display = 'none';
-  openModal('modal-create-password');
-});
-
 /* ── Create Password ── */
 document.getElementById('btn-create-pw').addEventListener('click', async () => {
-  const emailRow  = document.getElementById('create-pw-email-row');
-  const manualMode = emailRow.style.display !== 'none';
-  const email   = manualMode
-    ? document.getElementById('create-pw-email-input').value.trim()
-    : document.getElementById('create-pw-email').textContent.trim();
+  const email   = document.getElementById('create-pw-email').textContent;
   const pw      = document.getElementById('create-pw-new').value;
   const confirm = document.getElementById('create-pw-confirm').value;
   const errEl   = document.getElementById('create-pw-error');
   errEl.style.display = 'none';
 
-  if (manualMode && !email) { errEl.textContent = 'Please enter your email.'; errEl.style.display = 'block'; return; }
   if (pw.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.style.display = 'block'; return; }
   if (pw !== confirm) { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
 
@@ -1982,10 +1642,7 @@ document.getElementById('btn-create-pw').addEventListener('click', async () => {
     showApp();
     await loadPortalData();
   } catch (err) {
-    const msg = err.message || '';
-    errEl.textContent = (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no account') || err.status === 404)
-      ? 'No account found for that email.'
-      : (msg || 'Failed to create password.');
+    errEl.textContent = err.message || 'Failed to create password.';
     errEl.style.display = 'block';
   } finally {
     document.getElementById('btn-create-pw').disabled = false;
@@ -2060,9 +1717,8 @@ async function loadPortalData() {
 
     State.profile = profileData;
     State.policies = policiesData.policies || [];
-    const holders = holdersData?.certificateHolders || holdersData || [];
-    State.globalHolders = holders.filter(h => h.isGlobal);
-    State.savedHolders  = holders.filter(h => !h.isGlobal);
+    State.globalHolders = (holdersData || []).filter(h => h.isGlobal);
+    State.savedHolders  = (holdersData || []).filter(h => !h.isGlobal);
     State.selectedPolicyId = State.policies[0]?.policyId || null;
 
     renderHome();
@@ -2075,16 +1731,8 @@ async function loadPortalData() {
         .catch(() => {});
     }
   } catch (err) {
-    if (err.status === 401 || err.status === 403) {
+    if (err.status === 401) {
       logout();
-    } else {
-      // Network error or unexpected failure — show in UI instead of infinite spinner
-      const errMsg = err.message || 'Connection error. Please try again.';
-      const errHTML = `<div class="empty-card"><p class="empty-card-title">Could not load data</p><p class="empty-card-sub">${errMsg}</p><button class="btn-primary blue" style="margin-top:16px;padding:12px" onclick="loadPortalData()">Retry</button></div>`;
-      const list = document.getElementById('policies-list');
-      if (list) list.innerHTML = errHTML;
-      const profileCard = document.getElementById('profile-card');
-      if (profileCard) profileCard.innerHTML = errHTML;
     }
   }
 }
@@ -2186,6 +1834,7 @@ function renderProfile() {
   document.getElementById('account-details').innerHTML = `
     <div class="detail-row"><span class="detail-row-key">Primary Address</span><span class="detail-row-val">${esc(address)}</span></div>
     <div class="detail-row"><span class="detail-row-key">Preferred Contact</span><span class="detail-row-val">Email and SMS alerts</span></div>
+    <div class="detail-row"><span class="detail-row-key">Renewal Window</span><span class="detail-row-val">${daysToRenewal}</span></div>
     <div class="detail-row"><span class="detail-row-key">Agent</span><span class="detail-row-val">${esc(agent)}</span></div>
   `;
 }
@@ -2294,7 +1943,7 @@ document.getElementById('btn-send-coi').addEventListener('click', async () => {
     return;
   }
 
-  let holder = { name: "Insured's Copy", company: '', address: '', city: '', state: '', zip: '' };
+  let holder = null;
   if (State.coiAudience === 'thirdParty') {
     const name   = document.getElementById('holder-name').value.trim();
     const street = document.getElementById('holder-street').value.trim();
@@ -2412,7 +2061,7 @@ async function viewCOI(policyId) {
   if (!pol) return;
 
   const docs = await refreshPolicyDocs(policyId);
-  const liveCOI = docs.find(d => getDocType(d) === 'coi');
+  const liveCOI = docs.find(d => normalizeDocType(d.filename || d.name || '') === 'coi');
 
   document.getElementById('viewer-title').textContent    = pol.policyName || 'COI';
   document.getElementById('viewer-subtitle').textContent = pol.policyNumber || '';
@@ -2431,7 +2080,7 @@ async function viewIDCards(policyId) {
   if (!pol) return;
 
   const docs = await refreshPolicyDocs(policyId);
-  const liveIDCard = docs.find(d => getDocType(d) === 'id_card');
+  const liveIDCard = docs.find(d => normalizeDocType(d.filename || d.name || '') === 'id_card');
 
   document.getElementById('viewer-title').textContent    = pol.policyName || 'ID Cards';
   document.getElementById('viewer-subtitle').textContent = pol.policyNumber || '';
@@ -2472,9 +2121,9 @@ async function openDocViewer(type) {
     content.appendChild(header);
 
     let matchDoc = null;
-    if (type === 'idCards')       matchDoc = docs.find(d => getDocType(d) === 'id_card');
-    else if (type === 'declarations') matchDoc = docs.find(d => getDocType(d) === 'declaration');
-    else if (type === 'billing')  matchDoc = docs.find(d => getDocType(d) === 'billing');
+    if (type === 'idCards')       matchDoc = docs.find(d => normalizeDocType(d.filename || d.name || '') === 'id_card');
+    else if (type === 'declarations') matchDoc = docs.find(d => normalizeDocType(d.filename || d.name || '') === 'declaration');
+    else if (type === 'billing')  matchDoc = docs.find(d => normalizeDocType(d.filename || d.name || '') === 'billing');
 
     const wrapper = document.createElement('div');
     if (matchDoc) {
@@ -2497,19 +2146,13 @@ async function openDocViewer(type) {
 }
 
 async function refreshPolicyDocs(policyId) {
-  if (!Array.isArray(State.documentsByPolicyId[policyId])) {
+  if (!State.documentsByPolicyId[policyId]) {
     try {
-      const res = await apiCall('GET', '/policies/' + policyId + '/documents', null, State.token);
-      const arr = res?.documents ?? res;
-      State.documentsByPolicyId[policyId] = Array.isArray(arr) ? arr : [];
+      const docs = await apiCall('GET', '/policies/' + policyId + '/documents', null, State.token);
+      State.documentsByPolicyId[policyId] = docs || [];
     } catch { State.documentsByPolicyId[policyId] = []; }
   }
   return State.documentsByPolicyId[policyId];
-}
-
-function getDocType(d) {
-  if (d.docType) return d.docType; // API returns structured docType directly
-  return normalizeDocType(d.original_name || d.filename || d.name || '');
 }
 
 function normalizeDocType(name) {
@@ -2574,7 +2217,6 @@ function buildDocURL(doc) {
   const path = doc.downloadUrl || doc.download_url || doc.path || '';
   if (!path) return null;
   if (path.startsWith('http')) return path;
-  if (path.startsWith('/api/portal')) return path; // already absolute
   return '/api/portal' + (path.startsWith('/') ? '' : '/') + path;
 }
 
@@ -2595,7 +2237,7 @@ function renderMockCOIInto(container, pol) {
     <div class="acord-doc-row">
       <div class="acord-cell">
         <p class="acord-cell-label">Producer</p>
-        <p class="acord-cell-val">United Insurance Group</p>
+        <p class="acord-cell-val">Vanguard Insurance Group</p>
       </div>
       <div class="acord-cell">
         <p class="acord-cell-label">Date</p>
@@ -2639,7 +2281,7 @@ function renderMockIDCardsInto(container, pol) {
         <span class="doc-content-title">INSURANCE IDENTIFICATION CARD</span>
         <span style="font-size:12px;font-weight:600;color:var(--text-sec)">Vehicle ${n}</span>
       </div>
-      <div class="id-card-row"><span class="id-card-key">Carrier</span><span class="id-card-val">United Insurance Group</span></div>
+      <div class="id-card-row"><span class="id-card-key">Carrier</span><span class="id-card-val">Vanguard Insurance Group</span></div>
       <div class="id-card-row"><span class="id-card-key">Policy Number</span><span class="id-card-val">${esc(pol.policyNumber)}</span></div>
       <div class="id-card-row"><span class="id-card-key">Policy Type</span><span class="id-card-val">${esc(pol.policyName)}</span></div>
       <div class="id-card-row"><span class="id-card-key">Policy Period</span><span class="id-card-val">${esc(pol.effectiveDate||'')} – ${esc(pol.expirationDate||'')}</span></div>

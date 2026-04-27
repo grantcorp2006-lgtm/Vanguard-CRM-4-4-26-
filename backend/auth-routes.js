@@ -2,6 +2,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
@@ -227,5 +228,135 @@ function logAudit(db, username, action, resource, resourceId, req, details) {
         }
     );
 }
+
+const ADMIN_ROLES = ['master_admin', 'united_admin', 'vanguard_admin'];
+
+// ── GET /api/auth/users — list all CRM users (admin only) ───────────────────
+router.get('/users', async (req, res) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'No token' });
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (!ADMIN_ROLES.includes(decoded.role)) return res.status(403).json({ error: 'Admin only' });
+        const db = new sqlite3.Database(DB_PATH);
+        db.all('SELECT id, username, role, portal, active, created_at, last_login FROM users ORDER BY id', (err, rows) => {
+            db.close();
+            if (err) return res.status(500).json({ error: 'DB error' });
+            res.json({ users: rows });
+        });
+    } catch (err) {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+// ── PUT /api/auth/users/:id/role — update a user's role (admin only) ─────────
+router.put('/users/:id/role', async (req, res) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'No token' });
+    const { role } = req.body;
+    const validRoles = ['master_admin', 'united_admin', 'vanguard_admin', 'agent', 'producer', 'csr'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (!ADMIN_ROLES.includes(decoded.role)) return res.status(403).json({ error: 'Admin only' });
+        const db = new sqlite3.Database(DB_PATH);
+        db.run('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id], function(err) {
+            db.close();
+            if (err) return res.status(500).json({ error: 'DB error' });
+            if (this.changes === 0) return res.status(404).json({ error: 'User not found' });
+            logAudit(db, decoded.username, 'update_role', 'user', req.params.id, req, { role });
+            res.json({ success: true });
+        });
+    } catch (err) {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+// ── Magic Link (Slack → CRM bypass) ─────────────────────────────────────────
+// Create the table on startup
+{
+    const db = new sqlite3.Database(DB_PATH);
+    db.run(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
+        token      TEXT PRIMARY KEY,
+        redirect   TEXT NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used_at    DATETIME
+    )`, () => db.close());
+}
+
+// GET /api/auth/magic-link?t=TOKEN
+// Validates a single-use token and returns a self-authenticating HTML page
+router.get('/magic-link', (req, res) => {
+    const token = req.query.t;
+    if (!token) return res.status(400).send('Missing token');
+
+    const db = new sqlite3.Database(DB_PATH);
+    db.get(
+        `SELECT * FROM magic_link_tokens WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')`,
+        [token],
+        (err, row) => {
+            if (err || !row) {
+                db.close();
+                return res.status(403).send(`
+                    <!DOCTYPE html><html><head><title>Link Expired</title>
+                    <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f3f4f6}
+                    .box{background:white;padding:40px;border-radius:12px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+                    h2{color:#ef4444;margin:0 0 10px}p{color:#6b7280;margin:0}a{color:#2563eb}</style></head>
+                    <body><div class="box"><h2>Link Expired</h2><p>This link has already been used or expired.<br>
+                    <a href="/login.html">Log in manually</a></p></div></body></html>
+                `);
+            }
+
+            // Mark token as used
+            db.run(`UPDATE magic_link_tokens SET used_at = datetime('now') WHERE token = ?`, [token], () => db.close());
+
+            // Issue a 4-hour JWT for a Slack viewer session
+            const jwtToken = jwt.sign(
+                { userId: 5, username: 'csr', role: 'csr', portal: 'vanguard' },
+                JWT_SECRET,
+                { expiresIn: '4h' }
+            );
+
+            const redirect = row.redirect || '/';
+            const userJson = JSON.stringify({ username: 'csr', role: 'csr', portal: 'vanguard', loginTime: new Date().toISOString() });
+
+            // Extract policyNumber from redirect (supports both ?policyNumber=X and #policy/X)
+            const _rUrl = new URL(redirect, 'https://x');
+            let _pendingPolicy = _rUrl.searchParams.get('policyNumber') || '';
+            if (!_pendingPolicy) {
+                const _hashMatch = redirect.match(/#policy\/([^&?#]+)/);
+                if (_hashMatch) _pendingPolicy = decodeURIComponent(_hashMatch[1]);
+            }
+
+            // Return a page that sets the session and redirects.
+            // Append _t=timestamp to bust the browser's cached index.html so
+            // the latest JS version numbers are always picked up.
+            res.send(`<!DOCTYPE html>
+<html><head><title>Opening Vanguard CRM...</title>
+<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e40af}
+.msg{color:white;font-size:18px;opacity:.9}</style></head>
+<body><div class="msg">Opening policy...</div>
+<script>
+  sessionStorage.setItem('vanguard_jwt', ${JSON.stringify(jwtToken)});
+  sessionStorage.setItem('vanguard_user', ${JSON.stringify(userJson)});
+  localStorage.setItem('vanguard_login_portal', 'vanguard');
+  // Store pending policy so fix-policy-display-limit.js opens it after render
+  if (${JSON.stringify(_pendingPolicy)}) {
+    sessionStorage.setItem('vanguard_pending_policy', ${JSON.stringify(_pendingPolicy)});
+  }
+  // Always redirect to #policies — the pending policy in sessionStorage handles the auto-open
+  var dest = ${JSON.stringify(redirect)};
+  // If dest has #policy/X format, redirect to #policies instead (sessionStorage handles the open)
+  var hashPart = '#policies';
+  if (dest.indexOf('#') >= 0 && dest.indexOf('#policy/') === -1) {
+    hashPart = dest.slice(dest.indexOf('#'));
+  }
+  window.location.href = '/?_t=' + Date.now() + hashPart;
+</script></body></html>`);
+        }
+    );
+});
 
 module.exports = router;

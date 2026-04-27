@@ -42152,9 +42152,8 @@ function filterTodosBySchedule(todos, scheduleView) {
 .chat-send-btn { width:36px; height:36px; border-radius:50%; background:#2563eb; border:none; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; align-self:flex-end; transition:background 0.15s; font-size:14px; }
 .chat-send-btn:hover { background:#1d4ed8; }
 .chat-empty { text-align:center; color:#9ca3af; font-size:13px; margin:auto; padding:20px; }
-#chat-bubble-btn { position:fixed; bottom:20px; right:20px; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,#0066cc,#004499); border:none; color:#fff; box-shadow:0 4px 14px rgba(0,102,204,0.45); cursor:pointer; display:none; align-items:center; justify-content:center; font-size:22px; z-index:9998; transition:transform 0.15s; }
+#chat-bubble-btn { position:fixed; bottom:20px; right:20px; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,#dc2626,#991b1b); border:none; color:#fff; box-shadow:0 4px 14px rgba(220,38,38,0.45); cursor:pointer; display:none; align-items:center; justify-content:center; font-size:22px; z-index:9998; transition:transform 0.15s; }
 #chat-bubble-btn:hover { transform:scale(1.08); }
-#chat-bubble-badge { position:absolute; top:-3px; right:-3px; background:#ef4444; color:#fff; border-radius:10px; padding:1px 5px; font-size:11px; font-weight:700; min-width:18px; text-align:center; display:none; }
 .chat-notif-stack { position:fixed; bottom:20px; right:80px; display:flex; flex-direction:column-reverse; gap:8px; z-index:10001; pointer-events:none; }
 .chat-notif-toast { background:#fff; border-left:4px solid #2563eb; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); padding:10px 14px; min-width:240px; max-width:300px; pointer-events:all; animation:chatNotifIn 0.25s ease; position:relative; overflow:hidden; }
 .chat-notif-toast.removing { animation:chatNotifOut 0.2s ease forwards; }
@@ -42423,14 +42422,9 @@ function filterTodosBySchedule(todos, scheduleView) {
         _ensureChatStyles();
         _chatBubble = document.createElement('button');
         _chatBubble.id = 'chat-bubble-btn';
-        _chatBubble.title = 'Open Team Chat';
-        _chatBubble.innerHTML = `<i class="fas fa-comments"></i><span id="chat-bubble-badge" style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;border-radius:10px;padding:1px 5px;font-size:11px;font-weight:700;min-width:18px;text-align:center;display:none;"></span>`;
-        _chatBubble.onclick = () => {
-            const win = document.getElementById('team-chat-window');
-            if (!win) { openTeamChat(); }
-            else if (_chatMinimized) { _restoreChat(); }
-            else if (typeof bringToFront === 'function') { bringToFront(win); }
-        };
+        _chatBubble.title = 'Report a Bug';
+        _chatBubble.innerHTML = `<i class="fas fa-bug"></i>`;
+        _chatBubble.onclick = () => { if (window.openBugReport) window.openBugReport(); };
         document.body.appendChild(_chatBubble);
     }
 
@@ -42874,20 +42868,14 @@ function filterTodosBySchedule(todos, scheduleView) {
 #chat-bubble-btn {
     position: fixed; bottom: 20px; right: 20px;
     width: 52px; height: 52px; border-radius: 50%;
-    background: linear-gradient(135deg,#0066cc,#004499);
+    background: linear-gradient(135deg,#dc2626,#991b1b);
     border: none; color: #fff;
-    box-shadow: 0 4px 14px rgba(0,102,204,0.45);
+    box-shadow: 0 4px 14px rgba(220,38,38,0.45);
     cursor: pointer; display: none;
     align-items: center; justify-content: center;
     font-size: 22px; z-index: 9998; transition: transform 0.15s;
 }
 #chat-bubble-btn:hover { transform: scale(1.08); }
-#chat-bubble-badge {
-    position: absolute; top: -3px; right: -3px;
-    background: #ef4444; color: #fff;
-    border-radius: 10px; padding: 1px 5px;
-    font-size: 11px; font-weight: 700; min-width: 18px; text-align: center; display: none;
-}
 
 .chat-notif-stack {
     position: fixed; bottom: 20px; right: 80px;
@@ -43198,12 +43186,9 @@ function filterTodosBySchedule(todos, scheduleView) {
         _ensureChatStyles();
         _chatBubble = document.createElement('button');
         _chatBubble.id = 'chat-bubble-btn';
-        _chatBubble.title = 'Open Team Chat';
-        _chatBubble.innerHTML = '<i class="fas fa-comments"></i><span id="chat-bubble-badge" style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;border-radius:10px;padding:1px 5px;font-size:11px;font-weight:700;min-width:18px;text-align:center;display:none;"></span>';
-        _chatBubble.onclick = () => {
-            if (document.getElementById('team-chat-window')) { _restoreChat(); }
-            else { openTeamChat(); }
-        };
+        _chatBubble.title = 'Report a Bug';
+        _chatBubble.innerHTML = '<i class="fas fa-bug"></i>';
+        _chatBubble.onclick = () => { if (window.openBugReport) window.openBugReport(); };
         document.body.appendChild(_chatBubble);
     }
 
@@ -43603,3 +43588,141 @@ function filterTodosBySchedule(todos, scheduleView) {
     })();
 
 })(); // end Team Chat IIFE
+
+// ═══════════════════════════════════════════════════════════
+// BUG REPORT SYSTEM
+// ═══════════════════════════════════════════════════════════
+(function() {
+    // Capture console logs in a ring buffer
+    const _bugLogs = [];
+    const _MAX_LOGS = 50;
+    const _origConsole = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+
+    function _captureLogs(type, args) {
+        const msg = Array.from(args).map(a => {
+            if (typeof a === 'string') return a;
+            try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        _bugLogs.push({ type, message: msg.substring(0, 500), time: new Date().toLocaleTimeString() });
+        if (_bugLogs.length > _MAX_LOGS) _bugLogs.shift();
+    }
+
+    console.log   = function() { _captureLogs('log',   arguments); _origConsole.log.apply(console, arguments); };
+    console.warn  = function() { _captureLogs('warn',  arguments); _origConsole.warn.apply(console, arguments); };
+    console.error = function() { _captureLogs('error', arguments); _origConsole.error.apply(console, arguments); };
+    console.info  = function() { _captureLogs('info',  arguments); _origConsole.info.apply(console, arguments); };
+
+    window.openBugReport = function() {
+        if (document.getElementById('bug-report-modal')) {
+            document.getElementById('bug-report-modal').remove();
+        }
+
+        let user = 'Unknown';
+        try {
+            const raw = sessionStorage.getItem('vanguard_user') || '';
+            const parsed = JSON.parse(raw);
+            user = parsed.username || parsed.name || raw || 'Unknown';
+        } catch { user = sessionStorage.getItem('vanguard_user') || 'Unknown'; }
+
+        const modal = document.createElement('div');
+        modal.id = 'bug-report-modal';
+        modal.dataset.reportUser = user;
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div style="background:white;border-radius:12px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="background:#dc2626;color:white;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;">
+                    <h2 style="margin:0;font-size:18px;"><i class="fas fa-bug" style="margin-right:8px;"></i>Report a Bug</h2>
+                    <button onclick="document.getElementById('bug-report-modal').remove()" style="background:none;border:none;color:white;font-size:22px;cursor:pointer;padding:0 4px;">&times;</button>
+                </div>
+                <div style="padding:20px;">
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Area</label>
+                        <select id="bug-area" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">
+                            <option value="">Select area...</option>
+                            <option value="Dashboard">Dashboard</option>
+                            <option value="Lead Management">Lead Management</option>
+                            <option value="Active Clients">Active Clients</option>
+                            <option value="Policies">Policies</option>
+                            <option value="Generate Leads">Generate Leads</option>
+                            <option value="Calendar">Calendar</option>
+                            <option value="Phone System">Phone System</option>
+                            <option value="Email / Outlook">Email / Outlook</option>
+                            <option value="Agent Performance">Agent Performance</option>
+                            <option value="Client Portal">Client Portal</option>
+                            <option value="COI / Documents">COI / Documents</option>
+                            <option value="IVANS Sync">IVANS Sync</option>
+                            <option value="JenesisNow Sync">JenesisNow Sync</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Bug Title</label>
+                        <input id="bug-title" type="text" placeholder="Brief description of the issue" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Description</label>
+                        <textarea id="bug-description" rows="5" placeholder="What happened? What were you trying to do? What did you expect?" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+                    </div>
+                    <div style="margin-bottom:14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+                        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Console Logs (last ${_bugLogs.length})</div>
+                        <div style="font-size:11px;color:#9ca3af;">Logs will be automatically attached to the report</div>
+                    </div>
+                    <p id="bug-error" style="display:none;color:#dc2626;font-size:13px;margin-bottom:10px;"></p>
+                    <button id="bug-submit-btn" onclick="window._submitBugReport()" style="width:100%;padding:12px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:0.2s;">
+                        <i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Bug Report
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+        document.getElementById('bug-title').focus();
+    };
+
+    window._submitBugReport = async function() {
+        const title = document.getElementById('bug-title').value.trim();
+        const description = document.getElementById('bug-description').value.trim();
+        const area = document.getElementById('bug-area').value;
+        const reportedBy = document.getElementById('bug-report-modal').dataset.reportUser || 'Unknown';
+        const errEl = document.getElementById('bug-error');
+        const btn = document.getElementById('bug-submit-btn');
+
+        errEl.style.display = 'none';
+
+        if (!title) { errEl.textContent = 'Please enter a bug title.'; errEl.style.display = 'block'; return; }
+        if (!description) { errEl.textContent = 'Please describe the bug.'; errEl.style.display = 'block'; return; }
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Sending...';
+
+        try {
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const resp = await fetch('/api/bug-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+                body: JSON.stringify({
+                    title,
+                    area,
+                    description,
+                    reportedBy,
+                    consoleLogs: [..._bugLogs],
+                    url: window.location.href,
+                    timestamp: new Date().toLocaleString()
+                })
+            });
+
+            if (!resp.ok) throw new Error('Server error');
+
+            document.getElementById('bug-report-modal').remove();
+            if (typeof showNotification === 'function') {
+                showNotification('Bug report sent! Thank you.', 'success');
+            }
+        } catch (e) {
+            errEl.textContent = 'Failed to send bug report. Please try again.';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Bug Report';
+        }
+    };
+})();
