@@ -23789,10 +23789,11 @@ function generateViewTabContent(tabId, policy) {
 
                 if (coveragesArray && typeof coveragesArray === 'object' && Object.keys(coveragesArray).length > 0) {
                     Object.values(coveragesArray).filter(c => c && c.Code).forEach(cov => {
+                        const _isGL = window._isGLCode && window._isGLCode(cov.Code);
                         initRows += `<tr data-code="${_eQ(cov.Code)}" data-desc="${_eQ(cov.Description||'')}">
                             <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${cov.Code}</span>${cov.Description?`<br><span style="font-size:11px;color:#6b7280;">${cov.Description}</span>`:''}</td>
-                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(cov.Amount)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
-                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="${_eQ(cov.Deductible)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-limit" placeholder="${_isGL?'Limit':''}" value="${_eQ(cov.Amount)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-deduct" placeholder="${_isGL?'Aggregate':''}" value="${_eQ(_isGL ? (cov.Aggregate||cov.Deductible) : cov.Deductible)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-prem" value="${_eQ(cov.Premium)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
                             <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>
                         </tr>`;
@@ -23840,7 +23841,7 @@ function generateViewTabContent(tabId, policy) {
                                 <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
                                     <th style="padding:6px 8px;text-align:left;color:#374151;">Coverage</th>
                                     <th style="padding:6px 8px;text-align:left;color:#374151;">Limit</th>
-                                    <th style="padding:6px 8px;text-align:left;color:#374151;">Deductible</th>
+                                    <th style="padding:6px 8px;text-align:left;color:#374151;">Ded. / Agg.</th>
                                     <th style="padding:6px 8px;text-align:left;color:#374151;">Premium</th>
                                     <th style="width:30px;"></th>
                                 </tr>
@@ -24664,7 +24665,7 @@ function _jnDateToISO(jnDate) {
             ['MTCARGO','Motor Truck Cargo'],['REEFER','Refrigeration Breakdown'],['HOOK','Hook (On-Hook Towing)'],['AGTLR','Agricultural Produce Trailers - Seasonal'],['AGTLR_AUTO','Agricultural Produce Trailers (Auto)'],
         ]],
         ['General Liability', [
-            ['GLCBI','GL Combined Bodily Injury'],['GLCPD','GL Combined Property Damage'],['PRDCO','Products/Completed Operations'],['PIADV','Personal and Advertising Injury'],['FIRDM','Fire Damage'],['MDEXP','Medical Expense'],
+            ['GL','General Liability'],['GLCBI','GL Combined Bodily Injury'],['GLCPD','GL Combined Property Damage'],['GLACC','GL Each Occurrence'],['GLAGG','GL General Aggregate'],['PRDCO','Products/Completed Operations'],['PIADV','Personal and Advertising Injury'],['FIRDM','Fire Damage'],['MDEXP','Medical Expense'],
         ]],
         ['Auto Business Interruption', [
             ['ABICL','Auto BI Collision w/o Extra Expense'],['ABICO','Auto BI Comprehensive w/o Extra Expense'],['ABIEC','Auto BI Comprehensive with Extra Expense'],['ABIEL','Auto BI Collision with Extra Expense'],['ABIES','Auto BI Specified Causes w/ Extra Expense'],['ABISP','Auto BI Specified Causes w/o Extra Expense'],
@@ -24693,6 +24694,10 @@ function _jnDateToISO(jnDate) {
             ['MHCF','Mobile Home Contents - Fire'],['MHCF_PD','Mobile Home Contents - Fire (PD)'],['MHCLS','Mobile Home Contents - Limited Specified Causes'],['MHCLS_PD','Mobile Home Contents - Limited (PD)'],['MHCSP_PD','Mobile Home Contents - Specified Causes (PD)'],
         ]],
     ];
+    // GL codes use Limit + Aggregate columns instead of Limit + Deductible
+    const _glCodes = new Set(['GL','GLCBI','GLCPD','GLACC','GLAGG','PRDCO','PIADV','FIRDM','MDEXP']);
+    window._isGLCode = (code) => _glCodes.has(code);
+
     window._vcovOptsHTML = '<option value="">— Select coverage to add —</option>' +
         _grps.map(([g, opts]) =>
             `<optgroup label="${g}">` + opts.map(([c,d]) => `<option value="${c}">${c} - ${d}</option>`).join('') + '</optgroup>'
@@ -24734,10 +24739,11 @@ function _jnDateToISO(jnDate) {
         tr.setAttribute('data-code', code);
         tr.setAttribute('data-desc', desc);
         tr.style.borderBottom = '1px solid #e5e7eb';
+        const isGL = window._isGLCode(code);
         tr.innerHTML = `
             <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${code}</span>${desc?`<br><span style="font-size:11px;color:#6b7280;">${desc}</span>`:''}</td>
-            <td style="padding:3px 4px;"><input class="vcov-limit" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
-            <td style="padding:3px 4px;"><input class="vcov-deduct" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+            <td style="padding:3px 4px;"><input class="vcov-limit" placeholder="${isGL ? 'Limit' : ''}" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+            <td style="padding:3px 4px;"><input class="vcov-deduct" placeholder="${isGL ? 'Aggregate' : ''}" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
             <td style="padding:3px 4px;"><input class="vcov-prem" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
             <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>`;
         tbody.appendChild(tr);
@@ -24757,7 +24763,10 @@ function _jnDateToISO(jnDate) {
             const amount = tr.querySelector('.vcov-limit')?.value.trim() || '';
             const deductible = tr.querySelector('.vcov-deduct')?.value.trim() || '';
             const premium = tr.querySelector('.vcov-prem')?.value.trim() || '';
-            if (code) CoveragesArray[code] = { Code: code, Description: desc, Amount: amount, Deductible: deductible, Premium: premium };
+            if (!code) return;
+            const isGL = window._isGLCode && window._isGLCode(code);
+            CoveragesArray[code] = { Code: code, Description: desc, Amount: amount, Premium: premium };
+            if (isGL) { CoveragesArray[code].Aggregate = deductible; } else { CoveragesArray[code].Deductible = deductible; }
         });
         const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
         const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
