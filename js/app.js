@@ -23850,6 +23850,27 @@ function generateViewTabContent(tabId, policy) {
                             <i class="fas fa-save" style="margin-right:5px;"></i>Save Coverages
                         </button>
                     </div>
+                    ${(() => {
+                        // Build per-vehicle coverages section
+                        const vehs = Array.isArray(policy.vehicles) ? policy.vehicles : [];
+                        const vehsWithCov = vehs.filter(v => v.CoveragesArray && Object.keys(v.CoveragesArray).length > 0);
+                        if (!vehsWithCov.length) return '';
+                        let html = '<div style="margin-top:20px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;padding-bottom:5px;border-bottom:2px solid #e0e7ff;margin-bottom:10px;">Vehicle Coverages</div>';
+                        for (const v of vehsWithCov) {
+                            const vLabel = [v.year, v.make, v.model].filter(Boolean).join(' ') || 'Vehicle';
+                            const covs = typeof v.CoveragesArray === 'object' ? Object.values(v.CoveragesArray) : (Array.isArray(v.CoveragesArray) ? v.CoveragesArray : []);
+                            if (!covs.length) continue;
+                            html += '<div style="margin-bottom:12px;"><div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;padding:4px 8px;background:#f0f4ff;border-radius:6px;"><i class="fas fa-car" style="color:#6b7280;margin-right:6px;"></i>' + _eQ(vLabel) + '</div>';
+                            html += '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#f9fafb;"><th style="padding:4px 8px;text-align:left;color:#6b7280;font-size:11px;">Coverage</th><th style="padding:4px 8px;text-align:left;color:#6b7280;font-size:11px;">Limit</th><th style="padding:4px 8px;text-align:left;color:#6b7280;font-size:11px;">Deductible</th><th style="padding:4px 8px;text-align:left;color:#6b7280;font-size:11px;">Premium</th></tr></thead><tbody>';
+                            for (const c of covs) {
+                                if (!c || !c.Code) continue;
+                                html += '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:4px 8px;font-weight:600;color:#111827;">' + _eQ(c.Code) + (c.Description ? '<br><span style="font-size:10px;color:#9ca3af;font-weight:400;">' + _eQ(c.Description) + '</span>' : '') + '</td><td style="padding:4px 8px;color:#374151;">' + _eQ(c.Amount || '') + '</td><td style="padding:4px 8px;color:#374151;">' + _eQ(c.Deductible || '') + '</td><td style="padding:4px 8px;color:#374151;">' + _eQ(c.Premium || '') + '</td></tr>';
+                            }
+                            html += '</tbody></table></div>';
+                        }
+                        html += '</div>';
+                        return html;
+                    })()}
                 `;
 
                 // Vehicles (right column)
