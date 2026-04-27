@@ -24235,7 +24235,7 @@ function generateViewTabContent(tabId, policy) {
                             <h3 style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">Notes</h3>
                             <span style="font-size: 11px; color: #6b7280; background: #f3f4f6; padding: 3px 8px; border-radius: 12px;">IVANS</span>
                         </div>
-                        <div id="policy-doc-notes-${policy.id}" style="min-height: 120px; max-height: 520px; overflow-y: auto;">
+                        <div id="policy-doc-notes-${policy.id}" style="min-height: 120px; max-height: 520px; overflow-y: auto; overflow-x: auto; word-break: break-word; overflow-wrap: break-word;">
                             ${(() => {
                                 const policyNotes = typeof policy.notes === 'string' ? policy.notes : (policy.notes?.content || '');
                                 if (!policyNotes) {
