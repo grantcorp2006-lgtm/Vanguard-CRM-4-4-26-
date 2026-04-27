@@ -707,16 +707,28 @@ function createRealFormFields(policyId, policyData) {
     overlay.innerHTML = '';
 
     // Determine if GL coverage is present and not excluded
+    // Check flat keys first, then CoveragesArray for GL/GLCBI/GLACC/GLAGG codes
+    const _covArrPreGL = policyData?.coverage?.CoveragesArray || {};
+    const _glFromCovArr = _covArrPreGL['GL'] || _covArrPreGL['GLCBI'] || _covArrPreGL['GLACC'] || _covArrPreGL['GLAGG'] || null;
     const glAggregateRaw = policyData?.coverage?.['coverage-general-aggregate'] ||
                            policyData?.coverage?.['General Aggregate'] ||
                            policyData?.coverage?.['General Liability'] ||
-                           policyData?.coverage?.['General Liability BI'] || '';
+                           policyData?.coverage?.['General Liability BI'] ||
+                           (_glFromCovArr?.Amount || _glFromCovArr?.Aggregate || '') || '';
     const hasGL = !!glAggregateRaw && glAggregateRaw !== 'excluded';
-    // Helper: parse GL occurrence and aggregate from BI field (e.g. "1000000/2000000")
+    // Helper: parse GL occurrence and aggregate from BI field (e.g. "1000000/2000000") or CoveragesArray
     const _glBIRaw = policyData?.coverage?.['General Liability BI'] || '';
     const _glBIParts = _glBIRaw.replace(/[$,]/g,'').split('/');
-    const _glOcc = _glBIParts[0] ? parseFloat(_glBIParts[0]) : 0;
-    const _glAgg = _glBIParts[1] ? parseFloat(_glBIParts[1]) : (_glOcc ? _glOcc * 2 : 0);
+    let _glOcc = _glBIParts[0] ? parseFloat(_glBIParts[0]) : 0;
+    let _glAgg = _glBIParts[1] ? parseFloat(_glBIParts[1]) : (_glOcc ? _glOcc * 2 : 0);
+    // Override from CoveragesArray GL entry if present
+    if (_glFromCovArr && (!_glOcc || !_glAgg)) {
+        const occRaw = parseFloat((_glFromCovArr.Amount || '0').toString().replace(/[$,]/g, ''));
+        const aggRaw = parseFloat((_glFromCovArr.Aggregate || '0').toString().replace(/[$,]/g, ''));
+        if (occRaw > 0) _glOcc = occRaw;
+        if (aggRaw > 0) _glAgg = aggRaw;
+        if (_glOcc && !_glAgg) _glAgg = _glOcc * 2;
+    }
 
     // Pre-compute cargo and physical damage presence
     // Check flat keys, CoveragesArray (policy-level), and vehicle-level coverages
@@ -945,15 +957,11 @@ function createRealFormFields(policyId, policyData) {
         { id: 'glSubrWvd', x: 252, y: 437, width: 23, height: 16,
           value: '' },
         { id: 'glPolicyNum', x: 281, y: 437, width: 146, height: 16,
-          value: (hasGL && policyData?.policyType !== 'commercial-auto') ? (policyData?.policyNumber || '') : '' },
+          value: hasGL ? (policyData?.policyNumber || '') : '' },
         { id: 'glEffDate', x: 430, y: 437, width: 61, height: 16,
-          value: (hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.effectiveDate) ?
-                 formatDateForACORD(policyData.effectiveDate) :
-                 ((hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.overview?.['Effective Date']) ? formatDateForACORD(policyData.overview['Effective Date']) : '') },
+          value: hasGL ? (formatDateForACORD(policyData?.effectiveDate) || formatDateForACORD(policyData?.overview?.['Effective Date']) || '') : '' },
         { id: 'glExpDate', x: 491, y: 437, width: 61, height: 16,
-          value: (hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.expirationDate) ?
-                 formatDateForACORD(policyData.expirationDate) :
-                 ((hasGL && policyData?.policyType !== 'commercial-auto' && policyData?.overview?.['Expiration Date']) ? formatDateForACORD(policyData.overview['Expiration Date']) : '') },
+          value: hasGL ? (formatDateForACORD(policyData?.expirationDate) || formatDateForACORD(policyData?.overview?.['Expiration Date']) || '') : '' },
 
         // === AUTOMOBILE LIABILITY FIELDS ===
         { id: 'autoInsurer', x: 23, y: 530, width: 23, height: 16,
