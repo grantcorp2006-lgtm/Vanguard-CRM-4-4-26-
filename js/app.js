@@ -6499,7 +6499,7 @@ function renderAnnualPremiumBar(policies, currentUser) {
     if (annualSection) annualSection.style.display = '';
 
     // Per-user annual premium goals (config overrides default)
-    const USER_GOALS = { grant: 500000, carson: 1000000, hunter: 1000000 };
+    const USER_GOALS = { grant: 800000, carson: 1200000, hunter: 1000000 };
     const ANNUAL_GOAL = userCfg.annualGoal || USER_GOALS[currentUser] || 1000000;
 
     const currentYear = new Date().getFullYear();
@@ -25829,6 +25829,15 @@ function generateQuarterlyReport() {
           </select>
         </div>
         <input type="hidden" id="qrpt-q" value="${defQ}">
+        <input type="hidden" id="qrpt-agency" value="vanguard">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:6px">Agency</label>
+          <div style="display:flex;gap:6px">
+            <button onclick="setQRptAgency('vanguard')" id="qrpt-abtn-vanguard" style="padding:7px 14px;background:#ede9fe;border:1.5px solid #7c3aed;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700;color:#4c1d95">Vanguard</button>
+            <button onclick="setQRptAgency('united')" id="qrpt-abtn-united" style="padding:7px 14px;background:#f1f5f9;border:1.5px solid #e2e8f0;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700;color:#475569">United</button>
+            <button onclick="setQRptAgency('both')" id="qrpt-abtn-both" style="padding:7px 14px;background:#f1f5f9;border:1.5px solid #e2e8f0;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700;color:#475569">Both</button>
+          </div>
+        </div>
         <div style="margin-left:auto;align-self:flex-end">
           <button onclick="runQuarterlyReport()" style="padding:10px 28px;background:linear-gradient(135deg,#4338ca,#7c3aed);color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(124,58,237,0.4)">
             <i class="fas fa-play" style="font-size:13px"></i> Run Report
@@ -25866,6 +25875,20 @@ function setQRptQuarter(q) {
     runQuarterlyReport();
 }
 
+function setQRptAgency(agency) {
+    const hidden = document.getElementById('qrpt-agency');
+    if (hidden) hidden.value = agency;
+    ['vanguard','united','both'].forEach(a => {
+        const btn = document.getElementById('qrpt-abtn-' + a);
+        if (!btn) return;
+        const active = a === agency;
+        btn.style.background = active ? '#ede9fe' : '#f1f5f9';
+        btn.style.borderColor = active ? '#7c3aed' : '#e2e8f0';
+        btn.style.color = active ? '#4c1d95' : '#475569';
+    });
+    runQuarterlyReport();
+}
+
 async function runQuarterlyReport() {
     const qEl = document.getElementById('qrpt-q');
     const yEl = document.getElementById('qrpt-year');
@@ -25894,39 +25917,72 @@ async function runQuarterlyReport() {
             fetch('/api/finance/transactions?start=' + startDate + '&end=' + endDate).then(r => r.json()).catch(() => []),
             fetch('/api/finance/cashflow?year=' + year).then(r => r.json()).catch(() => ({})),
             fetch('/api/accounting/summary').then(r => r.json()).catch(() => ({})),
-            fetch('/api/policies?includeInactive=true').then(r => r.json()).catch(() => []),
+            fetch('/api/policies?includeInactive=true&limit=500').then(r => r.json()).catch(() => []),
             fetch('/api/leads').then(r => r.json()).catch(() => []),
             fetch('/api/vicidial/performance-report?query_date=' + startDate + '&end_date=' + endDate + '&shift=--&users=--ALL--').then(r => r.json()).catch(() => ({}))
         ]);
 
+        // Merge localStorage policies with server policies (localStorage has full data)
+        const localPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const serverPolIds = new Set((Array.isArray(policiesRaw) ? policiesRaw : []).map(p => String(p.id)));
+        const mergedPolicies = [...(Array.isArray(policiesRaw) ? policiesRaw : [])];
+        localPolicies.forEach(lp => {
+            if (!serverPolIds.has(String(lp.id))) {
+                mergedPolicies.push(lp);
+            } else {
+                // Merge localStorage fields into server record (localStorage has agent/premium)
+                const idx = mergedPolicies.findIndex(sp => String(sp.id) === String(lp.id));
+                if (idx >= 0) Object.assign(mergedPolicies[idx], lp);
+            }
+        });
+
         const qStart = new Date(startDate + 'T00:00:00').getTime();
         const qEnd   = new Date(endDate   + 'T23:59:59').getTime();
 
-        // ── Vanguard-only filter (exclude Maureen / United) ──────────────────
-        const isVanguard = val => !/maureen/i.test(val || '');
+        // ── Agency filter ─────────────────────────────────────────────────────
+        const agencyEl = document.getElementById('qrpt-agency');
+        const agencyMode = agencyEl ? agencyEl.value : 'vanguard';
+        const policyAgencyFilter = p => {
+            const agents = [p.agent, p.assignedTo, p.agentName].filter(Boolean);
+            if (agents.length === 0) return true;
+            if (agencyMode === 'vanguard') return agents.every(a => !/maureen/i.test(a));
+            if (agencyMode === 'united')   return agents.some(a => /maureen/i.test(a));
+            return true; // both
+        };
+        const isVanguard = val => {
+            if (agencyMode === 'both') return true;
+            if (agencyMode === 'united') return /maureen/i.test(val || '');
+            return !/maureen/i.test(val || '');
+        };
 
         // ── POLICIES in quarter ──────────────────────────────────────────────
-        // Renewals: Q1-effective-date policies that are NOT new business (hard-coded by management)
         const RENEWAL_POLICY_NUMBERS = new Set([
             '9300107451', // A-VINO LTD — Grant renewal
             '9300123436', // MIDWEST APEX TRANSPORT LLC — Grant renewal
             '868356853',  // Du Road Trucking LLC — Grant renewal
         ]);
-        const allPolicies = (Array.isArray(policiesRaw) ? policiesRaw : [])
-            .filter(p => isVanguard(p.agent) && isVanguard(p.assignedTo) && isVanguard(p.agentName));
+        const allPolicies = mergedPolicies.filter(p => policyAgencyFilter(p));
+
+        // Prefer policy ID timestamp (creation date) over effectiveDate
+        const getPolicyTs = p => {
+            const m = String(p.id || '').match(/POL-(\d+)-/);
+            if (m) return parseInt(m[1]);
+            const dateStr = p.effectiveDate || p.createdDate || p.created_at || '';
+            if (dateStr) { const ts = new Date(dateStr).getTime(); if (!isNaN(ts)) return ts; }
+            return 0;
+        };
+
         const qPolicies = allPolicies.filter(p => {
             if (RENEWAL_POLICY_NUMBERS.has(String(p.policyNumber || p.policy_number || ''))) return false;
-            const dateStr = p.effectiveDate || p.createdDate || p.created_at || '';
-            if (dateStr) { const ts = new Date(dateStr).getTime(); return ts >= qStart && ts <= qEnd; }
-            const m = String(p.id || '').match(/POL-(\d+)-/);
-            if (m) { const ts = parseInt(m[1]); return ts >= qStart && ts <= qEnd; }
-            return false;
+            const ts = getPolicyTs(p);
+            return ts >= qStart && ts <= qEnd;
         });
 
         let totalWrittenPremium = 0;
         const premiumByLine = {}, agentPremium = {}, agentPolicyCnt = {}, carrierPremium = {};
         qPolicies.forEach(p => {
             const premium = parseFloat((p.premium || p.annualPremium || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+            if (!premium) return; // skip policies with no premium data
             totalWrittenPremium += premium;
             const line  = p.coverageType || p.lineOfBusiness || p.policyType || 'Other';
             const agent = p.agent || p.assignedTo || p.agentName || 'Unassigned';
@@ -25937,17 +25993,14 @@ async function runQuarterlyReport() {
             carrierPremium[carr]   = (carrierPremium[carr]   || 0) + premium;
         });
         const avgPremPerPolicy = qPolicies.length > 0 ? totalWrittenPremium / qPolicies.length : 0;
-        const topAgents = Object.entries(agentPremium).sort((a, b) => b[1] - a[1]).slice(0, 6);
+        const topAgents = Object.entries(agentPremium).filter(([a]) => a !== 'Unassigned').sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-        // ── TOTAL Q1 WRITTEN PREMIUM (all Q1-effective policies, new + renewals) ──
+        // ── TOTAL WRITTEN PREMIUM (all quarter policies, new + renewals) ────
         const agentTotalPremium = {};
         let totalBookPremium = 0;
         allPolicies.filter(p => {
-            const dateStr = p.effectiveDate || p.createdDate || p.created_at || '';
-            if (dateStr) { const ts = new Date(dateStr).getTime(); return ts >= qStart && ts <= qEnd; }
-            const m = String(p.id || '').match(/POL-(\d+)-/);
-            if (m) { const ts = parseInt(m[1]); return ts >= qStart && ts <= qEnd; }
-            return false;
+            const ts = getPolicyTs(p);
+            return ts >= qStart && ts <= qEnd;
         }).forEach(p => {
             const premium = parseFloat((p.premium || p.annualPremium || '0').toString().replace(/[^0-9.]/g, '')) || 0;
             const agent = p.agent || p.assignedTo || p.agentName || 'Unassigned';
@@ -25996,8 +26049,14 @@ async function runQuarterlyReport() {
         });
         localLeads.forEach(l => { if (!allLeads.find(s => String(s.id) === String(l.id))) allLeads.push(l); });
 
-        // Exclude Maureen's leads
-        allLeads = allLeads.filter(l => isVanguard(l.assignedTo) && isVanguard(l.agent));
+        // Filter leads by selected agency
+        allLeads = allLeads.filter(l => {
+            if (agencyMode === 'both') return true;
+            const fields = [l.assignedTo, l.agent].filter(Boolean);
+            if (fields.length === 0) return true; // unassigned
+            if (agencyMode === 'united') return fields.some(f => /maureen/i.test(f));
+            return fields.every(f => !/maureen/i.test(f)); // vanguard
+        });
 
         let qLeads = 0, qCalls = 0, qConnected = 0, totalCallSecs = 0;
         const agCRM = {};
@@ -26134,17 +26193,31 @@ async function runQuarterlyReport() {
             '<td style="' + tdr + '">' + pct(prem, totalWrittenPremium) + '</td></tr>'
         ).join('') || noDataRow(3, 'No production data for ' + qLabel);
 
+        // ── Quota % per agent (based on new written premium, annual goal ÷ 4) ──
+        const ANNUAL_GOALS = { grant: 800000, carson: 1200000, hunter: 1000000 };
+        const agentQuota = {};
+        topAgents.forEach(([agent]) => {
+            const agLc = agent.toLowerCase();
+            const annualGoal = ANNUAL_GOALS[agLc] || 1000000;
+            const quarterlyQuota = annualGoal / 4;
+            const newPrem = agentPremium[agent] || 0;
+            const quotaPct = quarterlyQuota > 0 ? Math.round((newPrem / quarterlyQuota) * 100) : 0;
+            agentQuota[agent] = quotaPct;
+        });
+
         // ── Top agents ───────────────────────────────────────────────────────
         const agColors = ['#7c3aed','#4338ca','#0891b2','#059669','#d97706','#dc2626'];
-        const agentRows = topAgents.map(([agent, prem], i) =>
-            '<tr><td style="' + td + '"><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:' + (agColors[i]||'#64748b') + '18;color:' + (agColors[i]||'#64748b') + ';font-size:11px;font-weight:700;margin-right:8px">' + (i+1) + '</span>' + agent + '</td>' +
+        const agentRows = topAgents.map(([agent, prem], i) => {
+            const qPctVal = agentQuota[agent] || 0;
+            const qColor = qPctVal >= 100 ? '#10b981' : qPctVal >= 75 ? '#f59e0b' : '#ef4444';
+            return '<tr><td style="' + td + '"><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:' + (agColors[i]||'#64748b') + '18;color:' + (agColors[i]||'#64748b') + ';font-size:11px;font-weight:700;margin-right:8px">' + (i+1) + '</span>' + agent + '</td>' +
             '<td style="' + tdr + '">' + fmtN(agentPolicyCnt[agent] || 0) +
               ' <button onclick="viewQRptAgentPolicies(\'' + agent.replace(/'/g,"\\'") + '\')" title="View ' + agent + ' policies" style="background:#fef3c7;border:none;border-radius:5px;padding:3px 7px;cursor:pointer;color:#d97706;font-size:11px;margin-left:4px"><i class="fas fa-eye"></i></button></td>' +
             '<td style="' + tdr + '">' + fmt(prem) + '</td>' +
             '<td style="' + tdr + 'color:#059669">' + fmt(agentTotalPremium[agent] || 0) + '</td>' +
-            '<td style="' + tdr + '">' + (agentPolicyCnt[agent] ? fmt(prem / agentPolicyCnt[agent]) : '—') + '</td>' +
-            '<td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:center"><button onclick="viewQRptAgentStats(\'' + agent.replace(/'/g,"\\'") + '\')" title="View ' + agent + ' full stats" style="background:#ede9fe;border:none;border-radius:6px;padding:5px 9px;cursor:pointer;color:#7c3aed;font-size:12px"><i class="fas fa-eye"></i></button></td></tr>'
-        ).join('') || noDataRow(6, 'No agent data for ' + qLabel);
+            '<td style="' + tdr + 'color:' + qColor + '">' + qPctVal + '%</td>' +
+            '<td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:center"><button onclick="viewQRptAgentStats(\'' + agent.replace(/'/g,"\\'") + '\')" title="View ' + agent + ' full stats" style="background:#ede9fe;border:none;border-radius:6px;padding:5px 9px;cursor:pointer;color:#7c3aed;font-size:12px"><i class="fas fa-eye"></i></button></td></tr>';
+        }).join('') || noDataRow(6, 'No agent data for ' + qLabel);
 
         // ── Income by category ───────────────────────────────────────────────
         const incRows = Object.entries(txnIncomeCats).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([cat, amt]) =>
@@ -26194,7 +26267,7 @@ async function runQuarterlyReport() {
             // ── KPI ROW ──────────────────────────────────────────────────────
             '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:8px">' +
             kpiCard('fa-shield-alt',   'New Written Premium', fmt(totalWrittenPremium), qPolicies.length + ' policies this quarter', '#7c3aed') +
-            kpiCard('fa-book-open',    'Total Q1 Written',  fmt(totalBookPremium),    'New business + renewals written in quarter', '#059669') +
+            kpiCard('fa-book-open',    'Total ' + qLabel.split(' ')[0] + ' Written',  fmt(totalBookPremium),    'New business + renewals written in quarter', '#059669') +
             kpiCard('fa-dollar-sign',  'Net Revenue',   fmt(dispRevenue),  hasTxData ? fmt(dispNet) + ' net income' : 'P&L estimate', '#059669') +
             kpiCard('fa-file-contract','New Policies',  fmtN(qPolicies.length), 'Avg premium: ' + fmt(avgPremPerPolicy), '#4338ca') +
             kpiCard('fa-phone-volume', 'Calls → Leads %', vdHasData ? pct(vdTotalVDLeads, vdTotalCalls) : '—', vdHasData ? fmtN(vdTotalCalls) + ' calls · ' + fmtN(vdTotalVDLeads) + ' leads' : 'ViciDial unavailable', '#0891b2') +
@@ -26215,7 +26288,7 @@ async function runQuarterlyReport() {
             '<button onclick="viewQRptAgentPolicies(\'--ALL--\')" title="View all policies this quarter" style="background:#fef3c7;border:1.5px solid #fcd34d;border-radius:7px;padding:5px 11px;cursor:pointer;color:#d97706;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px"><i class="fas fa-eye"></i> All Policies</button>' +
             '</div>' +
             '<table style="' + tbl + '"><thead><tr>' +
-            '<th style="' + th + '">Agent</th><th style="' + th + 'text-align:right">Policies</th><th style="' + th + 'text-align:right">New Prem</th><th style="' + th + 'text-align:right">Total Prem</th><th style="' + th + 'text-align:right">Avg/Policy</th><th style="' + th + 'text-align:center">Stats</th>' +
+            '<th style="' + th + '">Agent</th><th style="' + th + 'text-align:right">Policies</th><th style="' + th + 'text-align:right">New Prem</th><th style="' + th + 'text-align:right">Total Prem</th><th style="' + th + 'text-align:right">Quota %</th><th style="' + th + 'text-align:center">Stats</th>' +
             '</tr></thead><tbody>' + agentRows + '</tbody></table></div>' +
             '</div>' +
 
