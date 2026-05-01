@@ -153,7 +153,7 @@ struct PortalCOICertificateHolderPayload: Encodable {
 actor PortalAPIClient {
     static let shared = PortalAPIClient()
 
-    private let baseURL = URL(string: "https://162-220-14-239.nip.io/api/portal")!
+    private let baseURL = URL(string: "https://portal.vigagency.com/api/portal")!
     private let session: URLSession
 
     init(session: URLSession = .shared) {
